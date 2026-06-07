@@ -25,13 +25,29 @@ from resources.lib.service.daemon import (
     _get_sources_config_path,
     _load_settings,
 )
-from resources.lib.utils import StructuredLogger, get_logger, notify
+from resources.lib.constants import DEFAULT_ADDON_ID
+from resources.lib.utils import (
+    StructuredLogger,
+    get_addon,
+    get_bool_setting,
+    get_logger,
+    notify,
+)
 
 log = get_logger('manual')
 
 
 def run() -> None:
     """Run a single manual scan cycle."""
+    StructuredLogger._initialized = False
+    try:
+        debug_on = get_bool_setting('logging')
+        addon_id = get_addon().getAddonInfo('id')
+    except RuntimeError:
+        debug_on = False
+        addon_id = DEFAULT_ADDON_ID
+    StructuredLogger.initialize(debug_enabled=debug_on, addon_id=addon_id)
+
     log.info("Manual scan started", event="manual.start")
 
     tracker: Optional[TrackerDB] = None

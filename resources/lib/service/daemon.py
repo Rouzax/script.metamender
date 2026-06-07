@@ -39,6 +39,7 @@ from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.scan import run_scan
 from resources.lib.utils import (
     StructuredLogger,
+    get_addon,
     get_bool_setting,
     get_float_setting,
     get_int_setting,
@@ -227,6 +228,18 @@ def _run_scan(
 
 def run() -> None:
     """Main service entry point. Blocks until Kodi requests abort."""
+    # Re-initialize the logger now that Kodi settings are readable.
+    # get_logger() at module import time may have initialized with
+    # debug_enabled=False because settings weren't available yet.
+    StructuredLogger._initialized = False
+    try:
+        debug_on = get_bool_setting('logging')
+        addon_id = get_addon().getAddonInfo('id')
+    except RuntimeError:
+        debug_on = False
+        addon_id = DEFAULT_ADDON_ID
+    StructuredLogger.initialize(debug_enabled=debug_on, addon_id=addon_id)
+
     log.info("Service started", event="service.start")
 
     monitor = MetaMendMonitor()

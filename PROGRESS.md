@@ -52,4 +52,8 @@
 - [x] Audit 1 (post Phase 3): Fixed 15 logging/error handling issues across tracker, kodi, sources
 - [x] Audit 2 (post Phase 4): Fixed 3 issues (redundant except clauses, missing elapsed_ms in INFO logs)
 
-## Test Count: 93 passing
+## Integration Test Bugs Found
+- [x] `mpaa` in base JSON-RPC properties broke episode queries (episodes don't have mpaa)
+- [x] Episode scan used episode-level TMDB IDs instead of show-level IDs for season lookups (all 404s)
+
+## Test Count: 168 passing

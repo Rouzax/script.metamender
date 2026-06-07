@@ -11,7 +11,8 @@ Logging:
         - scan.complete (INFO): Scan cycle finished with stats
         - scan.skip (DEBUG): Item skipped (disabled source, exhausted, no gaps)
         - scan.abort (INFO): Scan interrupted by Kodi shutdown
-        - scan.item (DEBUG): Processing a single item
+        - scan.processing (DEBUG): Starting to process a single item
+        - scan.updated (INFO): Item metadata written to Kodi
 """
 from __future__ import annotations
 
@@ -288,7 +289,7 @@ def run_scan(
 
         log.debug(
             "Processing item",
-            event="scan.item",
+            event="scan.processing",
             title=title,
             media_type=media_type.name,
             tmdb_id=tmdb_id,
@@ -430,7 +431,7 @@ def run_scan(
 
                 log.info(
                     "Item updated",
-                    event="scan.item",
+                    event="scan.updated",
                     title=title,
                     media_type=media_type.name,
                     fields_written=list(fields_to_write.keys()),
