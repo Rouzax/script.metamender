@@ -29,10 +29,9 @@
 ## Phase 6: Staleness and Retry Integration
 - [x] 6.1 Integrate staleness into scan loop (re-check stale, backoff, exhaustion)
 
-## Phase 7: OMDB Provider
-- [ ] 7.1 OMDB movie and episode lookup (imdbRating, imdbVotes, plot)
-- [ ] 7.2 Source priority and fallback (prefer TMDB/OMDB, resolve per field)
-- [ ] 7.3 OMDB daily budget tracking (950/day limit, persist counter)
+## Phase 7: IMDb API Provider (imdbapi.dev, replaces OMDB)
+- [ ] 7.1 IMDb API movie and episode lookup (no auth, no daily limit)
+- [ ] 7.2 Source priority and fallback (prefer TMDB/IMDB, resolve per field)
 
 ## Phase 8: Port Certification Module
 - [ ] 8.1 Port presets and config (country JSON presets, load/inference/seed)
