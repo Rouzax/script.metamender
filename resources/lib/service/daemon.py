@@ -276,6 +276,8 @@ def run() -> None:
                     )
 
                 if should_scan:
+                    StructuredLogger.start_scan_log()
+
                     log.info(
                         "Scan triggered",
                         event="service.scan_trigger",
@@ -306,6 +308,7 @@ def run() -> None:
                         total_elapsed_sec=elapsed,
                     )
 
+                    StructuredLogger.stop_scan_log()
                     last_scan = time.time()
                     monitor.clear_scan_request()
 

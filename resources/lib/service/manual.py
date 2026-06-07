@@ -47,17 +47,17 @@ def run() -> None:
         debug_on = False
         addon_id = DEFAULT_ADDON_ID
     StructuredLogger.initialize(debug_enabled=debug_on, addon_id=addon_id)
+    StructuredLogger.start_scan_log()
 
     log.info("Manual scan started", event="manual.start")
 
-    tracker: Optional[TrackerDB] = None
+    tracker = None  # type: Optional[TrackerDB]
 
     try:
         settings = _load_settings()
         tracker = TrackerDB(_get_db_path())
         source_config = load_source_config(_get_sources_config_path())
 
-        # Manual scans always start fresh
         tracker.start_new_cycle()
 
         tmdb_api_key = settings["tmdb_api_key"]
@@ -121,6 +121,6 @@ def run() -> None:
         log.exception("Manual scan failed", event="manual.error")
 
     finally:
+        StructuredLogger.stop_scan_log()
         if tracker is not None:
             tracker.close()
-        StructuredLogger.shutdown()

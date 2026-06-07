@@ -35,9 +35,8 @@ from resources.lib.constants import (
     ADDON_PREFIX,
     DEFAULT_ADDON_ID,
     LOG_DIR_NAME,
-    LOG_FILENAME,
-    LOG_MAX_ROTATED_FILES,
-    LOG_MAX_SIZE_BYTES,
+    LOG_FILE_PREFIX,
+    LOG_MAX_FILES,
     LOG_MAX_VALUE_LENGTH,
     LOG_TIMESTAMP_FORMAT,
     LOG_TIMESTAMP_TRIM,
@@ -183,8 +182,15 @@ class StructuredLogger:
     Structured logging with dual output: Kodi log + private file.
 
     Output Routing:
-        - ERROR/WARNING/INFO: Kodi log (always) + addon log (if debug enabled)
-        - DEBUG: addon log only (never pollutes Kodi log)
+        - ERROR/WARNING/INFO: Kodi log (always) + scan log file (if open)
+        - DEBUG: scan log file only (never pollutes Kodi log)
+
+    File lifecycle:
+        Call ``start_scan_log()`` at the beginning of each scan to open a
+        new timestamped log file. Call ``stop_scan_log()`` when the scan
+        finishes. Between scans no file is open and DEBUG lines are
+        discarded. Old log files beyond LOG_MAX_FILES are cleaned up
+        automatically when a new file is opened.
 
     Thread Safety:
         All file operations protected by threading.Lock().
@@ -192,7 +198,7 @@ class StructuredLogger:
 
     _log_file: Optional[TextIO] = None
     _log_file_path: Optional[str] = None
-    _log_file_size: int = 0
+    _log_dir: Optional[str] = None
     _addon_id: str = DEFAULT_ADDON_ID
     _debug_enabled: bool = False
     _initialized: bool = False
@@ -203,85 +209,109 @@ class StructuredLogger:
 
     @classmethod
     def initialize(cls, debug_enabled: bool, addon_id: str = DEFAULT_ADDON_ID) -> None:
-        """Initialize the logging system. Idempotent."""
+        """Configure the logging system. Does NOT open a file.
+
+        Call ``start_scan_log()`` separately to open a per-scan log file.
+        """
         with cls._lock:
             cls._addon_id = addon_id
             cls._debug_enabled = debug_enabled
-
-            if cls._initialized:
-                return
-
             cls._initialized = True
 
             if debug_enabled:
-                cls._init_log_file()
+                cls._ensure_log_dir()
 
     @classmethod
-    def _init_log_file(cls) -> None:
-        """Set up log file with rotation check. Must hold lock."""
+    def _ensure_log_dir(cls) -> None:
+        """Create the log directory if needed. Must hold lock."""
         try:
             log_dir = xbmcvfs.translatePath(
                 "special://profile/addon_data/{}/{}/".format(cls._addon_id, LOG_DIR_NAME)
             )
-
             if not xbmcvfs.exists(log_dir):
                 xbmcvfs.mkdirs(log_dir)
-
-            log_path = os.path.join(log_dir, LOG_FILENAME)
-
-            existing_size = 0
-            if xbmcvfs.exists(log_path):
-                try:
-                    stat_result = xbmcvfs.Stat(log_path)
-                    existing_size = stat_result.st_size()
-                except (OSError, AttributeError):
-                    existing_size = 0
-
-                if existing_size > LOG_MAX_SIZE_BYTES:
-                    cls._rotate_logs(log_dir)
-                    existing_size = 0
-
-            cls._log_file_path = log_path
-            try:
-                cls._log_file = open(log_path, "a", encoding="utf-8")
-                cls._log_file_size = existing_size
-            except (OSError, IOError):
-                cls._log_file = None
-                raise
+            cls._log_dir = log_dir
         except (OSError, IOError) as e:
             xbmc.log(
-                "[{}.logging] Failed to initialize log file: {}".format(ADDON_PREFIX, e),
-                xbmc.LOGWARNING
+                "[{}.logging] Failed to create log directory: {}".format(ADDON_PREFIX, e),
+                xbmc.LOGWARNING,
             )
-            cls._log_file = None
+            cls._log_dir = None
 
     @classmethod
-    def _rotate_logs(cls, log_dir: str) -> None:
-        """Rotate log files. Must hold lock."""
+    def start_scan_log(cls) -> Optional[str]:
+        """Open a new timestamped log file for this scan.
+
+        Cleans up old files beyond LOG_MAX_FILES. Returns the file path
+        or None if logging is disabled or the directory is unavailable.
+        """
+        with cls._lock:
+            if not cls._debug_enabled or cls._log_dir is None:
+                return None
+
+            if cls._log_file is not None:
+                try:
+                    cls._log_file.close()
+                except (OSError, IOError):
+                    pass
+                cls._log_file = None
+
+            timestamp = dt.now().strftime("%Y-%m-%d_%H%M%S")
+            filename = "{}_{}.log".format(LOG_FILE_PREFIX, timestamp)
+            log_path = os.path.join(cls._log_dir, filename)
+
+            try:
+                cls._log_file = open(log_path, "w", encoding="utf-8")
+                cls._log_file_path = log_path
+            except (OSError, IOError) as e:
+                xbmc.log(
+                    "[{}.logging] Failed to open scan log: {}".format(ADDON_PREFIX, e),
+                    xbmc.LOGWARNING,
+                )
+                cls._log_file = None
+                return None
+
+            cls._cleanup_old_logs()
+            return log_path
+
+    @classmethod
+    def stop_scan_log(cls) -> None:
+        """Close the current scan log file."""
+        with cls._lock:
+            if cls._log_file is not None:
+                try:
+                    cls._log_file.close()
+                except (OSError, IOError):
+                    pass
+                cls._log_file = None
+
+    @classmethod
+    def _cleanup_old_logs(cls) -> None:
+        """Delete log files beyond LOG_MAX_FILES. Must hold lock."""
+        if cls._log_dir is None:
+            return
         try:
-            base = LOG_FILENAME.replace(".log", "")
-
-            oldest = os.path.join(log_dir, "{}.{}.log".format(base, LOG_MAX_ROTATED_FILES))
-            if xbmcvfs.exists(oldest):
-                xbmcvfs.delete(oldest)
-
-            for i in range(LOG_MAX_ROTATED_FILES - 1, 0, -1):
-                src = os.path.join(log_dir, "{}.{}.log".format(base, i))
-                dst = os.path.join(log_dir, "{}.{}.log".format(base, i + 1))
-                if xbmcvfs.exists(src):
-                    xbmcvfs.rename(src, dst)
-
-            current = os.path.join(log_dir, LOG_FILENAME)
-            if xbmcvfs.exists(current):
-                xbmcvfs.rename(current, os.path.join(log_dir, "{}.1.log".format(base)))
+            files = sorted(
+                [
+                    f for f in os.listdir(cls._log_dir)
+                    if f.startswith(LOG_FILE_PREFIX) and f.endswith(".log")
+                ],
+                reverse=True,
+            )
+            for old_file in files[LOG_MAX_FILES:]:
+                old_path = os.path.join(cls._log_dir, old_file)
+                try:
+                    os.remove(old_path)
+                except (OSError, IOError):
+                    pass
         except (OSError, IOError):
             pass
 
     @classmethod
     def shutdown(cls) -> None:
-        """Close log file. Call when service stops."""
+        """Close log file and reset state. Call when service stops."""
         with cls._lock:
-            if cls._log_file:
+            if cls._log_file is not None:
                 try:
                     cls._log_file.close()
                 except (OSError, IOError):
@@ -308,8 +338,8 @@ class StructuredLogger:
         return "{} [{:5}] {}\n".format(timestamp, level, formatted_message)
 
     def _write_to_file(self, level: str, formatted_message: str) -> None:
-        """Write to file if enabled, with thread safety and mid-session rotation."""
-        if not StructuredLogger._debug_enabled or StructuredLogger._log_file is None:
+        """Write to scan log file if one is open."""
+        if StructuredLogger._log_file is None:
             return
 
         line = self._format_file_line(level, formatted_message)
@@ -318,17 +348,8 @@ class StructuredLogger:
             try:
                 if StructuredLogger._log_file is None:
                     return
-
                 StructuredLogger._log_file.write(line)
                 StructuredLogger._log_file.flush()
-                StructuredLogger._log_file_size += len(line.encode("utf-8"))
-
-                if StructuredLogger._log_file_size > LOG_MAX_SIZE_BYTES:
-                    StructuredLogger._log_file.close()
-                    log_dir = os.path.dirname(StructuredLogger._log_file_path or "")
-                    if log_dir:
-                        StructuredLogger._rotate_logs(log_dir)
-                    StructuredLogger._init_log_file()
             except (IOError, OSError):
                 pass
 
@@ -340,27 +361,27 @@ class StructuredLogger:
         return kwargs
 
     def debug(self, message: str, **kwargs: Any) -> None:
-        """DEBUG: file only when enabled. No event= required."""
-        if StructuredLogger._debug_enabled:
+        """DEBUG: file only when a scan log is open. No event= required."""
+        if StructuredLogger._debug_enabled and StructuredLogger._log_file is not None:
             formatted = self._format_message(message, **kwargs)
             self._write_to_file("DEBUG", formatted)
 
     def info(self, message: str, **kwargs: Any) -> None:
-        """INFO: always Kodi log + file when enabled. Include event=."""
+        """INFO: always Kodi log + scan log file if open. Include event=."""
         kwargs = self._ensure_event("info", kwargs)
         formatted = self._format_message(message, **kwargs)
         xbmc.log(formatted, xbmc.LOGINFO)
         self._write_to_file("INFO", formatted)
 
     def warning(self, message: str, **kwargs: Any) -> None:
-        """WARNING: always Kodi log + file when enabled. Include event=."""
+        """WARNING: always Kodi log + scan log file if open. Include event=."""
         kwargs = self._ensure_event("warning", kwargs)
         formatted = self._format_message(message, **kwargs)
         xbmc.log(formatted, xbmc.LOGWARNING)
         self._write_to_file("WARN", formatted)
 
     def error(self, message: str, **kwargs: Any) -> None:
-        """ERROR: always Kodi log + file when enabled. Include event=."""
+        """ERROR: always Kodi log + scan log file if open. Include event=."""
         kwargs = self._ensure_event("error", kwargs)
         formatted = self._format_message(message, **kwargs)
         xbmc.log(formatted, xbmc.LOGERROR)

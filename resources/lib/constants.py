@@ -13,9 +13,8 @@ ADDON_PREFIX = "MetaMend"
 # =============================================================================
 
 LOG_DIR_NAME = "logs"
-LOG_FILENAME = "metamender.log"
-LOG_MAX_SIZE_BYTES = 512 * 1024  # 500KB per file
-LOG_MAX_ROTATED_FILES = 3
+LOG_FILE_PREFIX = "metamender"
+LOG_MAX_FILES = 10
 LOG_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 LOG_TIMESTAMP_TRIM = -3  # Trim microseconds to milliseconds
 LOG_MAX_VALUE_LENGTH = 200
