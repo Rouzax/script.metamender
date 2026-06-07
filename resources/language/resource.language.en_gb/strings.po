@@ -1,12 +1,10 @@
 # MetaMender language file
 # Addon id: script.metamender
-# Addon name: MetaMender
 msgid ""
 msgstr ""
 "Project-Id-Version: script.metamender\n"
-"Report-Msgid-Bugs-To: https://github.com/Rouzax/script.metamender/issues\n"
-"POT-Creation-Date: 2026-06-07\n"
-"PO-Revision-Date: 2026-06-07\n"
+"Report-Msgid-Bugs-To: https://github.com/Rouzax/script.metamender\n"
+"PO-Revision-Date: 2026-06-07 00:00+0000\n"
 "Last-Translator: Rouzax\n"
 "Language-Team: English\n"
 "Language: en_GB\n"
@@ -30,7 +28,7 @@ msgid "TMDB API key"
 msgstr ""
 
 msgctxt "#32012"
-msgid "API key for The Movie Database. Required for most lookups. Get one free at themoviedb.org."
+msgid "API key for The Movie Database (themoviedb.org). Required for metadata lookups."
 msgstr ""
 
 msgctxt "#32020"
@@ -96,7 +94,7 @@ msgid "Enable ratings backfill"
 msgstr ""
 
 msgctxt "#32103"
-msgid "Backfill missing audience ratings (vote average and vote count) from TMDB or OMDB."
+msgid "Backfill missing or stale ratings and vote counts for movies, TV shows, and episodes."
 msgstr ""
 
 msgctxt "#32104"
@@ -164,7 +162,7 @@ msgid "Minimum votes (movies)"
 msgstr ""
 
 msgctxt "#32122"
-msgid "Only accept a rating if the movie has at least this many votes on the source. Lower values fill more items but may include unreliable scores."
+msgid "Minimum number of votes before a movie rating is considered trustworthy. Ratings with fewer votes are marked as stale and re-checked later."
 msgstr ""
 
 msgctxt "#32123"
@@ -180,7 +178,7 @@ msgid "Staleness threshold (days)"
 msgstr ""
 
 msgctxt "#32126"
-msgid "Re-check metadata that was last fetched more than this many days ago. Set higher to reduce API usage, lower to keep metadata fresher."
+msgid "Content older than this many days is considered to have stable ratings. Only items with empty ratings are backfilled for older content."
 msgstr ""
 
 msgctxt "#32130"
@@ -204,7 +202,7 @@ msgid "Configure sources"
 msgstr ""
 
 msgctxt "#32142"
-msgid "Open the source configuration dialog to set per-field language preferences and provider overrides."
+msgid "Open the source configuration dialog to enable or disable backfill per video source and set the metadata language for each source."
 msgstr ""
 
 # --- Certifications (32200-32268) ---
@@ -410,5 +408,5 @@ msgid "Enable debug logging"
 msgstr ""
 
 msgctxt "#32322"
-msgid "Write detailed debug information to a log file in the addon data folder. Useful for troubleshooting but increases disk usage."
+msgid "Write detailed diagnostic information to a log file in the addon data folder (addon_data/script.metamender/logs/)."
 msgstr ""

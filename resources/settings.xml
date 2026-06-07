@@ -79,7 +79,7 @@
                 <setting id="min_votes_movie" type="integer" label="32121" help="32122">
                     <default>50</default>
                     <constraints>
-                        <minimum>0</minimum>
+                        <minimum>1</minimum>
                         <maximum>1000</maximum>
                         <step>10</step>
                     </constraints>
@@ -88,7 +88,7 @@
                 <setting id="min_votes_episode" type="integer" label="32123" help="32124">
                     <default>20</default>
                     <constraints>
-                        <minimum>0</minimum>
+                        <minimum>1</minimum>
                         <maximum>500</maximum>
                         <step>5</step>
                     </constraints>
@@ -109,7 +109,7 @@
                     <default>4</default>
                     <constraints>
                         <minimum>1</minimum>
-                        <maximum>20</maximum>
+                        <maximum>10</maximum>
                         <step>1</step>
                     </constraints>
                     <control type="slider" format="integer" />
@@ -146,12 +146,14 @@
                     <control type="list" format="string" />
                 </setting>
                 <setting id="override_prefix" type="boolean" label="32204" help="32205">
+                    <level>2</level>
                     <default>false</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
                 </setting>
                 <setting id="rating_prefix" type="string" label="32206" help="32207">
+                    <level>2</level>
                     <default></default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
@@ -164,25 +166,25 @@
             </group>
             <group id="scrapers" label="32210">
                 <setting id="enable_fsk" type="boolean" label="32211" help="32212">
-                    <default>false</default>
+                    <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
                 </setting>
                 <setting id="enable_bbfc" type="boolean" label="32213" help="32214">
-                    <default>false</default>
+                    <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
                 </setting>
                 <setting id="enable_medieraadet" type="boolean" label="32215" help="32216">
-                    <default>false</default>
+                    <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
                 </setting>
                 <setting id="enable_kijkwijzer" type="boolean" label="32217" help="32218">
-                    <default>false</default>
+                    <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
@@ -198,7 +200,7 @@
             </group>
             <group id="fallback" label="32230">
                 <setting id="enable_fallback" type="boolean" label="32231" help="32232">
-                    <default>false</default>
+                    <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
@@ -242,6 +244,7 @@
                     <control type="slider" format="integer" />
                 </setting>
                 <setting id="rate_limit" type="number" label="32304" help="32305">
+                    <level>2</level>
                     <default>0.25</default>
                     <constraints>
                         <minimum>0.1</minimum>
@@ -261,6 +264,7 @@
             </group>
             <group id="debugging" label="32320">
                 <setting id="logging" type="boolean" label="32321" help="32322">
+                    <level>2</level>
                     <default>false</default>
                 </setting>
             </group>
