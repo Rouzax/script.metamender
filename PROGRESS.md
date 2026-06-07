@@ -51,6 +51,10 @@
 ## Audits
 - [x] Audit 1 (post Phase 3): Fixed 15 logging/error handling issues across tracker, kodi, sources
 - [x] Audit 2 (post Phase 4): Fixed 3 issues (redundant except clauses, missing elapsed_ms in INFO logs)
+- [x] Audit 3 (post Phase 5): Full log consistency audit against Docker Kodi
+  - Fixed logger init timing (settings unreadable at import time)
+  - Split scan.item into scan.processing (DEBUG) and scan.updated (INFO)
+  - Refactored to per-scan log files (one timestamped file per scan, keep 10)
 
 ## Integration Test Bugs Found
 - [x] `mpaa` in base JSON-RPC properties broke episode queries (episodes don't have mpaa)
