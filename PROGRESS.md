@@ -21,13 +21,13 @@
 - [x] 4.2 TMDB season/episode and TV show lookup (content_ratings)
 
 ## Phase 5: Basic Backfill Engine
-- [ ] 5.1 Gap detection (which fields need work per item)
-- [ ] 5.2 Staleness detection (vote count thresholds, retry scheduling)
-- [ ] 5.3 Scan orchestrator (query, filter, prioritize, process, stats)
-- [ ] 5.4 Service daemon and manual trigger (first end-to-end test)
+- [x] 5.1 Gap detection (which fields need work per item)
+- [x] 5.2 Staleness detection (vote count thresholds, retry scheduling)
+- [x] 5.3 Scan orchestrator (query, filter, prioritize, process, stats)
+- [x] 5.4 Service daemon and manual trigger (first end-to-end test)
 
 ## Phase 6: Staleness and Retry Integration
-- [ ] 6.1 Integrate staleness into scan loop (re-check stale, backoff, exhaustion)
+- [x] 6.1 Integrate staleness into scan loop (re-check stale, backoff, exhaustion)
 
 ## Phase 7: OMDB Provider
 - [ ] 7.1 OMDB movie and episode lookup (imdbRating, imdbVotes, plot)
@@ -59,5 +59,13 @@
 ## Integration Test Bugs Found
 - [x] `mpaa` in base JSON-RPC properties broke episode queries (episodes don't have mpaa)
 - [x] Episode scan used episode-level TMDB IDs instead of show-level IDs for season lookups (all 404s)
+- [x] `update_item` title parameter collision when writing episode titles (renamed to log_title)
+- [x] Kodi JSON-RPC cannot clear rating to 0.0 (data reality, not a bug)
+- [x] Some niche content (Dutch shows) doesn't exist on TMDB (data reality, handled gracefully)
 
-## Test Count: 168 passing
+## Additions Beyond Plan
+- [x] Targeted scan support: `kodi_filter` param on get_all_items, `items` param on run_scan
+- [x] Docker infrastructure: media mount (/mnt/media/Data), path substitution, MetaMender volume
+- [x] Live integration test suite (10 scenarios, 53 checks, runs against Docker Kodi)
+
+## Test Count: 178 unit + 53 integration = 231 total
