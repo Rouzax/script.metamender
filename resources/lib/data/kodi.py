@@ -132,7 +132,7 @@ def get_all_items(
 def update_item(
     item_id: int,
     media_type: MediaType,
-    title: str = "",
+    log_title: str = "",
     **fields: Any,
 ) -> bool:
     """Write fields back to a Kodi library item via JSON-RPC.
@@ -140,8 +140,8 @@ def update_item(
     Args:
         item_id: The Kodi database ID for the item.
         media_type: The media type of the item.
-        title: The item title (for logging).
-        **fields: Field names and values to set.
+        log_title: The item title (for logging only, not written to Kodi).
+        **fields: Field names and values to set (including "title" for episodes).
 
     Returns:
         True on success, False on failure.
@@ -157,7 +157,7 @@ def update_item(
     }
 
     try:
-        with log_timing(log, "update_item", media_type=media_type.name, title=title):
+        with log_timing(log, "update_item", media_type=media_type.name, title=log_title):
             raw = xbmc.executeJSONRPC(json.dumps(query))
             data = json.loads(raw)
     except Exception:
@@ -165,7 +165,7 @@ def update_item(
             "Failed to update item",
             event="kodi.update_fail",
             media_type=media_type.name,
-            title=title,
+            title=log_title,
             item_id=item_id,
         )
         return False
@@ -175,7 +175,7 @@ def update_item(
             "Failed to update item",
             event="kodi.update_fail",
             media_type=media_type.name,
-            title=title,
+            title=log_title,
             item_id=item_id,
             error=str(data["error"]),
         )
@@ -185,7 +185,7 @@ def update_item(
         "Item updated",
         event="kodi.update",
         media_type=media_type.name,
-        title=title,
+        title=log_title,
         item_id=item_id,
         fields=", ".join(fields.keys()),
     )

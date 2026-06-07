@@ -103,7 +103,7 @@ def test_update_item_success(kodi_stubs):
     kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
         return_value=json.dumps(response)
     )
-    result = update_item(1, MOVIE, title="Test Movie", rating=7.5, plot="Updated plot")
+    result = update_item(1, MOVIE, log_title="Test Movie", rating=7.5, plot="Updated plot")
     assert result is True
     call_args = kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0]
     payload = json.loads(call_args)
@@ -118,7 +118,7 @@ def test_update_item_failure(kodi_stubs):
     kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
         return_value=json.dumps(response)
     )
-    result = update_item(1, MOVIE, title="Test Movie", rating=7.5)
+    result = update_item(1, MOVIE, log_title="Test Movie", rating=7.5)
     assert result is False
 
 
