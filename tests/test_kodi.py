@@ -156,3 +156,59 @@ def test_build_properties_episode():
     assert "runtime" in props
     assert "premiered" not in props
     assert "tagline" not in props
+
+
+def test_get_all_items_with_filter(kodi_stubs):
+    response = {
+        "result": {
+            "movies": [
+                {"movieid": 1, "title": "Air"},
+            ],
+            "limits": {"start": 0, "end": 1, "total": 1},
+        }
+    }
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
+        return_value=json.dumps(response)
+    )
+    items = get_all_items(
+        MOVIE,
+        kodi_filter={"field": "title", "operator": "is", "value": "Air"},
+    )
+    assert len(items) == 1
+    call_args = kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0]
+    payload = json.loads(call_args)
+    assert "filter" in payload["params"]
+    assert payload["params"]["filter"]["value"] == "Air"
+
+
+def test_get_all_items_with_tvshowid(kodi_stubs):
+    response = {
+        "result": {
+            "episodes": [
+                {"episodeid": 1, "title": "Pilot"},
+            ],
+            "limits": {"start": 0, "end": 1, "total": 1},
+        }
+    }
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
+        return_value=json.dumps(response)
+    )
+    items = get_all_items(EPISODE, tvshowid=2, season=1)
+    assert len(items) == 1
+    call_args = kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0]
+    payload = json.loads(call_args)
+    assert payload["params"]["tvshowid"] == 2
+    assert payload["params"]["season"] == 1
+    assert "filter" not in payload["params"]
+
+
+def test_get_all_items_no_filter(kodi_stubs):
+    response = {"result": {"movies": [], "limits": {"start": 0, "end": 0, "total": 0}}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
+        return_value=json.dumps(response)
+    )
+    get_all_items(MOVIE)
+    call_args = kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0]
+    payload = json.loads(call_args)
+    assert "filter" not in payload["params"]
+    assert "tvshowid" not in payload["params"]

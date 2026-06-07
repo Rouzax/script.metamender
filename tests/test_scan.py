@@ -871,3 +871,51 @@ class TestRunScanStaleness:
         # Should be 3: 1 from first scan + 1 manual + 1 from second scan
         assert item["attempt_count"] == 3
         tracker.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests: pre-built items parameter
+# ---------------------------------------------------------------------------
+
+
+class TestRunScanWithItems:
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.fetch_movie")
+    def test_items_param_skips_kodi_query(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """When items= is provided, get_all_items should NOT be called."""
+        mock_fetch.return_value = _tmdb_movie_response()
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating", "plot"}),
+            "fake_key", _make_settings(),
+            items=[_make_movie_item()],
+        )
+        tracker.close()
+
+        assert not mock_get_all.called
+        assert stats["processed"] >= 1
+        assert stats["updated"] >= 1
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.fetch_movie")
+    def test_empty_items_list_processes_nothing(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            items=[],
+        )
+        tracker.close()
+
+        assert not mock_get_all.called
+        assert not mock_fetch.called
+        assert stats["processed"] == 0

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import xbmc
 
@@ -58,23 +58,44 @@ def _build_properties(media_type: MediaType) -> List[str]:
     return props
 
 
-def get_all_items(media_type: MediaType) -> List[Dict[str, Any]]:
-    """Bulk query Kodi library for all items of the given media type.
+def get_all_items(
+    media_type: MediaType,
+    kodi_filter: Optional[Dict[str, Any]] = None,
+    tvshowid: Optional[int] = None,
+    season: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Query Kodi library for items of the given media type.
+
+    Without filter arguments, returns all items. With filters, returns
+    only matching items (efficient for targeted scans).
 
     Args:
         media_type: The media type to query (MOVIE, TVSHOW, or EPISODE).
+        kodi_filter: Kodi JSON-RPC filter dict, e.g.
+            ``{"field": "title", "operator": "is", "value": "Air"}``.
+        tvshowid: For episodes, limit to this TV show (Kodi param, not filter).
+        season: For episodes, limit to this season (requires tvshowid).
 
     Returns:
         List of item dicts from the Kodi library.
     """
     properties = _build_properties(media_type)
+    params = {
+        "properties": properties,
+        "limits": {"start": 0, "end": 99999},
+    }  # type: Dict[str, Any]
+
+    if kodi_filter is not None:
+        params["filter"] = kodi_filter
+    if tvshowid is not None:
+        params["tvshowid"] = tvshowid
+    if season is not None:
+        params["season"] = season
+
     query = {
         "jsonrpc": "2.0",
         "method": media_type.kodi_list_method,
-        "params": {
-            "properties": properties,
-            "limits": {"start": 0, "end": 99999},
-        },
+        "params": params,
         "id": 1,
     }
 

@@ -208,11 +208,13 @@ def run_scan(
     settings: Dict[str, Any],
     monitor: Any = None,
     show_id_map: Optional[Dict[str, str]] = None,
+    items: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, int]:
     """Run a single scan cycle for one media type.
 
-    Queries Kodi for all items, detects gaps, fetches metadata from
-    TMDB, writes results back to Kodi, and updates the tracker.
+    Queries Kodi for all items (or uses a pre-built list), detects
+    gaps, fetches metadata from TMDB, writes results back to Kodi,
+    and updates the tracker.
 
     Args:
         media_type: MOVIE, TVSHOW, or EPISODE.
@@ -228,6 +230,9 @@ def run_scan(
         show_id_map: Dict mapping show title to show-level TMDB ID.
             Required for episode scans so fetch_season uses the show
             ID, not the episode ID.
+        items: Pre-built list of Kodi items to process. When provided,
+            skips the Kodi library query. Useful for targeted scans
+            (single item, folder, season) and testing.
 
     Returns:
         Stats dict with processed, skipped, updated, errors, and
@@ -246,7 +251,8 @@ def run_scan(
         media_type=media_type.name,
     )
 
-    items = get_all_items(media_type)
+    if items is None:
+        items = get_all_items(media_type)
 
     # Season cache for episode batching
     season_cache = {}  # type: Dict[str, Optional[List[Dict[str, Any]]]]
