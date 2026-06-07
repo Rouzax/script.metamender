@@ -1,0 +1,99 @@
+"""Centralized constants for MetaMender addon."""
+from __future__ import annotations
+
+# =============================================================================
+# Addon Identity
+# =============================================================================
+
+DEFAULT_ADDON_ID = "script.metamender"
+ADDON_PREFIX = "MetaMend"
+
+# =============================================================================
+# Logging
+# =============================================================================
+
+LOG_DIR_NAME = "logs"
+LOG_FILENAME = "metamender.log"
+LOG_MAX_SIZE_BYTES = 512 * 1024  # 500KB per file
+LOG_MAX_ROTATED_FILES = 3
+LOG_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+LOG_TIMESTAMP_TRIM = -3  # Trim microseconds to milliseconds
+LOG_MAX_VALUE_LENGTH = 200
+
+# =============================================================================
+# Service
+# =============================================================================
+
+KODI_HOME_WINDOW_ID = 10000
+
+# Default scan interval in hours
+DEFAULT_SCAN_INTERVAL_HOURS = 24
+
+# Sleep granularity: how often the service loop checks for abort (seconds)
+SERVICE_SLEEP_INTERVAL_SEC = 1
+
+# Rate limit between external API calls (seconds)
+DEFAULT_RATE_LIMIT_SEC = 0.25
+
+# Days to retry unresolved items before applying fallback
+DEFAULT_RETRY_DAYS = 30
+
+# Seconds to wait after library scan/clean finishes before triggering a rating scan
+LIBRARY_SCAN_DEBOUNCE_SEC = 60
+
+# =============================================================================
+# Rating Defaults
+# =============================================================================
+
+DEFAULT_FALLBACK_RATING = "NR"
+KNOWN_RATING_PREFIXES = ("Rated ",)
+
+# =============================================================================
+# Country Presets
+# =============================================================================
+
+PRESETS_DIR = "presets"
+DEFAULT_COUNTRY_CODE = "NL"
+COUNTRY_CODES = ("NL", "BE", "DE", "AT", "GB", "US", "FR", "DK", "SE")
+
+# =============================================================================
+# Backfill Tracker (SQLite)
+# =============================================================================
+
+BACKFILL_DB_FILENAME = "backfill.db"
+SOURCES_CONFIG_FILENAME = "sources.json"
+
+# Retry intervals in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
+RETRY_INTERVALS = (7, 30, 90)
+DEFAULT_MAX_RETRIES = 4
+
+# OMDB daily call budget (safety margin below free tier limit of 1000)
+OMDB_DAILY_LIMIT = 950
+
+# =============================================================================
+# Inference Config
+# =============================================================================
+
+CONFIG_DIR = "config"
+CONFIG_FILENAME = "inference.json"
+
+# =============================================================================
+# External APIs
+# =============================================================================
+
+TMDB_BASE_URL = "https://api.themoviedb.org/3"
+OMDB_BASE_URL = "https://www.omdbapi.com/"
+FSK_API_URL = "https://www.fsk.de/fskapi/ReleaseSearch"
+BBFC_SEARCH_URL = "https://www.bbfc.co.uk/search"
+KIJKWIJZER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+# =============================================================================
+# Scraper Canaries
+# =============================================================================
+
+SCRAPER_CANARIES = {
+    "fsk": {"title": "The Matrix", "expected": "16", "year": 1999},
+    "bbfc": {"title": "Interstellar", "expected": "12", "year": 2014},
+    "medieraadet": {"title": "Interstellar", "expected": "11", "year": 2014},
+    "kijkwijzer": {"title": "Interstellar", "expected": "12", "year": 2014},
+}
