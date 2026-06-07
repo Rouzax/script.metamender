@@ -1,0 +1,93 @@
+"""
+MetaMender manual trigger.
+
+Runs a single scan cycle when launched via RunScript(script.metamender).
+
+Logging:
+    Logger: 'manual'
+    Key events:
+        - manual.start (INFO): Manual scan started
+        - manual.complete (INFO): Manual scan finished with summary
+        - manual.error (ERROR): Manual scan failed
+"""
+from __future__ import annotations
+
+import time
+from typing import Any, Dict, Optional
+
+from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.sources import load_source_config
+from resources.lib.data.tracker import TrackerDB
+from resources.lib.engine.scan import run_scan
+from resources.lib.service.daemon import _get_db_path, _get_sources_config_path, _load_settings
+from resources.lib.utils import StructuredLogger, get_logger, notify
+
+log = get_logger('manual')
+
+
+def run() -> None:
+    """Run a single manual scan cycle."""
+    log.info("Manual scan started", event="manual.start")
+
+    tracker: Optional[TrackerDB] = None
+
+    try:
+        settings = _load_settings()
+        tracker = TrackerDB(_get_db_path())
+        source_config = load_source_config(_get_sources_config_path())
+
+        # Manual scans always start fresh
+        tracker.start_new_cycle()
+
+        tmdb_api_key = settings["tmdb_api_key"]
+        enabled_fields = settings["enabled_fields"]
+
+        scan_start = time.perf_counter()
+        all_stats: Dict[str, Dict[str, Any]] = {}
+
+        for media_type in (MOVIE, TVSHOW, EPISODE):
+            stats = run_scan(
+                media_type=media_type,
+                tracker=tracker,
+                source_config=source_config,
+                enabled_fields=enabled_fields,
+                tmdb_api_key=tmdb_api_key,
+                settings=settings,
+            )
+            all_stats[media_type.name] = stats
+
+        elapsed = round(time.perf_counter() - scan_start, 2)
+
+        movie_stats = all_stats.get("movie", {})
+        tvshow_stats = all_stats.get("tvshow", {})
+        episode_stats = all_stats.get("episode", {})
+
+        log.info(
+            "Manual scan complete",
+            event="manual.complete",
+            movies_updated=movie_stats.get("updated", 0),
+            tvshows_updated=tvshow_stats.get("updated", 0),
+            episodes_updated=episode_stats.get("updated", 0),
+            total_elapsed_sec=elapsed,
+        )
+
+        # Notification
+        total_updated = (
+            movie_stats.get("updated", 0)
+            + tvshow_stats.get("updated", 0)
+            + episode_stats.get("updated", 0)
+        )
+        parts = []
+        if total_updated:
+            parts.append("{} updated".format(total_updated))
+        if not parts:
+            parts.append("No changes")
+        notify(", ".join(parts))
+
+    except Exception:
+        log.exception("Manual scan failed", event="manual.error")
+
+    finally:
+        if tracker is not None:
+            tracker.close()
+        StructuredLogger.shutdown()
