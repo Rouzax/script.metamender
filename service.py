@@ -1,0 +1,1 @@
+"""MetaMender background service."""

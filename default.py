@@ -1,0 +1,1 @@
+"""MetaMender manual trigger."""

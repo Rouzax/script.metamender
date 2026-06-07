@@ -1,0 +1,8 @@
+{
+    "pythonVersion": "3.8",
+    "pythonPlatform": "All",
+    "typeCheckingMode": "standard",
+    "reportMissingImports": "warning",
+    "reportAttributeAccessIssue": "error",
+    "exclude": ["**/__pycache__", ".worktrees", "_temp", "build", "tests"]
+}

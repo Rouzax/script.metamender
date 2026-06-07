@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.worktrees/
+_temp/
+build/
+*.egg-info/
+.pytest_cache/
+docs/superpowers/
+CLAUDE.md
+.claude/

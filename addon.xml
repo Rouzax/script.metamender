@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="script.metamender"
+       name="MetaMender"
+       version="0.1.0"
+       provider-name="Rouzax">
+    <requires>
+        <import addon="xbmc.python" version="3.0.1" />
+        <import addon="script.module.requests" version="2.28.0" />
+    </requires>
+    <extension point="xbmc.python.script" library="default.py" />
+    <extension point="xbmc.service" library="service.py" />
+    <extension point="xbmc.python.library" library="resources/lib" />
+    <extension point="xbmc.addon.metadata">
+        <summary lang="en_GB">Backfills the metadata Kodi missed.</summary>
+        <description lang="en_GB">Automatically fills missing and stale metadata for movies, TV shows, and episodes using TMDB and OMDB. Backfills ratings, plots, episode titles, age certifications, credits, trailers, taglines, and more. Runs in the background with configurable field groups, staleness-aware retries, and per-source language settings.</description>
+        <platform>all</platform>
+        <license>MIT</license>
+    </extension>
+</addon>

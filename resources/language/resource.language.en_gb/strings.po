@@ -1,0 +1,414 @@
+# MetaMender language file
+# Addon id: script.metamender
+# Addon name: MetaMender
+msgid ""
+msgstr ""
+"Project-Id-Version: script.metamender\n"
+"Report-Msgid-Bugs-To: https://github.com/Rouzax/script.metamender/issues\n"
+"POT-Creation-Date: 2026-06-07\n"
+"PO-Revision-Date: 2026-06-07\n"
+"Last-Translator: Rouzax\n"
+"Language-Team: English\n"
+"Language: en_GB\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# --- Providers (32001-32033) ---
+
+msgctxt "#32001"
+msgid "Providers"
+msgstr ""
+
+msgctxt "#32010"
+msgid "TMDB"
+msgstr ""
+
+msgctxt "#32011"
+msgid "TMDB API key"
+msgstr ""
+
+msgctxt "#32012"
+msgid "API key for The Movie Database. Required for most lookups. Get one free at themoviedb.org."
+msgstr ""
+
+msgctxt "#32020"
+msgid "OMDB"
+msgstr ""
+
+msgctxt "#32021"
+msgid "OMDB API key"
+msgstr ""
+
+msgctxt "#32022"
+msgid "API key for the Open Movie Database. Optional but recommended. Free tier allows 1,000 requests per day."
+msgstr ""
+
+msgctxt "#32025"
+msgid "Source priority"
+msgstr ""
+
+msgctxt "#32026"
+msgid "Rating source"
+msgstr ""
+
+msgctxt "#32027"
+msgid "Which provider to prefer when looking up audience ratings. If the preferred source has no data, the other source is tried as a fallback."
+msgstr ""
+
+msgctxt "#32028"
+msgid "Plot source"
+msgstr ""
+
+msgctxt "#32029"
+msgid "Which provider to prefer when looking up plot summaries. If the preferred source has no data, the other source is tried as a fallback."
+msgstr ""
+
+msgctxt "#32030"
+msgid "Prefer TMDB"
+msgstr ""
+
+msgctxt "#32031"
+msgid "Prefer OMDB"
+msgstr ""
+
+msgctxt "#32032"
+msgid "TMDB only"
+msgstr ""
+
+msgctxt "#32033"
+msgid "OMDB only"
+msgstr ""
+
+# --- Backfill (32100-32149) ---
+
+msgctxt "#32100"
+msgid "Backfill"
+msgstr ""
+
+msgctxt "#32101"
+msgid "Fields"
+msgstr ""
+
+msgctxt "#32102"
+msgid "Enable ratings backfill"
+msgstr ""
+
+msgctxt "#32103"
+msgid "Backfill missing audience ratings (vote average and vote count) from TMDB or OMDB."
+msgstr ""
+
+msgctxt "#32104"
+msgid "Enable plots backfill"
+msgstr ""
+
+msgctxt "#32105"
+msgid "Backfill missing plot summaries and outlines from TMDB or OMDB."
+msgstr ""
+
+msgctxt "#32106"
+msgid "Enable episode title backfill"
+msgstr ""
+
+msgctxt "#32107"
+msgid "Backfill missing episode titles from TMDB. Only affects episodes with generic or empty titles."
+msgstr ""
+
+msgctxt "#32108"
+msgid "Enable certifications"
+msgstr ""
+
+msgctxt "#32109"
+msgid "Backfill missing age certifications using TMDB, OMDB, and country-specific scrapers. Configure the target country and scraper options in the Certifications tab."
+msgstr ""
+
+msgctxt "#32110"
+msgid "Enable credits backfill"
+msgstr ""
+
+msgctxt "#32111"
+msgid "Backfill missing director, writer, and studio credits from TMDB."
+msgstr ""
+
+msgctxt "#32112"
+msgid "Enable trailers backfill"
+msgstr ""
+
+msgctxt "#32113"
+msgid "Backfill missing trailer URLs from TMDB."
+msgstr ""
+
+msgctxt "#32114"
+msgid "Enable taglines backfill"
+msgstr ""
+
+msgctxt "#32115"
+msgid "Backfill missing movie taglines from TMDB."
+msgstr ""
+
+msgctxt "#32116"
+msgid "Enable details backfill"
+msgstr ""
+
+msgctxt "#32117"
+msgid "Backfill missing supplementary details such as genres, premiere dates, and runtime from TMDB."
+msgstr ""
+
+msgctxt "#32120"
+msgid "Freshness"
+msgstr ""
+
+msgctxt "#32121"
+msgid "Minimum votes (movies)"
+msgstr ""
+
+msgctxt "#32122"
+msgid "Only accept a rating if the movie has at least this many votes on the source. Lower values fill more items but may include unreliable scores."
+msgstr ""
+
+msgctxt "#32123"
+msgid "Minimum votes (episodes)"
+msgstr ""
+
+msgctxt "#32124"
+msgid "Only accept a rating if the episode has at least this many votes on the source. Episodes typically have fewer votes than movies, so a lower threshold is normal."
+msgstr ""
+
+msgctxt "#32125"
+msgid "Staleness threshold (days)"
+msgstr ""
+
+msgctxt "#32126"
+msgid "Re-check metadata that was last fetched more than this many days ago. Set higher to reduce API usage, lower to keep metadata fresher."
+msgstr ""
+
+msgctxt "#32130"
+msgid "Retries"
+msgstr ""
+
+msgctxt "#32131"
+msgid "Maximum retries"
+msgstr ""
+
+msgctxt "#32132"
+msgid "How many times to retry an item that could not be resolved before giving up. Each retry uses exponential backoff across scan cycles."
+msgstr ""
+
+msgctxt "#32140"
+msgid "Sources"
+msgstr ""
+
+msgctxt "#32141"
+msgid "Configure sources"
+msgstr ""
+
+msgctxt "#32142"
+msgid "Open the source configuration dialog to set per-field language preferences and provider overrides."
+msgstr ""
+
+# --- Certifications (32200-32268) ---
+
+msgctxt "#32200"
+msgid "Certifications"
+msgstr ""
+
+msgctxt "#32201"
+msgid "Certification format"
+msgstr ""
+
+msgctxt "#32202"
+msgid "Country"
+msgstr ""
+
+msgctxt "#32203"
+msgid "The country whose certification system to use. This determines valid certification values, the inference chain for cross-country mapping, and which scrapers are available."
+msgstr ""
+
+msgctxt "#32204"
+msgid "Override certification prefix"
+msgstr ""
+
+msgctxt "#32205"
+msgid "Use a custom prefix instead of the default for the selected country. Enable this if your Kodi skin expects a specific prefix format."
+msgstr ""
+
+msgctxt "#32206"
+msgid "Custom prefix"
+msgstr ""
+
+msgctxt "#32207"
+msgid "The prefix to prepend to certification values (for example, \"de:\" or \"Rated \"). Leave empty for no prefix."
+msgstr ""
+
+msgctxt "#32210"
+msgid "Country scrapers"
+msgstr ""
+
+msgctxt "#32211"
+msgid "Enable FSK lookup"
+msgstr ""
+
+msgctxt "#32212"
+msgid "Look up certifications from the German FSK (Freiwillige Selbstkontrolle) website. Only useful when the target country is Germany or Austria."
+msgstr ""
+
+msgctxt "#32213"
+msgid "Enable BBFC lookup"
+msgstr ""
+
+msgctxt "#32214"
+msgid "Look up certifications from the British Board of Film Classification website. Only useful when the target country is the United Kingdom."
+msgstr ""
+
+msgctxt "#32215"
+msgid "Enable Medieraadet lookup"
+msgstr ""
+
+msgctxt "#32216"
+msgid "Look up certifications from the Danish Media Council (Medieraadet) API. Only useful when the target country is Denmark."
+msgstr ""
+
+msgctxt "#32217"
+msgid "Enable Kijkwijzer lookup"
+msgstr ""
+
+msgctxt "#32218"
+msgid "Look up certifications from the Dutch Kijkwijzer website. Only useful when the target country is the Netherlands or Belgium. This scraper may be blocked by bot protection on some networks."
+msgstr ""
+
+msgctxt "#32220"
+msgid "Correction"
+msgstr ""
+
+msgctxt "#32221"
+msgid "Replace incorrect certifications"
+msgstr ""
+
+msgctxt "#32222"
+msgid "When enabled, certifications that do not match any valid value for the selected country will be replaced with a fresh lookup. When disabled, only empty certifications are filled."
+msgstr ""
+
+msgctxt "#32230"
+msgid "Fallback"
+msgstr ""
+
+msgctxt "#32231"
+msgid "Apply certification when not found"
+msgstr ""
+
+msgctxt "#32232"
+msgid "When enabled, items that cannot be resolved after the retry window will receive the fallback certification below. When disabled, unresolved items are left empty."
+msgstr ""
+
+msgctxt "#32233"
+msgid "Not-found certification"
+msgstr ""
+
+msgctxt "#32234"
+msgid "The certification value to apply when no source can provide a result and the retry window has expired. Common values: NR, Not Rated, Unrated."
+msgstr ""
+
+msgctxt "#32235"
+msgid "Retry window (days)"
+msgstr ""
+
+msgctxt "#32236"
+msgid "How many days to keep retrying before applying the fallback certification. Items are retried with exponential backoff during this window."
+msgstr ""
+
+# Country names
+
+msgctxt "#32260"
+msgid "NL - Kijkwijzer"
+msgstr ""
+
+msgctxt "#32261"
+msgid "BE - Kijkwijzer"
+msgstr ""
+
+msgctxt "#32262"
+msgid "DE - FSK"
+msgstr ""
+
+msgctxt "#32263"
+msgid "AT - JMK"
+msgstr ""
+
+msgctxt "#32264"
+msgid "GB - BBFC"
+msgstr ""
+
+msgctxt "#32265"
+msgid "US - MPAA"
+msgstr ""
+
+msgctxt "#32266"
+msgid "FR - CNC"
+msgstr ""
+
+msgctxt "#32267"
+msgid "DK - Medieraadet"
+msgstr ""
+
+msgctxt "#32268"
+msgid "SE - Mediemyndigheten"
+msgstr ""
+
+# --- General (32300-32349) ---
+
+msgctxt "#32300"
+msgid "General"
+msgstr ""
+
+msgctxt "#32301"
+msgid "Schedule"
+msgstr ""
+
+msgctxt "#32302"
+msgid "Scan interval (hours)"
+msgstr ""
+
+msgctxt "#32303"
+msgid "Hours between automatic background scans. Lower values keep the library fresher but increase API usage."
+msgstr ""
+
+msgctxt "#32304"
+msgid "API rate limit (seconds)"
+msgstr ""
+
+msgctxt "#32305"
+msgid "Minimum delay between external API calls. Increase this if you experience rate limiting or throttling from providers."
+msgstr ""
+
+msgctxt "#32310"
+msgid "Notifications"
+msgstr ""
+
+msgctxt "#32311"
+msgid "Show notifications"
+msgstr ""
+
+msgctxt "#32312"
+msgid "Display a Kodi notification when a scan starts, finishes, or encounters errors."
+msgstr ""
+
+msgctxt "#32313"
+msgid "Resume interrupted scans"
+msgstr ""
+
+msgctxt "#32314"
+msgid "When enabled, a scan that was interrupted (for example, by a Kodi restart) will resume from where it left off instead of starting over."
+msgstr ""
+
+msgctxt "#32320"
+msgid "Debugging"
+msgstr ""
+
+msgctxt "#32321"
+msgid "Enable debug logging"
+msgstr ""
+
+msgctxt "#32322"
+msgid "Write detailed debug information to a log file in the addon data folder. Useful for troubleshooting but increases disk usage."
+msgstr ""
