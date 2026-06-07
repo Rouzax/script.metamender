@@ -77,8 +77,8 @@ class TrackerDB:
     def __init__(self, db_path: str) -> None:
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
-        self._ensure_schema()
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._ensure_schema()
 
     def _ensure_schema(self) -> None:
         """Create tables and indexes if they do not exist."""

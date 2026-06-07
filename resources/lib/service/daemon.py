@@ -155,16 +155,16 @@ def _get_sources_config_path() -> str:
 def _build_show_id_map(tracker: TrackerDB) -> Dict[str, str]:
     """Build a map of show title to show-level TMDB ID.
 
-    Uses the tracker's tvshow items (populated during the tvshow scan)
-    so the episode scan can look up the correct show TMDB ID.
+    Queries all tvshow items in the tracker (populated during the
+    tvshow scan) so the episode scan can look up the correct show
+    TMDB ID.
     """
     show_map = {}  # type: Dict[str, str]
-    for item in tracker.get_items_by_status("tvshow", "complete") + \
-                tracker.get_items_by_status("tvshow", "partial") + \
-                tracker.get_items_by_status("tvshow", "pending"):
-        tmdb_id = item.get("tmdb_id")
-        if tmdb_id:
-            show_map[item["title"]] = tmdb_id
+    cursor = tracker._conn.execute(
+        "SELECT title, tmdb_id FROM items WHERE media_type = 'tvshow' AND tmdb_id IS NOT NULL"
+    )
+    for row in cursor.fetchall():
+        show_map[row["title"]] = row["tmdb_id"]
     return show_map
 
 
@@ -274,6 +274,15 @@ def run() -> None:
                         "Skipping scan, video is playing",
                         event="service.skip_playback",
                     )
+
+                if should_scan:
+                    if not settings.get("tmdb_api_key"):
+                        log.warning(
+                            "No TMDB API key configured, skipping scan",
+                            event="service.skip_no_key",
+                        )
+                        last_scan = time.time()
+                        should_scan = False
 
                 if should_scan:
                     StructuredLogger.start_scan_log()

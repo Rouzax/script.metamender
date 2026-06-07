@@ -466,16 +466,15 @@ def run_scan(
 
             if media_type.name == "movie":
                 tmdb_data = fetch_movie(tmdb_id, tmdb_api_key, language)
+                needs_sleep = True
             elif media_type.name == "tvshow":
                 tmdb_data = fetch_tvshow(tmdb_id, tmdb_api_key, language)
+                needs_sleep = True
             elif media_type.name == "episode":
                 season_number = item.get("season", 0)
                 episode_number = item.get("episode", 0)
                 showtitle = item.get("showtitle", "")
 
-                # Episodes have episode-level TMDB IDs, but fetch_season
-                # needs the show-level TMDB ID. Look it up from show_id_map
-                # (built during the tvshow scan).
                 ep_show_tmdb_id = (show_id_map or {}).get(showtitle)
                 if not ep_show_tmdb_id:
                     log.debug(
@@ -491,13 +490,15 @@ def run_scan(
                     tracker.mark_cycle_processed(media_type.name, title)
                     continue
 
+                cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
+                is_cache_miss = cache_key not in season_cache
                 season_data = _get_season_data(
                     ep_show_tmdb_id, season_number, tmdb_api_key, language, season_cache
                 )
                 if season_data is not None:
                     tmdb_data = _find_episode_in_season(season_data, episode_number)
-
-            needs_sleep = True
+                if is_cache_miss:
+                    needs_sleep = True
         except ApiKeyError:
             log.exception(
                 "Invalid TMDB API key",

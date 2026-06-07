@@ -25,7 +25,7 @@ MOVIE = MediaType(
     kodi_id_field="movieid",
     kodi_result_key="movies",
     backfill_fields=frozenset({
-        "rating", "plot", "tagline", "director", "writer",
+        "rating", "votes", "plot", "tagline", "director", "writer",
         "genre", "studio", "country", "trailer", "runtime", "mpaa",
     }),
     date_field="premiered",
@@ -39,7 +39,7 @@ TVSHOW = MediaType(
     kodi_id_field="tvshowid",
     kodi_result_key="tvshows",
     backfill_fields=frozenset({
-        "rating", "plot", "genre", "mpaa",
+        "rating", "votes", "plot", "genre", "mpaa",
     }),
     date_field="premiered",
 )
@@ -52,7 +52,7 @@ EPISODE = MediaType(
     kodi_id_field="episodeid",
     kodi_result_key="episodes",
     backfill_fields=frozenset({
-        "rating", "plot", "title", "director", "writer",
+        "rating", "votes", "plot", "title", "director", "writer",
         "firstaired", "runtime",
     }),
     date_field="firstaired",

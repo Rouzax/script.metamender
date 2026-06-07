@@ -149,12 +149,11 @@ def resolve_id(
                 params={"api_key": api_key, "external_source": source},
                 timeout=10,
             )
-    except requests.RequestException as e:
-        log.warning(
+    except requests.RequestException:
+        log.exception(
             "Resolve request failed",
             event="tmdb.error",
             tmdb_id=external_id,
-            error=str(e),
         )
         return None
 
@@ -173,7 +172,7 @@ def resolve_id(
     try:
         data = resp.json()
     except ValueError:
-        log.warning(
+        log.exception(
             "Invalid JSON in resolve response",
             event="tmdb.error",
             tmdb_id=external_id,
@@ -224,12 +223,11 @@ def fetch_movie(
     try:
         with log_timing(log, "tmdb.movie", tmdb_id=tmdb_id):
             resp = requests.get(url, params=params, timeout=10)
-    except requests.RequestException as e:
-        log.warning(
+    except requests.RequestException:
+        log.exception(
             "Request failed",
             event="tmdb.error",
             tmdb_id=tmdb_id,
-            error=str(e),
         )
         return None
 
@@ -248,7 +246,7 @@ def fetch_movie(
     try:
         data = resp.json()
     except ValueError:
-        log.warning(
+        log.exception(
             "Invalid JSON",
             event="tmdb.error",
             tmdb_id=tmdb_id,
@@ -322,13 +320,12 @@ def fetch_season(
             tmdb_id=show_tmdb_id, season=season_number,
         ):
             resp = requests.get(url, params=params, timeout=10)
-    except requests.RequestException as e:
-        log.warning(
+    except requests.RequestException:
+        log.exception(
             "Request failed",
             event="tmdb.error",
             tmdb_id=show_tmdb_id,
             season=season_number,
-            error=str(e),
         )
         return None
 
@@ -348,7 +345,7 @@ def fetch_season(
     try:
         data = resp.json()
     except ValueError:
-        log.warning(
+        log.exception(
             "Invalid JSON",
             event="tmdb.error",
             tmdb_id=show_tmdb_id,
@@ -408,12 +405,11 @@ def fetch_tvshow(
     try:
         with log_timing(log, "tmdb.tvshow", tmdb_id=tmdb_id):
             resp = requests.get(url, params=params, timeout=10)
-    except requests.RequestException as e:
-        log.warning(
+    except requests.RequestException:
+        log.exception(
             "Request failed",
             event="tmdb.error",
             tmdb_id=tmdb_id,
-            error=str(e),
         )
         return None
 
@@ -432,7 +428,7 @@ def fetch_tvshow(
     try:
         data = resp.json()
     except ValueError:
-        log.warning(
+        log.exception(
             "Invalid JSON",
             event="tmdb.error",
             tmdb_id=tmdb_id,

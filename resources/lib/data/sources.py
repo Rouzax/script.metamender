@@ -8,6 +8,8 @@ Logging:
     Logger: 'sources'
     Key events:
         - sources.load (INFO): Source config loaded
+        - sources.discover (INFO): Video sources discovered from Kodi
+        - sources.save (INFO): Source config saved
         - sources.match (DEBUG): Item matched to a source
 """
 from __future__ import annotations
@@ -22,15 +24,15 @@ from resources.lib.utils import get_logger, log_timing
 
 log = get_logger('sources')
 
-_DEFAULT_CONFIG = {
-    "sources": [],
-    "default_language": "en-US",
-}
 
-_DEFAULT_MATCH = {
-    "enabled": True,
-    "language": "en-US",
-}
+def _default_config() -> Dict[str, Any]:
+    """Return a fresh default config (no shared mutable state)."""
+    return {"sources": [], "default_language": "en-US"}
+
+
+def _default_match() -> Dict[str, Any]:
+    """Return a fresh default match result."""
+    return {"enabled": True, "language": "en-US"}
 
 
 def load_source_config(config_path: str) -> Dict[str, Any]:
@@ -40,8 +42,9 @@ def load_source_config(config_path: str) -> Dict[str, Any]:
         config_path: Absolute path to the sources.json file.
 
     Returns:
-        The parsed config dict. If the file does not exist, returns a
-        default config with an empty sources list and "en-US" language.
+        The parsed config dict. If the file does not exist or cannot
+        be read, returns a default config with an empty sources list
+        and "en-US" language.
     """
     if not os.path.exists(config_path):
         log.info(
@@ -49,18 +52,18 @@ def load_source_config(config_path: str) -> Dict[str, Any]:
             event="sources.load",
             path=config_path,
         )
-        return dict(_DEFAULT_CONFIG)
+        return _default_config()
 
     try:
         with open(config_path, "r", encoding="utf-8") as fh:
             config = json.load(fh)
-    except json.JSONDecodeError:
-        log.warning(
-            "Invalid JSON in source config, using defaults",
+    except (json.JSONDecodeError, IOError, OSError):
+        log.exception(
+            "Failed to read source config, using defaults",
             event="sources.load",
             path=config_path,
         )
-        return dict(_DEFAULT_CONFIG)
+        return _default_config()
 
     log.info(
         "Source config loaded",
@@ -118,9 +121,16 @@ def discover_sources() -> List[Dict[str, str]]:
         "id": 1,
     }
 
-    with log_timing(log, "discover_sources"):
-        raw = xbmc.executeJSONRPC(json.dumps(query))
-        data = json.loads(raw)
+    try:
+        with log_timing(log, "discover_sources"):
+            raw = xbmc.executeJSONRPC(json.dumps(query))
+            data = json.loads(raw)
+    except Exception:
+        log.exception(
+            "Failed to discover video sources",
+            event="sources.discover",
+        )
+        return []
 
     result = data.get("result", {})
     sources = result.get("sources", [])
@@ -180,4 +190,4 @@ def match_source(
         event="sources.match",
         file_path=file_path,
     )
-    return dict(_DEFAULT_MATCH)
+    return _default_match()
