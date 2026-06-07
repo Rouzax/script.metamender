@@ -11,12 +11,14 @@ Logging:
         - scan.complete (INFO): Scan cycle finished with stats
         - scan.skip (DEBUG): Item skipped (disabled source, exhausted, no gaps)
         - scan.abort (INFO): Scan interrupted by Kodi shutdown
+        - scan.stale (DEBUG): Rating detected as stale, re-added to gaps
         - scan.processing (DEBUG): Starting to process a single item
         - scan.updated (INFO): Item metadata written to Kodi
 """
 from __future__ import annotations
 
 import time
+from datetime import date
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from resources.lib.data.kodi import get_all_items, update_item
@@ -24,7 +26,7 @@ from resources.lib.data.media_types import MediaType
 from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.gaps import detect_gaps, is_placeholder_title
-from resources.lib.engine.staleness import compute_next_retry
+from resources.lib.engine.staleness import compute_next_retry, is_rating_stale
 from resources.lib.providers.tmdb import (
     fetch_movie,
     fetch_season,
@@ -63,6 +65,30 @@ def _make_stats() -> Dict[str, Any]:
         "errors": 0,
         "fields": {},
     }
+
+
+def _record_attempt_with_retry(
+    tracker: TrackerDB,
+    media_type_name: str,
+    title: str,
+    max_retries: int,
+) -> None:
+    """Record an attempt and set next retry or mark exhausted.
+
+    Reads the current attempt count from the tracker, computes the
+    next retry date for attempt_count + 1, then calls record_attempt
+    (which increments the count). If retries are exhausted, marks the
+    item as exhausted.
+    """
+    tracker_item = tracker.get_item(media_type_name, title)
+    current_count = tracker_item["attempt_count"] if tracker_item else 0
+    next_attempt = current_count + 1
+    next_retry_date = compute_next_retry(next_attempt, max_retries)
+
+    tracker.record_attempt(media_type_name, title, next_retry=next_retry_date)
+
+    if next_retry_date is None:
+        tracker.update_item_status(media_type_name, title, "exhausted")
 
 
 def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
@@ -281,6 +307,92 @@ def run_scan(
 
         # Detect gaps
         gaps = detect_gaps(item, enabled_fields, media_type)
+
+        # Check tracker state for retry gating and staleness
+        tracker_item = tracker.get_item(media_type.name, title)
+        if tracker_item is not None:
+            # Skip exhausted items
+            if tracker_item["status"] == "exhausted":
+                log.debug(
+                    "Skipping exhausted item",
+                    event="scan.skip",
+                    title=title,
+                    media_type=media_type.name,
+                    attempt_count=tracker_item["attempt_count"],
+                )
+                tracker.mark_cycle_processed(media_type.name, title)
+                stats["skipped"] += 1
+                continue
+
+            # Skip items not yet due for retry
+            next_retry = tracker_item.get("next_retry")
+            if next_retry and tracker_item["attempt_count"] > 0:
+                today = date.today().isoformat()
+                if next_retry > today:
+                    log.debug(
+                        "Skipping item, retry not due",
+                        event="scan.skip",
+                        title=title,
+                        media_type=media_type.name,
+                        next_retry=next_retry,
+                    )
+                    tracker.mark_cycle_processed(media_type.name, title)
+                    stats["skipped"] += 1
+                    continue
+
+        if not gaps:
+            # Check rating staleness before declaring complete: even if
+            # the item has a rating, it might be based on too few votes
+            # for recent content.
+            if "rating" in enabled_fields and media_type.name in ("movie", "tvshow"):
+                min_votes = settings.get("min_votes_movie", 50)
+                stale_days = settings.get("stale_threshold_days", 365)
+                field_info = tracker.get_field_status(
+                    media_type.name, title, "rating"
+                )
+                if field_info is not None:
+                    stale = is_rating_stale(
+                        premiered=item.get(media_type.date_field, ""),
+                        vote_count=field_info.get("vote_count") or 0,
+                        last_fetched=field_info.get("fetched_at"),
+                        min_votes=min_votes,
+                        stale_threshold_days=stale_days,
+                    )
+                    if stale:
+                        gaps.append("rating")
+                        log.debug(
+                            "Rating is stale, adding to gaps",
+                            event="scan.stale",
+                            title=title,
+                            media_type=media_type.name,
+                            vote_count=field_info.get("vote_count"),
+                            premiered=item.get(media_type.date_field, ""),
+                        )
+            elif "rating" in enabled_fields and media_type.name == "episode":
+                min_votes = settings.get("min_votes_episode", 20)
+                stale_days = settings.get("stale_threshold_days", 365)
+                field_info = tracker.get_field_status(
+                    media_type.name, title, "rating"
+                )
+                if field_info is not None:
+                    stale = is_rating_stale(
+                        premiered=item.get(media_type.date_field, ""),
+                        vote_count=field_info.get("vote_count") or 0,
+                        last_fetched=field_info.get("fetched_at"),
+                        min_votes=min_votes,
+                        stale_threshold_days=stale_days,
+                    )
+                    if stale:
+                        gaps.append("rating")
+                        log.debug(
+                            "Rating is stale, adding to gaps",
+                            event="scan.stale",
+                            title=title,
+                            media_type=media_type.name,
+                            vote_count=field_info.get("vote_count"),
+                            premiered=item.get(media_type.date_field, ""),
+                        )
+
         if not gaps:
             tracker.update_item_status(media_type.name, title, "complete")
             tracker.mark_cycle_processed(media_type.name, title)
@@ -317,10 +429,8 @@ def run_scan(
                     title=title,
                 )
                 stats["errors"] += 1
-                tracker.record_attempt(
-                    media_type.name,
-                    title,
-                    next_retry=compute_next_retry(1, max_retries),
+                _record_attempt_with_retry(
+                    tracker, media_type.name, title, max_retries,
                 )
                 tracker.mark_cycle_processed(media_type.name, title)
                 stats["processed"] += 1
@@ -332,10 +442,8 @@ def run_scan(
                     event="scan.skip",
                     title=title,
                 )
-                tracker.record_attempt(
-                    media_type.name,
-                    title,
-                    next_retry=compute_next_retry(1, max_retries),
+                _record_attempt_with_retry(
+                    tracker, media_type.name, title, max_retries,
                 )
                 tracker.mark_cycle_processed(media_type.name, title)
                 stats["processed"] += 1
@@ -371,9 +479,8 @@ def run_scan(
                         showtitle=showtitle,
                     )
                     stats["skipped"] += 1
-                    tracker.record_attempt(
-                        media_type.name, title,
-                        next_retry=compute_next_retry(1, max_retries),
+                    _record_attempt_with_retry(
+                        tracker, media_type.name, title, max_retries,
                     )
                     tracker.mark_cycle_processed(media_type.name, title)
                     continue
@@ -400,20 +507,16 @@ def run_scan(
                 tmdb_id=tmdb_id,
             )
             stats["errors"] += 1
-            tracker.record_attempt(
-                media_type.name,
-                title,
-                next_retry=compute_next_retry(1, max_retries),
+            _record_attempt_with_retry(
+                tracker, media_type.name, title, max_retries,
             )
             tracker.mark_cycle_processed(media_type.name, title)
             stats["processed"] += 1
             continue
 
         if tmdb_data is None:
-            tracker.record_attempt(
-                media_type.name,
-                title,
-                next_retry=compute_next_retry(1, max_retries),
+            _record_attempt_with_retry(
+                tracker, media_type.name, title, max_retries,
             )
             tracker.mark_cycle_processed(media_type.name, title)
             stats["processed"] += 1
@@ -470,10 +573,8 @@ def run_scan(
         if not remaining_gaps:
             tracker.update_item_status(media_type.name, title, "complete")
         else:
-            tracker.record_attempt(
-                media_type.name,
-                title,
-                next_retry=compute_next_retry(1, max_retries),
+            _record_attempt_with_retry(
+                tracker, media_type.name, title, max_retries,
             )
 
         tracker.mark_cycle_processed(media_type.name, title)

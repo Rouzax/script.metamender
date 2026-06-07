@@ -735,3 +735,139 @@ class TestRunScanMultipleItems:
         assert stats["processed"] == 2
         assert stats["updated"] == 2
         assert mock_fetch.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: staleness and retry gating
+# ---------------------------------------------------------------------------
+
+
+class TestRunScanStaleness:
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.fetch_movie")
+    def test_skips_exhausted_item(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        tracker = _make_tracker(tmp_path)
+        # Pre-seed tracker as exhausted
+        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        tracker.update_item_status("movie", "Test Movie", "exhausted")
+
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+        )
+        tracker.close()
+
+        assert stats["skipped"] >= 1
+        assert not mock_fetch.called
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.fetch_movie")
+    def test_skips_item_before_retry_date(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        # Set next_retry to far future
+        tracker.record_attempt("movie", "Test Movie", next_retry="2099-01-01")
+
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+        )
+        tracker.close()
+
+        assert stats["skipped"] >= 1
+        assert not mock_fetch.called
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.fetch_movie")
+    def test_processes_item_past_retry_date(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = _tmdb_movie_response()
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        # Set next_retry to past
+        tracker.record_attempt("movie", "Test Movie", next_retry="2020-01-01")
+
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+        )
+        tracker.close()
+
+        assert mock_fetch.called
+        assert stats["updated"] >= 1
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.fetch_movie")
+    def test_marks_exhausted_after_max_retries(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = None  # TMDB returns nothing
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        # Simulate 3 previous attempts (max is 4)
+        for _ in range(3):
+            tracker.record_attempt("movie", "Test Movie", next_retry="2020-01-01")
+
+        settings = _make_settings()
+        settings["max_retries"] = 4
+
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", settings,
+        )
+
+        item = tracker.get_item("movie", "Test Movie")
+        assert item["status"] == "exhausted"
+        assert item["attempt_count"] == 4
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.fetch_movie")
+    def test_attempt_count_increments_correctly(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = None
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+
+        # First scan
+        run_scan(MOVIE, tracker, _make_source_config(),
+                 frozenset({"rating"}), "fake_key", _make_settings())
+
+        item = tracker.get_item("movie", "Test Movie")
+        assert item["attempt_count"] == 1
+        assert item["next_retry"] is not None
+
+        # Set next_retry to past so second scan processes the item
+        tracker.record_attempt("movie", "Test Movie", next_retry="2020-01-01")
+        # attempt_count is now 2 from the manual record_attempt
+
+        run_scan(MOVIE, tracker, _make_source_config(),
+                 frozenset({"rating"}), "fake_key", _make_settings())
+
+        item = tracker.get_item("movie", "Test Movie")
+        # Should be 3: 1 from first scan + 1 manual + 1 from second scan
+        assert item["attempt_count"] == 3
+        tracker.close()
