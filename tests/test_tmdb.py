@@ -1,0 +1,675 @@
+"""Tests for the TMDB provider module."""
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from resources.lib.providers.tmdb import (
+    _normalize_certs,
+    _parse_directors,
+    _parse_movie_certifications,
+    _parse_trailer,
+    _parse_tv_certifications,
+    _parse_writers,
+    fetch_movie,
+    fetch_season,
+    fetch_tvshow,
+    resolve_id,
+)
+from resources.lib.utils import ApiKeyError
+
+
+# =============================================================================
+# Fixtures: realistic TMDB API responses
+# =============================================================================
+
+MOVIE_RESPONSE = {
+    "id": 666277,
+    "title": "Past Lives",
+    "tagline": "What if?",
+    "overview": "After decades apart, childhood friends reunite.",
+    "vote_average": 7.702,
+    "vote_count": 2330,
+    "runtime": 106,
+    "release_date": "2023-06-02",
+    "original_title": "Past Lives",
+    "genres": [
+        {"id": 18, "name": "Drama"},
+        {"id": 10749, "name": "Romance"},
+    ],
+    "production_companies": [
+        {"name": "A24"},
+        {"name": "Killer Films"},
+    ],
+    "production_countries": [
+        {"name": "United States of America"},
+        {"name": "South Korea"},
+    ],
+    "credits": {
+        "crew": [
+            {
+                "name": "Celine Song",
+                "job": "Director",
+                "department": "Directing",
+            },
+            {
+                "name": "Celine Song",
+                "job": "Writer",
+                "department": "Writing",
+            },
+        ],
+    },
+    "videos": {
+        "results": [
+            {
+                "type": "Trailer",
+                "site": "YouTube",
+                "key": "kA244xewjcI",
+                "name": "Official Trailer",
+            },
+            {
+                "type": "Teaser",
+                "site": "YouTube",
+                "key": "abc123",
+                "name": "Teaser",
+            },
+        ],
+    },
+    "release_dates": {
+        "results": [
+            {
+                "iso_3166_1": "US",
+                "release_dates": [
+                    {"certification": "PG-13", "type": 3},
+                ],
+            },
+            {
+                "iso_3166_1": "GB",
+                "release_dates": [
+                    {"certification": "12A", "type": 3},
+                ],
+            },
+            {
+                "iso_3166_1": "DE",
+                "release_dates": [
+                    {"certification": "6", "type": 3},
+                ],
+            },
+        ],
+    },
+}
+
+SEASON_RESPONSE = {
+    "episodes": [
+        {
+            "episode_number": 1,
+            "season_number": 2,
+            "name": "Call Tracking",
+            "overview": "Peter goes AWOL.",
+            "vote_average": 6.764,
+            "vote_count": 36,
+            "air_date": "2025-01-23",
+            "runtime": 51,
+            "crew": [
+                {
+                    "name": "Guy Ferland",
+                    "job": "Director",
+                    "department": "Directing",
+                },
+                {
+                    "name": "Shawn Ryan",
+                    "job": "Writer",
+                    "department": "Writing",
+                },
+            ],
+        },
+        {
+            "episode_number": 2,
+            "season_number": 2,
+            "name": "Disconnected",
+            "overview": "Peter and Rose race.",
+            "vote_average": 7.172,
+            "vote_count": 32,
+            "air_date": "2025-01-23",
+            "runtime": 52,
+            "crew": [
+                {
+                    "name": "Guy Ferland",
+                    "job": "Director",
+                    "department": "Directing",
+                },
+                {
+                    "name": "Tiffany Shaw Ho",
+                    "job": "Writer",
+                    "department": "Writing",
+                },
+            ],
+        },
+    ],
+}
+
+TVSHOW_RESPONSE = {
+    "id": 129552,
+    "name": "The Night Agent",
+    "overview": "An FBI agent unravels a conspiracy.",
+    "vote_average": 7.713,
+    "vote_count": 1162,
+    "genres": [
+        {"id": 10759, "name": "Action & Adventure"},
+        {"id": 18, "name": "Drama"},
+    ],
+    "content_ratings": {
+        "results": [
+            {"iso_3166_1": "US", "rating": "TV-MA"},
+            {"iso_3166_1": "GB", "rating": "15"},
+            {"iso_3166_1": "NL", "rating": "16"},
+        ],
+    },
+}
+
+FIND_RESPONSE_TVDB = {
+    "movie_results": [],
+    "tv_results": [{"id": 129552}],
+}
+
+FIND_RESPONSE_IMDB = {
+    "movie_results": [{"id": 666277}],
+    "tv_results": [],
+}
+
+FIND_RESPONSE_EMPTY = {
+    "movie_results": [],
+    "tv_results": [],
+}
+
+
+def _mock_response(
+    status_code: int = 200,
+    json_data: Any = None,
+    raise_for_json: bool = False,
+) -> MagicMock:
+    """Create a mock requests.Response."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    if raise_for_json:
+        resp.json.side_effect = ValueError("No JSON")
+    else:
+        resp.json.return_value = json_data if json_data is not None else {}
+    return resp
+
+
+# =============================================================================
+# Tests: internal helpers
+# =============================================================================
+
+
+class TestParseDirectors:
+    def test_extracts_directors(self) -> None:
+        credits = {
+            "crew": [
+                {"name": "Celine Song", "job": "Director", "department": "Directing"},
+                {"name": "Someone", "job": "Producer", "department": "Production"},
+            ],
+        }
+        assert _parse_directors(credits) == ["Celine Song"]
+
+    def test_empty_crew(self) -> None:
+        assert _parse_directors({}) == []
+        assert _parse_directors({"crew": []}) == []
+
+
+class TestParseWriters:
+    def test_extracts_and_deduplicates_writers(self) -> None:
+        credits = {
+            "crew": [
+                {"name": "Celine Song", "job": "Writer", "department": "Writing"},
+                {"name": "Celine Song", "job": "Screenplay", "department": "Writing"},
+                {"name": "Another Writer", "job": "Writer", "department": "Writing"},
+            ],
+        }
+        result = _parse_writers(credits)
+        assert result == ["Celine Song", "Another Writer"]
+
+    def test_empty_crew(self) -> None:
+        assert _parse_writers({}) == []
+
+
+class TestParseTrailer:
+    def test_finds_first_youtube_trailer(self) -> None:
+        videos = {
+            "results": [
+                {"type": "Teaser", "site": "YouTube", "key": "abc123"},
+                {"type": "Trailer", "site": "YouTube", "key": "kA244xewjcI"},
+                {"type": "Trailer", "site": "YouTube", "key": "second"},
+            ],
+        }
+        expected = "plugin://plugin.video.youtube/?action=play_video&videoid=kA244xewjcI"
+        assert _parse_trailer(videos) == expected
+
+    def test_returns_none_when_no_trailer(self) -> None:
+        videos = {
+            "results": [
+                {"type": "Teaser", "site": "YouTube", "key": "abc123"},
+            ],
+        }
+        assert _parse_trailer(videos) is None
+
+    def test_returns_none_for_empty_videos(self) -> None:
+        assert _parse_trailer({}) is None
+        assert _parse_trailer({"results": []}) is None
+
+
+class TestParseMovieCertifications:
+    def test_extracts_certifications(self) -> None:
+        release_dates = {
+            "results": [
+                {
+                    "iso_3166_1": "US",
+                    "release_dates": [{"certification": "PG-13", "type": 3}],
+                },
+                {
+                    "iso_3166_1": "GB",
+                    "release_dates": [{"certification": "12A", "type": 3}],
+                },
+            ],
+        }
+        result = _parse_movie_certifications(release_dates)
+        assert result == {"US": "PG-13", "GB": "12A"}
+
+    def test_takes_first_nonempty_certification(self) -> None:
+        release_dates = {
+            "results": [
+                {
+                    "iso_3166_1": "US",
+                    "release_dates": [
+                        {"certification": "", "type": 1},
+                        {"certification": "R", "type": 3},
+                    ],
+                },
+            ],
+        }
+        result = _parse_movie_certifications(release_dates)
+        assert result == {"US": "R"}
+
+    def test_skips_empty_certifications(self) -> None:
+        release_dates = {
+            "results": [
+                {
+                    "iso_3166_1": "US",
+                    "release_dates": [{"certification": "", "type": 3}],
+                },
+            ],
+        }
+        result = _parse_movie_certifications(release_dates)
+        assert result == {}
+
+
+class TestParseTvCertifications:
+    def test_extracts_certifications(self) -> None:
+        content_ratings = {
+            "results": [
+                {"iso_3166_1": "US", "rating": "TV-MA"},
+                {"iso_3166_1": "GB", "rating": "15"},
+            ],
+        }
+        result = _parse_tv_certifications(content_ratings)
+        assert result == {"US": "TV-MA", "GB": "15"}
+
+    def test_skips_empty_ratings(self) -> None:
+        content_ratings = {
+            "results": [
+                {"iso_3166_1": "US", "rating": ""},
+            ],
+        }
+        result = _parse_tv_certifications(content_ratings)
+        assert result == {}
+
+
+class TestNormalizeCerts:
+    def test_normalizes_se_tv_format(self) -> None:
+        certs = {"SE": "Från 7 år", "US": "PG-13"}
+        result = _normalize_certs(certs)
+        assert result["SE"] == "7"
+        assert result["US"] == "PG-13"
+
+    def test_leaves_already_canonical(self) -> None:
+        certs = {"SE": "15", "DE": "12"}
+        result = _normalize_certs(certs)
+        assert result == {"SE": "15", "DE": "12"}
+
+
+# =============================================================================
+# Tests: fetch_movie
+# =============================================================================
+
+
+class TestFetchMovie:
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_all_fields(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
+
+        result = fetch_movie("666277", "fake_key")
+
+        assert result is not None
+        assert result["rating"] == 7.702
+        assert result["votes"] == 2330
+        assert result["plot"] == "After decades apart, childhood friends reunite."
+        assert result["tagline"] == "What if?"
+        assert result["runtime"] == 106
+        assert result["premiered"] == "2023-06-02"
+        assert result["original_title"] == "Past Lives"
+        assert result["genres"] == ["Drama", "Romance"]
+        assert result["studios"] == ["A24", "Killer Films"]
+        assert result["countries"] == [
+            "United States of America",
+            "South Korea",
+        ]
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_directors_parsed(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
+        result = fetch_movie("666277", "fake_key")
+        assert result is not None
+        assert result["directors"] == ["Celine Song"]
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_writers_parsed_and_deduplicated(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
+        result = fetch_movie("666277", "fake_key")
+        assert result is not None
+        # Celine Song appears once in fixture with job=Writer, department=Writing
+        assert result["writers"] == ["Celine Song"]
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_trailer_formatted_as_youtube_url(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
+        result = fetch_movie("666277", "fake_key")
+        assert result is not None
+        expected = "plugin://plugin.video.youtube/?action=play_video&videoid=kA244xewjcI"
+        assert result["trailer"] == expected
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_trailer_none_when_no_trailer(self, mock_get: MagicMock) -> None:
+        response = dict(MOVIE_RESPONSE)
+        response["videos"] = {"results": []}
+        mock_get.return_value = _mock_response(200, response)
+        result = fetch_movie("666277", "fake_key")
+        assert result is not None
+        assert result["trailer"] is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_certifications_parsed(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
+        result = fetch_movie("666277", "fake_key")
+        assert result is not None
+        assert result["certifications"] == {
+            "US": "PG-13",
+            "GB": "12A",
+            "DE": "6",
+        }
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+        import requests as req
+
+        mock_get.side_effect = req.ConnectionError("timeout")
+        result = fetch_movie("666277", "fake_key")
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(401)
+        with pytest.raises(ApiKeyError) as exc_info:
+            fetch_movie("666277", "fake_key")
+        assert exc_info.value.provider == "tmdb"
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(404)
+        result = fetch_movie("666277", "fake_key")
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_invalid_json(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, raise_for_json=True)
+        result = fetch_movie("666277", "fake_key")
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_passes_language_param(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
+        fetch_movie("666277", "fake_key", language="nl-NL")
+        call_kwargs = mock_get.call_args
+        assert call_kwargs[1]["params"]["language"] == "nl-NL"
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_se_certifications_normalized(self, mock_get: MagicMock) -> None:
+        response = dict(MOVIE_RESPONSE)
+        response["release_dates"] = {
+            "results": [
+                {
+                    "iso_3166_1": "SE",
+                    "release_dates": [
+                        {"certification": "Från 11 år", "type": 3},
+                    ],
+                },
+            ],
+        }
+        mock_get.return_value = _mock_response(200, response)
+        result = fetch_movie("666277", "fake_key")
+        assert result is not None
+        assert result["certifications"]["SE"] == "11"
+
+
+# =============================================================================
+# Tests: fetch_season
+# =============================================================================
+
+
+class TestFetchSeason:
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_episode_list(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
+
+        result = fetch_season("129552", 2, "fake_key")
+
+        assert result is not None
+        assert len(result) == 2
+
+        ep1 = result[0]
+        assert ep1["episode_number"] == 1
+        assert ep1["season_number"] == 2
+        assert ep1["title"] == "Call Tracking"
+        assert ep1["rating"] == 6.764
+        assert ep1["votes"] == 36
+        assert ep1["plot"] == "Peter goes AWOL."
+        assert ep1["firstaired"] == "2025-01-23"
+        assert ep1["runtime"] == 51
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_episode_directors_and_writers(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
+
+        result = fetch_season("129552", 2, "fake_key")
+
+        assert result is not None
+        ep1 = result[0]
+        assert ep1["directors"] == ["Guy Ferland"]
+        assert ep1["writers"] == ["Shawn Ryan"]
+
+        ep2 = result[1]
+        assert ep2["directors"] == ["Guy Ferland"]
+        assert ep2["writers"] == ["Tiffany Shaw Ho"]
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_handles_empty_episodes(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, {"episodes": []})
+
+        result = fetch_season("129552", 1, "fake_key")
+
+        assert result is not None
+        assert result == []
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+        import requests as req
+
+        mock_get.side_effect = req.ConnectionError("timeout")
+        result = fetch_season("129552", 2, "fake_key")
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(401)
+        with pytest.raises(ApiKeyError):
+            fetch_season("129552", 2, "fake_key")
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(404)
+        result = fetch_season("129552", 2, "fake_key")
+        assert result is None
+
+
+# =============================================================================
+# Tests: fetch_tvshow
+# =============================================================================
+
+
+class TestFetchTvshow:
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_metadata(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, TVSHOW_RESPONSE)
+
+        result = fetch_tvshow("129552", "fake_key")
+
+        assert result is not None
+        assert result["rating"] == 7.713
+        assert result["votes"] == 1162
+        assert result["plot"] == "An FBI agent unravels a conspiracy."
+        assert result["genres"] == ["Action & Adventure", "Drama"]
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_certifications_parsed(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, TVSHOW_RESPONSE)
+
+        result = fetch_tvshow("129552", "fake_key")
+
+        assert result is not None
+        assert result["certifications"] == {
+            "US": "TV-MA",
+            "GB": "15",
+            "NL": "16",
+        }
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(401)
+        with pytest.raises(ApiKeyError):
+            fetch_tvshow("129552", "fake_key")
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(404)
+        result = fetch_tvshow("129552", "fake_key")
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_invalid_json(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, raise_for_json=True)
+        result = fetch_tvshow("129552", "fake_key")
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_se_tv_certs_normalized(self, mock_get: MagicMock) -> None:
+        response = dict(TVSHOW_RESPONSE)
+        response["content_ratings"] = {
+            "results": [
+                {"iso_3166_1": "SE", "rating": "Från 15 år"},
+                {"iso_3166_1": "US", "rating": "TV-14"},
+            ],
+        }
+        mock_get.return_value = _mock_response(200, response)
+        result = fetch_tvshow("129552", "fake_key")
+        assert result is not None
+        assert result["certifications"]["SE"] == "15"
+        assert result["certifications"]["US"] == "TV-14"
+
+
+# =============================================================================
+# Tests: resolve_id
+# =============================================================================
+
+
+class TestResolveId:
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_resolves_from_tvdb_id(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, FIND_RESPONSE_TVDB)
+
+        result = resolve_id("fake_key", tvdb_id="395557")
+
+        assert result == "129552"
+        call_kwargs = mock_get.call_args
+        assert "tvdb_id" in call_kwargs[1]["params"]["external_source"]
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_resolves_from_imdb_id(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, FIND_RESPONSE_IMDB)
+
+        result = resolve_id("fake_key", imdb_id="tt13238346")
+
+        assert result == "666277"
+        call_kwargs = mock_get.call_args
+        assert "imdb_id" in call_kwargs[1]["params"]["external_source"]
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_prefers_tvdb_over_imdb(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, FIND_RESPONSE_TVDB)
+
+        resolve_id("fake_key", tvdb_id="395557", imdb_id="tt13238346")
+
+        call_kwargs = mock_get.call_args
+        assert "tvdb_id" in call_kwargs[1]["params"]["external_source"]
+        assert "/find/395557" in call_kwargs[0][0]
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_when_not_found(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, FIND_RESPONSE_EMPTY)
+
+        result = resolve_id("fake_key", tvdb_id="999999")
+
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_when_no_ids_given(self, mock_get: MagicMock) -> None:
+        result = resolve_id("fake_key")
+        assert result is None
+        mock_get.assert_not_called()
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(401)
+        with pytest.raises(ApiKeyError):
+            resolve_id("fake_key", tvdb_id="395557")
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+        import requests as req
+
+        mock_get.side_effect = req.ConnectionError("timeout")
+        result = resolve_id("fake_key", tvdb_id="395557")
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(500)
+        result = resolve_id("fake_key", tvdb_id="395557")
+        assert result is None
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_returns_none_on_invalid_json(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, raise_for_json=True)
+        result = resolve_id("fake_key", tvdb_id="395557")
+        assert result is None

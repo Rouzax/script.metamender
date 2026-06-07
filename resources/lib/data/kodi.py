@@ -26,17 +26,17 @@ log = get_logger('kodi')
 # Base properties requested for all media types
 _BASE_PROPERTIES = [
     "title", "rating", "votes", "plot", "uniqueid",
-    "file", "dateadded", "mpaa",
+    "file", "dateadded",
 ]
 
 # Extra properties per media type name
 _EXTRA_PROPERTIES = {
     "movie": [
-        "tagline", "director", "writer", "genre",
+        "mpaa", "tagline", "director", "writer", "genre",
         "studio", "country", "trailer", "runtime",
     ],
     "tvshow": [
-        "genre",
+        "mpaa", "genre",
     ],
     "episode": [
         "showtitle", "season", "episode",
@@ -86,7 +86,7 @@ def get_all_items(media_type: MediaType) -> List[Dict[str, Any]]:
             data = json.loads(raw)
             timer.mark("parse")
         rpc_ms = int((time.perf_counter() - rpc_start) * 1000)
-    except (json.JSONDecodeError, Exception):
+    except Exception:
         log.exception(
             "Failed to query library",
             event="kodi.query",
@@ -139,7 +139,7 @@ def update_item(
         with log_timing(log, "update_item", media_type=media_type.name, title=title):
             raw = xbmc.executeJSONRPC(json.dumps(query))
             data = json.loads(raw)
-    except (json.JSONDecodeError, Exception):
+    except Exception:
         log.exception(
             "Failed to update item",
             event="kodi.update_fail",

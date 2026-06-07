@@ -151,6 +151,22 @@ def _get_sources_config_path() -> str:
     return os.path.join(addon_data, SOURCES_CONFIG_FILENAME)
 
 
+def _build_show_id_map(tracker: TrackerDB) -> Dict[str, str]:
+    """Build a map of show title to show-level TMDB ID.
+
+    Uses the tracker's tvshow items (populated during the tvshow scan)
+    so the episode scan can look up the correct show TMDB ID.
+    """
+    show_map = {}  # type: Dict[str, str]
+    for item in tracker.get_items_by_status("tvshow", "complete") + \
+                tracker.get_items_by_status("tvshow", "partial") + \
+                tracker.get_items_by_status("tvshow", "pending"):
+        tmdb_id = item.get("tmdb_id")
+        if tmdb_id:
+            show_map[item["title"]] = tmdb_id
+    return show_map
+
+
 def _run_scan(
     tracker: TrackerDB,
     source_config: Dict[str, Any],
@@ -159,15 +175,18 @@ def _run_scan(
 ) -> Dict[str, Dict[str, int]]:
     """Run scan for MOVIE, TVSHOW, and EPISODE in order.
 
+    TV shows are scanned before episodes so their TMDB IDs are
+    available for the episode season lookups.
+
     Returns:
         Dict keyed by media type name with stats dicts as values.
     """
     tmdb_api_key = settings["tmdb_api_key"]
-    enabled_fields: FrozenSet[str] = settings["enabled_fields"]
+    enabled_fields = settings["enabled_fields"]  # type: FrozenSet[str]
 
-    all_stats: Dict[str, Dict[str, int]] = {}
+    all_stats = {}  # type: Dict[str, Dict[str, int]]
 
-    for media_type in (MOVIE, TVSHOW, EPISODE):
+    for media_type in (MOVIE, TVSHOW):
         stats = run_scan(
             media_type=media_type,
             tracker=tracker,
@@ -178,6 +197,25 @@ def _run_scan(
             monitor=monitor,
         )
         all_stats[media_type.name] = stats
+
+    show_id_map = _build_show_id_map(tracker)
+    log.info(
+        "Show ID map built for episode scan",
+        event="service.show_id_map",
+        shows=len(show_id_map),
+    )
+
+    episode_stats = run_scan(
+        media_type=EPISODE,
+        tracker=tracker,
+        source_config=source_config,
+        enabled_fields=enabled_fields,
+        tmdb_api_key=tmdb_api_key,
+        settings=settings,
+        monitor=monitor,
+        show_id_map=show_id_map,
+    )
+    all_stats[EPISODE.name] = episode_stats
 
     return all_stats
 
@@ -201,6 +239,7 @@ def run() -> None:
         while not monitor.abortRequested():
             try:
                 should_scan = False
+                reason = "scheduled"
                 now = time.time()
 
                 # Periodic / startup trigger

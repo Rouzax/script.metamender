@@ -19,7 +19,12 @@ from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.scan import run_scan
-from resources.lib.service.daemon import _get_db_path, _get_sources_config_path, _load_settings
+from resources.lib.service.daemon import (
+    _build_show_id_map,
+    _get_db_path,
+    _get_sources_config_path,
+    _load_settings,
+)
 from resources.lib.utils import StructuredLogger, get_logger, notify
 
 log = get_logger('manual')
@@ -43,9 +48,9 @@ def run() -> None:
         enabled_fields = settings["enabled_fields"]
 
         scan_start = time.perf_counter()
-        all_stats: Dict[str, Dict[str, Any]] = {}
+        all_stats = {}  # type: Dict[str, Dict[str, Any]]
 
-        for media_type in (MOVIE, TVSHOW, EPISODE):
+        for media_type in (MOVIE, TVSHOW):
             stats = run_scan(
                 media_type=media_type,
                 tracker=tracker,
@@ -55,6 +60,18 @@ def run() -> None:
                 settings=settings,
             )
             all_stats[media_type.name] = stats
+
+        show_id_map = _build_show_id_map(tracker)
+        episode_stats = run_scan(
+            media_type=EPISODE,
+            tracker=tracker,
+            source_config=source_config,
+            enabled_fields=enabled_fields,
+            tmdb_api_key=tmdb_api_key,
+            settings=settings,
+            show_id_map=show_id_map,
+        )
+        all_stats[EPISODE.name] = episode_stats
 
         elapsed = round(time.perf_counter() - scan_start, 2)
 
