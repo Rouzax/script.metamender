@@ -127,8 +127,17 @@ class TrackerDB:
             sets=", ".join(set_parts),
         )
 
-        cursor = self._conn.execute(sql, values)
-        self._conn.commit()
+        try:
+            cursor = self._conn.execute(sql, values)
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to upsert item",
+                event="tracker.error",
+                media_type=media_type,
+                title=title,
+            )
+            return -1
 
         log.debug(
             "Item upserted",
@@ -164,11 +173,37 @@ class TrackerDB:
         self, media_type: str, title: str, status: str
     ) -> None:
         """Update the status column for an item."""
-        self._conn.execute(
-            "UPDATE items SET status = ? WHERE media_type = ? AND title = ?",
-            (status, media_type, title),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                "UPDATE items SET status = ? WHERE media_type = ? AND title = ?",
+                (status, media_type, title),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to update item status",
+                event="tracker.error",
+                media_type=media_type,
+                title=title,
+                status=status,
+            )
+            return
+
+        if status == "exhausted":
+            log.info(
+                "Item marked as exhausted",
+                event="tracker.exhausted",
+                media_type=media_type,
+                title=title,
+                status=status,
+            )
+        else:
+            log.debug(
+                "Item status updated",
+                media_type=media_type,
+                title=title,
+                status=status,
+            )
 
     def record_attempt(
         self,
@@ -178,15 +213,33 @@ class TrackerDB:
     ) -> None:
         """Increment attempt_count, set last_scanned to today, set next_retry."""
         today = date.today().isoformat()
-        self._conn.execute(
-            "UPDATE items "
-            "SET attempt_count = attempt_count + 1, "
-            "    last_scanned = ?, "
-            "    next_retry = ? "
+        try:
+            self._conn.execute(
+                "UPDATE items "
+                "SET attempt_count = attempt_count + 1, "
+                "    last_scanned = ?, "
+                "    next_retry = ? "
+                "WHERE media_type = ? AND title = ?",
+                (today, next_retry, media_type, title),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record attempt",
+                event="tracker.error",
+                media_type=media_type,
+                title=title,
+            )
+            return
+
+        # Query the new attempt_count for the log message
+        cursor = self._conn.execute(
+            "SELECT attempt_count FROM items "
             "WHERE media_type = ? AND title = ?",
-            (today, next_retry, media_type, title),
+            (media_type, title),
         )
-        self._conn.commit()
+        row = cursor.fetchone()
+        attempt_count = row["attempt_count"] if row else None
 
         log.debug(
             "Attempt recorded",
@@ -194,6 +247,7 @@ class TrackerDB:
             media_type=media_type,
             title=title,
             next_retry=next_retry,
+            attempt_count=attempt_count,
         )
 
     # ------------------------------------------------------------------
@@ -230,17 +284,34 @@ class TrackerDB:
         """
         item_id = self._get_item_id(media_type, title)
         if item_id is None:
+            log.warning(
+                "Cannot update field status: item not found",
+                event="tracker.field_update",
+                media_type=media_type,
+                title=title,
+                field=field,
+            )
             return
 
         fetched_at = date.today().isoformat() if status == "filled" else None
 
-        self._conn.execute(
-            "INSERT OR REPLACE INTO field_status "
-            "(item_id, field, status, source, vote_count, fetched_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (item_id, field, status, source, vote_count, fetched_at),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO field_status "
+                "(item_id, field, status, source, vote_count, fetched_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (item_id, field, status, source, vote_count, fetched_at),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to update field status",
+                event="tracker.error",
+                media_type=media_type,
+                title=title,
+                field=field,
+            )
+            return
 
         log.debug(
             "Field status updated",
@@ -257,6 +328,12 @@ class TrackerDB:
         """Get a single field_status row, or None if not found."""
         item_id = self._get_item_id(media_type, title)
         if item_id is None:
+            log.debug(
+                "Item not found for field status query",
+                media_type=media_type,
+                title=title,
+                field=field,
+            )
             return None
 
         cursor = self._conn.execute(
@@ -274,6 +351,12 @@ class TrackerDB:
         """Get all field_status rows matching a given status for an item."""
         item_id = self._get_item_id(media_type, title)
         if item_id is None:
+            log.debug(
+                "Item not found for fields by status query",
+                media_type=media_type,
+                title=title,
+                status=status,
+            )
             return []
 
         cursor = self._conn.execute(
@@ -288,22 +371,38 @@ class TrackerDB:
 
     def start_new_cycle(self) -> None:
         """Reset cycle_processed to 0 for all items."""
-        self._conn.execute("UPDATE items SET cycle_processed = 0")
-        self._conn.commit()
+        try:
+            cursor = self._conn.execute("UPDATE items SET cycle_processed = 0")
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to start new cycle",
+                event="tracker.error",
+            )
+            return
 
         log.info(
             "New scan cycle started",
             event="tracker.cycle_start",
+            items_reset=cursor.rowcount,
         )
 
     def mark_cycle_processed(self, media_type: str, title: str) -> None:
         """Mark an item as processed in the current cycle."""
-        self._conn.execute(
-            "UPDATE items SET cycle_processed = 1 "
-            "WHERE media_type = ? AND title = ?",
-            (media_type, title),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                "UPDATE items SET cycle_processed = 1 "
+                "WHERE media_type = ? AND title = ?",
+                (media_type, title),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to mark cycle processed",
+                event="tracker.error",
+                media_type=media_type,
+                title=title,
+            )
 
     def get_unprocessed_items(self, media_type: str) -> List[Dict[str, Any]]:
         """Get items not yet processed in this cycle.
@@ -320,11 +419,18 @@ class TrackerDB:
 
     def set_scan_state(self, key: str, value: str) -> None:
         """Insert or replace a key-value pair in the scan_state table."""
-        self._conn.execute(
-            "INSERT OR REPLACE INTO scan_state (key, value) VALUES (?, ?)",
-            (key, value),
-        )
-        self._conn.commit()
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO scan_state (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to set scan state",
+                event="tracker.error",
+                key=key,
+            )
 
     def get_scan_state(self, key: str) -> Optional[str]:
         """Get a value from the scan_state table, or None if not found."""

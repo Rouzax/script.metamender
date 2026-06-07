@@ -13,6 +13,7 @@ Logging:
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Dict, List
 
 import xbmc
@@ -77,23 +78,31 @@ def get_all_items(media_type: MediaType) -> List[Dict[str, Any]]:
         "id": 1,
     }
 
-    with log_timing(log, "get_all_items", media_type=media_type.name) as timer:
-        raw = xbmc.executeJSONRPC(json.dumps(query))
-        timer.mark("rpc")
-        data = json.loads(raw)
-        timer.mark("parse")
+    try:
+        rpc_start = time.perf_counter()
+        with log_timing(log, "get_all_items", media_type=media_type.name) as timer:
+            raw = xbmc.executeJSONRPC(json.dumps(query))
+            timer.mark("rpc")
+            data = json.loads(raw)
+            timer.mark("parse")
+        rpc_ms = int((time.perf_counter() - rpc_start) * 1000)
+    except (json.JSONDecodeError, Exception):
+        log.exception(
+            "Failed to query library",
+            event="kodi.query",
+            media_type=media_type.name,
+        )
+        return []
 
     result = data.get("result", {})
     items = result.get(media_type.kodi_result_key, [])
 
-    elapsed = timer._phases.get("rpc", 0)
-    elapsed_ms = int(elapsed * 1000)
     log.info(
         "Library queried",
         event="kodi.query",
         media_type=media_type.name,
         count=len(items),
-        elapsed_ms=elapsed_ms,
+        elapsed_ms=rpc_ms,
     )
 
     return items
@@ -126,9 +135,19 @@ def update_item(
         "id": 1,
     }
 
-    with log_timing(log, "update_item", media_type=media_type.name, title=title):
-        raw = xbmc.executeJSONRPC(json.dumps(query))
-        data = json.loads(raw)
+    try:
+        with log_timing(log, "update_item", media_type=media_type.name, title=title):
+            raw = xbmc.executeJSONRPC(json.dumps(query))
+            data = json.loads(raw)
+    except (json.JSONDecodeError, Exception):
+        log.exception(
+            "Failed to update item",
+            event="kodi.update_fail",
+            media_type=media_type.name,
+            title=title,
+            item_id=item_id,
+        )
+        return False
 
     if "error" in data:
         log.warning(

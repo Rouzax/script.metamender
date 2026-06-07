@@ -18,7 +18,7 @@ from typing import Any, Dict, List
 
 import xbmc
 
-from resources.lib.utils import get_logger
+from resources.lib.utils import get_logger, log_timing
 
 log = get_logger('sources')
 
@@ -51,8 +51,16 @@ def load_source_config(config_path: str) -> Dict[str, Any]:
         )
         return dict(_DEFAULT_CONFIG)
 
-    with open(config_path, "r", encoding="utf-8") as fh:
-        config = json.load(fh)
+    try:
+        with open(config_path, "r", encoding="utf-8") as fh:
+            config = json.load(fh)
+    except json.JSONDecodeError:
+        log.warning(
+            "Invalid JSON in source config, using defaults",
+            event="sources.load",
+            path=config_path,
+        )
+        return dict(_DEFAULT_CONFIG)
 
     log.info(
         "Source config loaded",
@@ -76,8 +84,22 @@ def save_source_config(config_path: str, config: Dict[str, Any]) -> None:
     if parent and not os.path.exists(parent):
         os.makedirs(parent, exist_ok=True)
 
-    with open(config_path, "w", encoding="utf-8") as fh:
-        json.dump(config, fh, indent=2)
+    try:
+        with open(config_path, "w", encoding="utf-8") as fh:
+            json.dump(config, fh, indent=2)
+    except (IOError, OSError):
+        log.exception(
+            "Failed to save source config",
+            event="sources.save_fail",
+            path=config_path,
+        )
+        return
+
+    log.info(
+        "Source config saved",
+        event="sources.save",
+        path=config_path,
+    )
 
 
 def discover_sources() -> List[Dict[str, str]]:
@@ -95,16 +117,26 @@ def discover_sources() -> List[Dict[str, str]]:
         "params": {"media": "video"},
         "id": 1,
     }
-    raw = xbmc.executeJSONRPC(json.dumps(query))
-    data = json.loads(raw)
+
+    with log_timing(log, "discover_sources"):
+        raw = xbmc.executeJSONRPC(json.dumps(query))
+        data = json.loads(raw)
 
     result = data.get("result", {})
     sources = result.get("sources", [])
 
-    return [
+    discovered = [
         {"path": s.get("file", ""), "label": s.get("label", "")}
         for s in sources
     ]
+
+    log.info(
+        "Video sources discovered",
+        event="sources.discover",
+        count=len(discovered),
+    )
+
+    return discovered
 
 
 def match_source(
@@ -139,6 +171,7 @@ def match_source(
             event="sources.match",
             file_path=file_path,
             source_path=best_match.get("path", ""),
+            language=best_match.get("language", ""),
         )
         return best_match
 
