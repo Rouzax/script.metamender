@@ -195,3 +195,144 @@ class TrackerDB:
             title=title,
             next_retry=next_retry,
         )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_item_id(self, media_type: str, title: str) -> Optional[int]:
+        """Look up the row id for an item by (media_type, title)."""
+        cursor = self._conn.execute(
+            "SELECT id FROM items WHERE media_type = ? AND title = ?",
+            (media_type, title),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return row["id"]  # type: ignore[no-any-return]
+
+    # ------------------------------------------------------------------
+    # Field status (Task 2.3)
+    # ------------------------------------------------------------------
+
+    def set_field_status(
+        self,
+        media_type: str,
+        title: str,
+        field: str,
+        status: str,
+        source: Optional[str] = None,
+        vote_count: Optional[int] = None,
+    ) -> None:
+        """Insert or replace a field_status row for the given item and field.
+
+        Sets fetched_at to today's date when status is "filled".
+        """
+        item_id = self._get_item_id(media_type, title)
+        if item_id is None:
+            return
+
+        fetched_at = date.today().isoformat() if status == "filled" else None
+
+        self._conn.execute(
+            "INSERT OR REPLACE INTO field_status "
+            "(item_id, field, status, source, vote_count, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (item_id, field, status, source, vote_count, fetched_at),
+        )
+        self._conn.commit()
+
+        log.debug(
+            "Field status updated",
+            event="tracker.field_update",
+            media_type=media_type,
+            title=title,
+            field=field,
+            status=status,
+        )
+
+    def get_field_status(
+        self, media_type: str, title: str, field: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get a single field_status row, or None if not found."""
+        item_id = self._get_item_id(media_type, title)
+        if item_id is None:
+            return None
+
+        cursor = self._conn.execute(
+            "SELECT * FROM field_status WHERE item_id = ? AND field = ?",
+            (item_id, field),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def get_fields_by_status(
+        self, media_type: str, title: str, status: str
+    ) -> List[Dict[str, Any]]:
+        """Get all field_status rows matching a given status for an item."""
+        item_id = self._get_item_id(media_type, title)
+        if item_id is None:
+            return []
+
+        cursor = self._conn.execute(
+            "SELECT * FROM field_status WHERE item_id = ? AND status = ?",
+            (item_id, status),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+
+    # ------------------------------------------------------------------
+    # Cycle tracking and scan state (Task 2.4)
+    # ------------------------------------------------------------------
+
+    def start_new_cycle(self) -> None:
+        """Reset cycle_processed to 0 for all items."""
+        self._conn.execute("UPDATE items SET cycle_processed = 0")
+        self._conn.commit()
+
+        log.info(
+            "New scan cycle started",
+            event="tracker.cycle_start",
+        )
+
+    def mark_cycle_processed(self, media_type: str, title: str) -> None:
+        """Mark an item as processed in the current cycle."""
+        self._conn.execute(
+            "UPDATE items SET cycle_processed = 1 "
+            "WHERE media_type = ? AND title = ?",
+            (media_type, title),
+        )
+        self._conn.commit()
+
+    def get_unprocessed_items(self, media_type: str) -> List[Dict[str, Any]]:
+        """Get items not yet processed in this cycle.
+
+        Excludes items with status 'exhausted' or 'complete'.
+        """
+        cursor = self._conn.execute(
+            "SELECT * FROM items "
+            "WHERE media_type = ? AND cycle_processed = 0 "
+            "AND status NOT IN ('exhausted', 'complete')",
+            (media_type,),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+
+    def set_scan_state(self, key: str, value: str) -> None:
+        """Insert or replace a key-value pair in the scan_state table."""
+        self._conn.execute(
+            "INSERT OR REPLACE INTO scan_state (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        self._conn.commit()
+
+    def get_scan_state(self, key: str) -> Optional[str]:
+        """Get a value from the scan_state table, or None if not found."""
+        cursor = self._conn.execute(
+            "SELECT value FROM scan_state WHERE key = ?",
+            (key,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return row["value"]  # type: ignore[no-any-return]

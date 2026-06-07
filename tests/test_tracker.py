@@ -112,3 +112,124 @@ def test_record_attempt_increments_multiple(tmp_path):
     assert item["attempt_count"] == 2
     assert item["next_retry"] == "2026-07-14"
     db.close()
+
+
+# --- Task 2.3: Field status ---
+
+def test_set_field_status(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
+    db.set_field_status("movie", "Test Movie", "rating", "filled",
+                        source="tmdb", vote_count=500)
+    field = db.get_field_status("movie", "Test Movie", "rating")
+    assert field is not None
+    assert field["status"] == "filled"
+    assert field["source"] == "tmdb"
+    assert field["vote_count"] == 500
+    assert field["fetched_at"] is not None
+    db.close()
+
+
+def test_set_field_status_updates_existing(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
+    db.set_field_status("movie", "Test Movie", "rating", "stale",
+                        source="tmdb", vote_count=5)
+    db.set_field_status("movie", "Test Movie", "rating", "filled",
+                        source="omdb", vote_count=2000)
+    field = db.get_field_status("movie", "Test Movie", "rating")
+    assert field["status"] == "filled"
+    assert field["source"] == "omdb"
+    assert field["vote_count"] == 2000
+    db.close()
+
+
+def test_get_field_status_not_found(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
+    assert db.get_field_status("movie", "Test Movie", "rating") is None
+    db.close()
+
+
+def test_get_fields_by_status(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
+    db.set_field_status("movie", "Test Movie", "rating", "filled", source="tmdb")
+    db.set_field_status("movie", "Test Movie", "plot", "empty")
+    db.set_field_status("movie", "Test Movie", "tagline", "empty")
+    empty = db.get_fields_by_status("movie", "Test Movie", "empty")
+    assert len(empty) == 2
+    assert {f["field"] for f in empty} == {"plot", "tagline"}
+    db.close()
+
+
+def test_get_fields_by_status_empty_result(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
+    assert db.get_fields_by_status("movie", "Test Movie", "filled") == []
+    db.close()
+
+
+# --- Task 2.4: Cycle tracking ---
+
+def test_start_new_cycle_resets_processed(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
+    db.mark_cycle_processed("movie", "Movie A")
+    item = db.get_item("movie", "Movie A")
+    assert item["cycle_processed"] == 1
+    db.start_new_cycle()
+    item = db.get_item("movie", "Movie A")
+    assert item["cycle_processed"] == 0
+    db.close()
+
+
+def test_get_unprocessed_in_cycle(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
+    db.upsert_item("movie", "Movie B", kodi_id=2, tmdb_id="2")
+    db.mark_cycle_processed("movie", "Movie A")
+    unprocessed = db.get_unprocessed_items("movie")
+    assert len(unprocessed) == 1
+    assert unprocessed[0]["title"] == "Movie B"
+    db.close()
+
+
+def test_get_unprocessed_excludes_exhausted(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
+    db.upsert_item("movie", "Movie B", kodi_id=2, tmdb_id="2")
+    db.update_item_status("movie", "Movie A", "exhausted")
+    unprocessed = db.get_unprocessed_items("movie")
+    assert len(unprocessed) == 1
+    assert unprocessed[0]["title"] == "Movie B"
+    db.close()
+
+
+def test_get_unprocessed_excludes_complete(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
+    db.update_item_status("movie", "Movie A", "complete")
+    assert db.get_unprocessed_items("movie") == []
+    db.close()
+
+
+def test_scan_state_persistence(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.set_scan_state("omdb_calls_today", "42")
+    assert db.get_scan_state("omdb_calls_today") == "42"
+    db.close()
+
+
+def test_scan_state_update(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.set_scan_state("omdb_calls_today", "42")
+    db.set_scan_state("omdb_calls_today", "99")
+    assert db.get_scan_state("omdb_calls_today") == "99"
+    db.close()
+
+
+def test_scan_state_not_found(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    assert db.get_scan_state("nonexistent") is None
+    db.close()
