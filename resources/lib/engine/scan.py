@@ -43,7 +43,7 @@ from resources.lib.providers.tmdb import (
     fetch_tvshow as tmdb_fetch_tvshow,
     resolve_id,
 )
-from resources.lib.utils import ApiKeyError, get_logger
+from resources.lib.utils import ApiKeyError, get_logger, is_empty
 
 log = get_logger('scan')
 
@@ -221,25 +221,12 @@ def _extract_fields(
         # for these fields (plot, tagline, credits, genre, runtime, etc.).
         # First-encounter adds already-filled fields to gaps to establish a
         # baseline; we must record them as checked, not clobber them.
-        if not _is_empty_current(current):
+        if not is_empty(current):
             continue
 
         fields[kodi_key] = value
 
     return fields
-
-
-def _is_empty_current(value: Any) -> bool:
-    """Whether the item's current Kodi value counts as empty (overwrite OK)."""
-    if value is None:
-        return True
-    if isinstance(value, str) and value == "":
-        return True
-    if isinstance(value, (int, float)) and value == 0:
-        return True
-    if isinstance(value, list) and len(value) == 0:
-        return True
-    return False
 
 
 def run_scan(

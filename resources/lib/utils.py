@@ -46,6 +46,19 @@ from resources.lib.constants import (
 _TITLE_SEPARATORS = frozenset((" ", ":", "-"))
 
 
+def is_empty(value: Any) -> bool:
+    """Whether a value is effectively empty (None, "", 0, 0.0, or [])."""
+    if value is None:
+        return True
+    if isinstance(value, str) and value == "":
+        return True
+    if isinstance(value, (int, float)) and value == 0:
+        return True
+    if isinstance(value, list) and len(value) == 0:
+        return True
+    return False
+
+
 def normalize_for_compare(text: str) -> str:
     """Strip diacritics and lowercase for accent-insensitive comparison."""
     return "".join(

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from resources.lib.utils import get_logger
+from resources.lib.utils import get_logger, is_empty
 
 log = get_logger('resolve')
 
@@ -31,19 +31,6 @@ _RATING_FIELDS = frozenset({"rating", "votes"})
 _PLOT_FIELDS = frozenset({"plot"})
 
 
-def _is_empty(value: Any) -> bool:
-    """Check whether a value is effectively empty."""
-    if value is None:
-        return True
-    if isinstance(value, str) and value == "":
-        return True
-    if isinstance(value, (int, float)) and value == 0:
-        return True
-    if isinstance(value, list) and len(value) == 0:
-        return True
-    return False
-
-
 def resolve_field(
     field: str,
     tmdb_value: Any,
@@ -56,33 +43,33 @@ def resolve_field(
     "" if both are empty.
     """
     if preference == TMDB_ONLY:
-        if not _is_empty(tmdb_value):
+        if not is_empty(tmdb_value):
             return (tmdb_value, "tmdb")
         return (None, "")
 
     if preference == IMDB_ONLY:
-        if not _is_empty(imdb_value):
+        if not is_empty(imdb_value):
             return (imdb_value, "imdb")
         return (None, "")
 
     if preference == PREFER_TMDB:
-        if not _is_empty(tmdb_value):
+        if not is_empty(tmdb_value):
             return (tmdb_value, "tmdb")
-        if not _is_empty(imdb_value):
+        if not is_empty(imdb_value):
             return (imdb_value, "imdb")
         return (None, "")
 
     if preference == PREFER_IMDB:
-        if not _is_empty(imdb_value):
+        if not is_empty(imdb_value):
             return (imdb_value, "imdb")
-        if not _is_empty(tmdb_value):
+        if not is_empty(tmdb_value):
             return (tmdb_value, "tmdb")
         return (None, "")
 
     # Unknown preference, default to prefer TMDB
-    if not _is_empty(tmdb_value):
+    if not is_empty(tmdb_value):
         return (tmdb_value, "tmdb")
-    if not _is_empty(imdb_value):
+    if not is_empty(imdb_value):
         return (imdb_value, "imdb")
     return (None, "")
 
@@ -129,7 +116,7 @@ def resolve_metadata(
 
         value, source = resolve_field(field, tmdb_val, imdb_val, pref)
 
-        if not _is_empty(value):
+        if not is_empty(value):
             merged[field] = value
             sources[field] = source
 
