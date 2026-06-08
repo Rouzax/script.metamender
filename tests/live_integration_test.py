@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 KODI_URL = os.environ.get("KODI_URL", "http://localhost:8085/jsonrpc")
-TMDB_KEY = os.environ.get("TMDB_API_KEY", "REDACTED_TMDB_KEY")
+TMDB_KEY = os.environ.get("TMDB_API_KEY", "")  # set TMDB_API_KEY env var to run
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
