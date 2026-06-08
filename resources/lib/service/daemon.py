@@ -39,6 +39,7 @@ from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
+from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.utils import (
     KodiQueryError,
     StructuredLogger,
@@ -305,91 +306,108 @@ def run() -> None:
                         last_scan = time.time()
                         should_scan = False
 
+                if should_scan and not acquire_scan_lock():
+                    log.info(
+                        "Scan already running elsewhere, skipping",
+                        event="service.locked",
+                    )
+                    should_scan = False
+
                 if should_scan:
-                    StructuredLogger.start_scan_log()
-
-                    kodi_filter = None  # type: Optional[Dict[str, str]]
-                    if reason == "library_event":
-                        last_completed = tracker.get_scan_state("last_scan_completed")
-                        if last_completed:
-                            kodi_filter = {
-                                "field": "dateadded",
-                                "operator": "after",
-                                "value": last_completed,
-                            }
-
-                    log.info(
-                        "Scan triggered",
-                        event="service.scan_trigger",
-                        reason=reason,
-                        targeted=kodi_filter is not None,
-                    )
-
-                    source_config = load_source_config(
-                        _get_sources_config_path()
-                    )
-
-                    if not settings["resume_interrupted"]:
-                        tracker.start_new_cycle()
-
-                    scan_start = time.perf_counter()
+                    # Lock acquired above; release on EVERY exit path
+                    # (success, KodiQueryError continue, unexpected error).
                     try:
-                        all_stats = _run_scan(
-                            tracker, source_config, settings, monitor,
-                            kodi_filter=kodi_filter,
-                        )
-                    except KodiQueryError:
-                        # A Kodi library query failed (RPC/parse error), which
-                        # is NOT an empty library. Treat the cycle as FAILED:
-                        # do not advance the schedule or the watermark, and do
-                        # not clear a library-event request, so it retries.
-                        # Set a short backoff instead of a full interval so the
-                        # next loop re-attempts soon without hammering Kodi.
-                        log.exception(
-                            "Scan aborted on Kodi query failure",
-                            event="service.scan_failed",
+                        StructuredLogger.start_scan_log()
+
+                        kodi_filter = None  # type: Optional[Dict[str, str]]
+                        if reason == "library_event":
+                            last_completed = tracker.get_scan_state(
+                                "last_scan_completed"
+                            )
+                            if last_completed:
+                                kodi_filter = {
+                                    "field": "dateadded",
+                                    "operator": "after",
+                                    "value": last_completed,
+                                }
+
+                        log.info(
+                            "Scan triggered",
+                            event="service.scan_trigger",
                             reason=reason,
+                            targeted=kodi_filter is not None,
                         )
-                        next_retry_after = time.time() + SCAN_FAILURE_BACKOFF_SEC
-                        continue
+
+                        source_config = load_source_config(
+                            _get_sources_config_path()
+                        )
+
+                        if not settings["resume_interrupted"]:
+                            tracker.start_new_cycle()
+
+                        scan_start = time.perf_counter()
+                        try:
+                            all_stats = _run_scan(
+                                tracker, source_config, settings, monitor,
+                                kodi_filter=kodi_filter,
+                            )
+                        except KodiQueryError:
+                            # A Kodi library query failed (RPC/parse error),
+                            # which is NOT an empty library. Treat the cycle as
+                            # FAILED: do not advance the schedule or the
+                            # watermark, and do not clear a library-event
+                            # request, so it retries. Set a short backoff
+                            # instead of a full interval so the next loop
+                            # re-attempts soon without hammering Kodi.
+                            log.exception(
+                                "Scan aborted on Kodi query failure",
+                                event="service.scan_failed",
+                                reason=reason,
+                            )
+                            next_retry_after = (
+                                time.time() + SCAN_FAILURE_BACKOFF_SEC
+                            )
+                            continue
+                        finally:
+                            StructuredLogger.stop_scan_log()
+
+                        elapsed = round(time.perf_counter() - scan_start, 2)
+
+                        movie_stats = all_stats.get("movie", {})
+                        tvshow_stats = all_stats.get("tvshow", {})
+                        episode_stats = all_stats.get("episode", {})
+
+                        log.info(
+                            "Scan complete",
+                            event="service.scan_complete",
+                            movies_updated=movie_stats.get("updated", 0),
+                            tvshows_updated=tvshow_stats.get("updated", 0),
+                            episodes_updated=episode_stats.get("updated", 0),
+                            total_elapsed_sec=elapsed,
+                        )
+
+                        last_scan = time.time()
+                        monitor.clear_scan_request()
+                        tracker.set_scan_state(
+                            "last_scan_completed",
+                            time.strftime("%Y-%m-%d %H:%M:%S"),
+                        )
+
+                        # Notification
+                        if settings["show_notifications"]:
+                            total_updated = (
+                                movie_stats.get("updated", 0)
+                                + tvshow_stats.get("updated", 0)
+                                + episode_stats.get("updated", 0)
+                            )
+                            parts = []
+                            if total_updated:
+                                parts.append("{} updated".format(total_updated))
+                            if not parts:
+                                parts.append("No changes")
+                            notify(", ".join(parts))
                     finally:
-                        StructuredLogger.stop_scan_log()
-
-                    elapsed = round(time.perf_counter() - scan_start, 2)
-
-                    movie_stats = all_stats.get("movie", {})
-                    tvshow_stats = all_stats.get("tvshow", {})
-                    episode_stats = all_stats.get("episode", {})
-
-                    log.info(
-                        "Scan complete",
-                        event="service.scan_complete",
-                        movies_updated=movie_stats.get("updated", 0),
-                        tvshows_updated=tvshow_stats.get("updated", 0),
-                        episodes_updated=episode_stats.get("updated", 0),
-                        total_elapsed_sec=elapsed,
-                    )
-
-                    last_scan = time.time()
-                    monitor.clear_scan_request()
-                    tracker.set_scan_state(
-                        "last_scan_completed",
-                        time.strftime("%Y-%m-%d %H:%M:%S"),
-                    )
-
-                    # Notification
-                    if settings["show_notifications"]:
-                        total_updated = (
-                            movie_stats.get("updated", 0)
-                            + tvshow_stats.get("updated", 0)
-                            + episode_stats.get("updated", 0)
-                        )
-                        parts = []
-                        if total_updated:
-                            parts.append("{} updated".format(total_updated))
-                        if not parts:
-                            parts.append("No changes")
-                        notify(", ".join(parts))
+                        release_scan_lock()
 
             except Exception:
                 log.exception("Scan cycle failed", event="service.scan_error")

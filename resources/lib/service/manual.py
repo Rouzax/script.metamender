@@ -25,6 +25,7 @@ from resources.lib.service.daemon import (
     _get_sources_config_path,
     _load_settings,
 )
+from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.utils import (
     StructuredLogger,
@@ -52,6 +53,7 @@ def run() -> None:
     log.info("Manual scan started", event="manual.start")
 
     tracker = None
+    locked = False
 
     try:
         settings = _load_settings()
@@ -62,6 +64,14 @@ def run() -> None:
                 event="manual.skip_no_key",
             )
             return
+
+        if not acquire_scan_lock():
+            log.info(
+                "A scan is already running, skipping",
+                event="manual.locked",
+            )
+            return
+        locked = True
 
         tracker = TrackerDB(_get_db_path())
         source_config = load_source_config(_get_sources_config_path())
@@ -135,6 +145,8 @@ def run() -> None:
         log.exception("Manual scan failed", event="manual.error")
 
     finally:
+        if locked:
+            release_scan_lock()
         StructuredLogger.stop_scan_log()
         if tracker is not None:
             tracker.close()
