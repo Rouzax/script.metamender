@@ -1,8 +1,7 @@
 """Tests for gap detection."""
 from __future__ import annotations
 
-from resources.lib.data.media_types import EPISODE, MOVIE
-from resources.lib.engine.gaps import detect_gaps, is_field_empty, is_placeholder_title
+from resources.lib.engine.gaps import is_field_empty, is_placeholder_title
 
 
 class TestIsFieldEmpty:
@@ -85,59 +84,3 @@ class TestIsPlaceholderTitle:
     def test_placeholder_real_title_not_matched(self):
         assert is_placeholder_title("Afsnittet om kärlek") is False
         assert is_placeholder_title("The Pilot") is False
-
-
-class TestDetectGaps:
-    def test_empty_rating_is_gap(self):
-        item = {"rating": 0, "plot": "A plot", "tagline": "Tag", "mpaa": "PG"}
-        gaps = detect_gaps(item, frozenset({"rating", "plot", "tagline"}), MOVIE)
-        assert "rating" in gaps
-        assert "plot" not in gaps
-
-    def test_empty_plot_is_gap(self):
-        item = {"rating": 7.5, "plot": "", "mpaa": "PG"}
-        gaps = detect_gaps(item, frozenset({"rating", "plot"}), MOVIE)
-        assert "plot" in gaps
-        assert "rating" not in gaps
-
-    def test_disabled_field_not_reported(self):
-        item = {"rating": 0, "plot": ""}
-        gaps = detect_gaps(item, frozenset({"rating"}), MOVIE)
-        assert "rating" in gaps
-        assert "plot" not in gaps
-
-    def test_field_not_in_media_type_excluded(self):
-        item = {"rating": 0, "tagline": ""}
-        # TVSHOW doesn't have tagline in backfill_fields
-        gaps = detect_gaps(item, frozenset({"rating", "tagline"}), MOVIE)
-        assert "tagline" in gaps
-        # But for TVSHOW:
-        from resources.lib.data.media_types import TVSHOW
-        gaps2 = detect_gaps(item, frozenset({"rating", "tagline"}), TVSHOW)
-        assert "tagline" not in gaps2
-
-    def test_placeholder_title_is_gap_for_episodes(self):
-        item = {"title": "Episode 1", "rating": 8.0, "plot": "A plot"}
-        gaps = detect_gaps(item, frozenset({"title", "rating", "plot"}), EPISODE)
-        assert "title" in gaps
-
-    def test_real_title_not_gap_for_episodes(self):
-        item = {"title": "Call Tracking", "rating": 8.0, "plot": "A plot"}
-        gaps = detect_gaps(item, frozenset({"title", "rating", "plot"}), EPISODE)
-        assert "title" not in gaps
-
-    def test_title_not_checked_for_movies(self):
-        # Movies don't have "title" in backfill_fields
-        item = {"title": "", "rating": 0}
-        gaps = detect_gaps(item, frozenset({"title", "rating"}), MOVIE)
-        assert "title" not in gaps
-
-    def test_all_filled_returns_empty(self):
-        item = {"rating": 7.5, "plot": "Good movie", "tagline": "Tag", "mpaa": "PG-13"}
-        gaps = detect_gaps(item, frozenset({"rating", "plot", "tagline"}), MOVIE)
-        assert gaps == []
-
-    def test_multiple_gaps(self):
-        item = {"rating": 0, "plot": "", "tagline": "", "mpaa": ""}
-        gaps = detect_gaps(item, frozenset({"rating", "plot", "tagline", "mpaa"}), MOVIE)
-        assert set(gaps) == {"rating", "plot", "tagline", "mpaa"}

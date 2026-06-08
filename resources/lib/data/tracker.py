@@ -424,6 +424,27 @@ class TrackerDB:
                 media_type=media_type, title=identity, field=field,
             )
 
+    def set_field_next_retry(
+        self, media_type: str, identity: str, field: str, next_retry: Optional[str]
+    ) -> None:
+        """Set a field's next_retry value (no-op if the item/field is missing)."""
+        item_id = self._get_item_id(media_type, identity)
+        if item_id is None:
+            return
+        try:
+            self._conn.execute(
+                "UPDATE field_status SET next_retry = ? "
+                "WHERE item_id = ? AND field = ?",
+                (next_retry, item_id, field),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to set field next_retry",
+                event="tracker.error",
+                media_type=media_type, title=identity, field=field,
+            )
+
     def get_field_status(
         self, media_type: str, identity: str, field: str
     ) -> Optional[Dict[str, Any]]:
@@ -447,6 +468,18 @@ class TrackerDB:
             return None
         return dict(row)
 
+    def get_field_status_map(
+        self, media_type: str, identity: str
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return {field: row_dict} for all field_status rows of an item."""
+        item_id = self._get_item_id(media_type, identity)
+        if item_id is None:
+            return {}
+        cursor = self._conn.execute(
+            "SELECT * FROM field_status WHERE item_id = ?", (item_id,)
+        )
+        return {row["field"]: dict(row) for row in cursor.fetchall()}
+
     def get_fields_by_status(
         self, media_type: str, identity: str, status: str
     ) -> List[Dict[str, Any]]:
@@ -466,17 +499,6 @@ class TrackerDB:
             (item_id, status),
         )
         return [dict(r) for r in cursor.fetchall()]
-
-    def get_checked_fields(self, media_type: str, identity: str) -> set:
-        """Return the set of field names that have any field_status entry."""
-        item_id = self._get_item_id(media_type, identity)
-        if item_id is None:
-            return set()
-        cursor = self._conn.execute(
-            "SELECT DISTINCT field FROM field_status WHERE item_id = ?",
-            (item_id,),
-        )
-        return {row["field"] for row in cursor.fetchall()}
 
     # ------------------------------------------------------------------
     # Cycle tracking and scan state (Task 2.4)

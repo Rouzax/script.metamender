@@ -188,29 +188,34 @@ def test_get_fields_by_status_empty_result(tmp_path):
     db.close()
 
 
-def test_get_checked_fields(tmp_path):
+def test_get_field_status_map(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
-    db.set_field_status("movie", "Test Movie", "rating", "filled",
-                        source="tmdb", vote_count=500)
-    db.set_field_status("movie", "Test Movie", "plot", "empty")
-    checked = db.get_checked_fields("movie", "Test Movie")
-    assert checked == {"rating", "plot"}
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.set_field_status("movie", "tmdb:1", "plot", "filled", source="tmdb")
+    db.set_field_status("movie", "tmdb:1", "tagline", "empty")
+    m = db.get_field_status_map("movie", "tmdb:1")
+    assert set(m.keys()) == {"plot", "tagline"}
+    assert m["plot"]["status"] == "filled"
+    assert m["tagline"]["status"] == "empty"
+    assert db.get_field_status_map("movie", "unknown") == {}
     db.close()
 
 
-def test_get_checked_fields_empty(tmp_path):
+def test_set_field_next_retry(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
-    checked = db.get_checked_fields("movie", "Test Movie")
-    assert checked == set()
-    db.close()
-
-
-def test_get_checked_fields_unknown_item(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    checked = db.get_checked_fields("movie", "Unknown")
-    assert checked == set()
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.set_field_status("movie", "tmdb:1", "plot", "empty")
+    db.set_field_next_retry("movie", "tmdb:1", "plot", "2026-12-01")
+    fs = db.get_field_status("movie", "tmdb:1", "plot")
+    assert fs is not None
+    assert fs["next_retry"] == "2026-12-01"
+    # Clearing it back to None goes permanent
+    db.set_field_next_retry("movie", "tmdb:1", "plot", None)
+    fs = db.get_field_status("movie", "tmdb:1", "plot")
+    assert fs is not None
+    assert fs["next_retry"] is None
+    # No-op on a missing item/field
+    db.set_field_next_retry("movie", "unknown", "plot", "2026-12-01")
     db.close()
 
 

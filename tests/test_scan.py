@@ -1,6 +1,7 @@
 """Tests for scan orchestrator."""
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any, Dict  # noqa: F401 (used in type comments)
 from unittest.mock import MagicMock, patch
 
@@ -184,6 +185,41 @@ def _tmdb_episode_data(**overrides):
     }
     base.update(overrides)
     return base
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _field_due
+# ---------------------------------------------------------------------------
+
+
+def test_field_due_no_row_is_due():
+    from resources.lib.engine.scan import _field_due
+    assert _field_due(None, "2026-06-08") is True
+
+
+def test_field_due_empty_future_retry_not_due():
+    from resources.lib.engine.scan import _field_due
+    assert _field_due({"status": "empty", "next_retry": "2026-12-01"}, "2026-06-08") is False
+
+
+def test_field_due_empty_past_retry_is_due():
+    from resources.lib.engine.scan import _field_due
+    assert _field_due({"status": "empty", "next_retry": "2026-01-01"}, "2026-06-08") is True
+
+
+def test_field_due_exhausted_permanent_not_due():
+    from resources.lib.engine.scan import _field_due
+    assert _field_due({"status": "exhausted", "next_retry": None}, "2026-06-08") is False
+
+
+def test_field_due_exhausted_autoretry_due():
+    from resources.lib.engine.scan import _field_due
+    assert _field_due({"status": "exhausted", "next_retry": "2026-01-01"}, "2026-06-08") is True
+
+
+def test_field_due_filled_not_due():
+    from resources.lib.engine.scan import _field_due
+    assert _field_due({"status": "filled", "next_retry": None}, "2026-06-08") is False
 
 
 # ---------------------------------------------------------------------------
@@ -502,9 +538,10 @@ class TestRunScanMovies:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_tmdb_returns_none_records_attempt(
+    def test_tmdb_returns_none_records_field_attempt(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
+        """No data: the per-field attempt is recorded on the field, not the item."""
         mock_get_all.return_value = [_make_movie_item()]
         mock_fetch.return_value = None
 
@@ -517,7 +554,13 @@ class TestRunScanMovies:
 
         item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item is not None
-        assert item["attempt_count"] == 1
+        # Item-level attempt_count is now vestigial (per-field model)
+        assert item["attempt_count"] == 0
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field is not None
+        assert field["attempt_count"] == 1
+        assert field["next_retry"] is not None
+        assert field["status"] == "empty"
         tracker.close()
 
     @patch("resources.lib.engine.scan.get_all_items")
@@ -567,10 +610,14 @@ class TestRunScanMovies:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_partial_fill_records_attempt(
+    def test_partial_fill_records_field_attempt(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
-        """When TMDB fills some but not all gaps, attempt is recorded."""
+        """When TMDB fills some but not all gaps, only the unfilled field retries.
+
+        The filled field is 'filled'; the unfilled field records a per-field
+        attempt; the item rolls up to 'partial'.
+        """
         mock_get_all.return_value = [_make_movie_item()]
         # TMDB returns rating but not plot
         mock_fetch.return_value = _tmdb_movie_response(plot="")
@@ -585,7 +632,14 @@ class TestRunScanMovies:
 
         item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item is not None
-        assert item["attempt_count"] == 1
+        assert item["status"] == "partial"
+        rating = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert rating is not None
+        assert rating["status"] == "filled"
+        plot = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        assert plot is not None
+        assert plot["status"] == "empty"
+        assert plot["attempt_count"] == 1
         tracker.close()
 
     @patch("resources.lib.engine.scan.get_all_items")
@@ -781,7 +835,12 @@ class TestRunScanMovies:
         item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item is not None
         assert item["status"] != "complete"
-        assert item["attempt_count"] == 1
+        # A failed write leaves the field unresolved -> a per-field attempt is
+        # recorded so it is retried (A9).
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field is not None
+        assert field["status"] == "empty"
+        assert field["attempt_count"] == 1
         tracker.close()
 
 
@@ -887,7 +946,10 @@ class TestRunScanEpisodes:
 
         item = tracker.get_item("episode", "Test Show S01E01")
         assert item is not None
-        assert item["attempt_count"] == 1
+        # Per-field model: the rating field records the retry attempt.
+        field = tracker.get_field_status("episode", "Test Show S01E01", "rating")
+        assert field is not None
+        assert field["attempt_count"] == 1
         assert stats["updated"] == 0
         tracker.close()
 
@@ -1047,14 +1109,16 @@ class TestRunScanStaleness:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_skips_exhausted_item(
+    def test_skips_permanently_exhausted_field(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
+        """A permanently-exhausted field (next_retry None) is not re-attempted."""
         mock_get_all.return_value = [_make_movie_item()]
         tracker = _make_tracker(tmp_path)
-        # Pre-seed tracker as exhausted
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        tracker.update_item_status("movie", _MOVIE_IDENTITY, "exhausted")
+        # The only enabled field is permanently exhausted.
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "rating", "exhausted")
+        tracker.set_field_next_retry("movie", _MOVIE_IDENTITY, "rating", None)
 
         stats = run_scan(
             MOVIE, tracker, _make_source_config(),
@@ -1069,14 +1133,16 @@ class TestRunScanStaleness:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_skips_item_before_retry_date(
+    def test_skips_field_before_retry_date(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
+        """A field whose next_retry is in the future is not re-attempted."""
         mock_get_all.return_value = [_make_movie_item()]
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        # Set next_retry to far future
-        tracker.record_attempt("movie", _MOVIE_IDENTITY, next_retry="2099-01-01")
+        # The rating field has a far-future retry date.
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "rating", "empty")
+        tracker.set_field_next_retry("movie", _MOVIE_IDENTITY, "rating", "2099-01-01")
 
         stats = run_scan(
             MOVIE, tracker, _make_source_config(),
@@ -1091,17 +1157,19 @@ class TestRunScanStaleness:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_processes_item_past_retry_date(
+    def test_processes_field_past_retry_date(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
+        """A field whose next_retry has passed is re-attempted."""
         mock_get_all.return_value = [_make_movie_item()]
         mock_fetch.return_value = _tmdb_movie_response()
         mock_update.return_value = True
 
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        # Set next_retry to past
-        tracker.record_attempt("movie", _MOVIE_IDENTITY, next_retry="2020-01-01")
+        # The rating field is empty with a past retry date -> due.
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "rating", "empty")
+        tracker.set_field_next_retry("movie", _MOVIE_IDENTITY, "rating", "2020-01-01")
 
         stats = run_scan(
             MOVIE, tracker, _make_source_config(),
@@ -1115,64 +1183,227 @@ class TestRunScanStaleness:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_marks_exhausted_after_max_retries(
+    def test_field_marks_exhausted_after_max_retries(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
+        """A field reaching max_retries with no data becomes exhausted.
+
+        Exhaustion is per-field. The field gets ONE auto-retry scheduled
+        (next_retry ~EXHAUSTED_AUTORETRY_DAYS out, not None). When the only
+        gap field is exhausted, the item rolls up to 'exhausted'.
+        """
+        from resources.lib.constants import EXHAUSTED_AUTORETRY_DAYS
+
         mock_get_all.return_value = [_make_movie_item()]
         mock_fetch.return_value = None  # TMDB returns nothing
 
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        # Simulate 3 previous attempts (max is 4)
+        # Simulate 3 previous field attempts (max is 4); the 4th exhausts.
         for _ in range(3):
-            tracker.record_attempt("movie", _MOVIE_IDENTITY, next_retry="2020-01-01")
+            tracker.record_field_attempt(
+                "movie", _MOVIE_IDENTITY, "rating", next_retry="2020-01-01"
+            )
 
         settings = _make_settings()
         settings["max_retries"] = 4
 
-        stats = run_scan(
+        run_scan(
             MOVIE, tracker, _make_source_config(),
             frozenset({"rating"}),
             "fake_key", settings,
         )
 
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field is not None
+        assert field["status"] == "exhausted"
+        assert field["attempt_count"] == 4
+        # One auto-retry is scheduled (not permanent yet).
+        assert field["next_retry"] is not None
+        expected = (date.today() + timedelta(days=EXHAUSTED_AUTORETRY_DAYS)).isoformat()
+        assert field["next_retry"] == expected
+
         item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item["status"] == "exhausted"
-        assert item["attempt_count"] == 4
         tracker.close()
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_attempt_count_increments_correctly(
+    def test_field_attempt_count_increments_correctly(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
+        """The per-field attempt_count increments each time the field retries."""
         mock_get_all.return_value = [_make_movie_item()]
         mock_fetch.return_value = None
 
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
 
-        # First scan
+        # First scan: rating is a first-encounter gap, no data -> attempt 1.
         run_scan(MOVIE, tracker, _make_source_config(),
                  frozenset({"rating"}), "fake_key", _make_settings())
 
-        item = tracker.get_item("movie", _MOVIE_IDENTITY)
-        assert item["attempt_count"] == 1
-        assert item["next_retry"] is not None
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field["attempt_count"] == 1
+        assert field["next_retry"] is not None
 
-        # Set next_retry to past so second scan processes the item
-        tracker.record_attempt("movie", _MOVIE_IDENTITY, next_retry="2020-01-01")
-        # attempt_count is now 2 from the manual record_attempt
+        # Back-date the field's next_retry so the next scan re-attempts it.
+        tracker.set_field_next_retry("movie", _MOVIE_IDENTITY, "rating", "2020-01-01")
 
-        # Start new cycle so cycle_processed is reset
+        # Start new cycle so cycle_processed is reset.
         tracker.start_new_cycle()
         run_scan(MOVIE, tracker, _make_source_config(),
                  frozenset({"rating"}), "fake_key", _make_settings())
 
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        # 1 from first scan + 1 from second scan.
+        assert field["attempt_count"] == 2
+        tracker.close()
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: per-field retry and exhaustion (D2)
+# ---------------------------------------------------------------------------
+
+
+class TestRunScanPerFieldRetry:
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_one_dead_field_does_not_block_a_good_field(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """A field with no data records its own attempt and stays empty while a
+        different field that has data is filled. The item rolls up to partial."""
+        mock_get_all.return_value = [_make_movie_item()]
+        # TMDB provides plot but no tagline.
+        mock_fetch.return_value = _tmdb_movie_response(tagline="")
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot", "tagline"}),
+            "fake_key", _make_settings(),
+        )
+
+        plot = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        assert plot is not None
+        assert plot["status"] == "filled"
+        tagline = tracker.get_field_status("movie", _MOVIE_IDENTITY, "tagline")
+        assert tagline is not None
+        assert tagline["status"] == "empty"
+        assert tagline["attempt_count"] == 1
         item = tracker.get_item("movie", _MOVIE_IDENTITY)
-        # Should be 3: 1 from first scan + 1 manual + 1 from second scan
-        assert item["attempt_count"] == 3
+        assert item["status"] == "partial"
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_permanently_exhausted_field_is_not_a_gap_and_does_not_block_complete(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """A permanently-exhausted field is not re-attempted (not a gap), so it
+        does not count against rollup: when the only remaining gap fills, the
+        item is complete and the dead field is left exhausted."""
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = _tmdb_movie_response(tagline="")
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        # tagline already permanently exhausted; plot is fresh.
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "tagline", "exhausted")
+        tracker.set_field_next_retry("movie", _MOVIE_IDENTITY, "tagline", None)
+
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot", "tagline"}),
+            "fake_key", _make_settings(),
+        )
+
+        plot = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        assert plot is not None
+        assert plot["status"] == "filled"
+        # tagline is left untouched (not a gap; permanently exhausted).
+        tagline = tracker.get_field_status("movie", _MOVIE_IDENTITY, "tagline")
+        assert tagline is not None
+        assert tagline["status"] == "exhausted"
+        assert tagline["next_retry"] is None
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
+        assert item["status"] == "complete"
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_all_gap_fields_exhausted_rolls_up_to_exhausted(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """When every gap field exhausts in the same pass, item -> exhausted."""
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = None
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        # Both fields are at attempt 3 (next attempt exhausts at max 4).
+        for fld in ("plot", "tagline"):
+            for _ in range(3):
+                tracker.record_field_attempt(
+                    "movie", _MOVIE_IDENTITY, fld, next_retry="2020-01-01"
+                )
+
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot", "tagline"}),
+            "fake_key", _make_settings(),
+        )
+
+        for fld in ("plot", "tagline"):
+            field = tracker.get_field_status("movie", _MOVIE_IDENTITY, fld)
+            assert field["status"] == "exhausted"
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
+        assert item["status"] == "exhausted"
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_field_exhausts_while_sibling_still_retries(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """One field reaching max_retries exhausts; a sibling with fewer attempts
+        keeps retrying (records a normal attempt, stays empty)."""
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = None
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        # tagline is one attempt from exhaustion; plot is fresh-ish.
+        for _ in range(3):
+            tracker.record_field_attempt(
+                "movie", _MOVIE_IDENTITY, "tagline", next_retry="2020-01-01"
+            )
+        tracker.record_field_attempt(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry="2020-01-01"
+        )
+
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot", "tagline"}),
+            "fake_key", _make_settings(),
+        )
+
+        tagline = tracker.get_field_status("movie", _MOVIE_IDENTITY, "tagline")
+        assert tagline["status"] == "exhausted"
+        assert tagline["attempt_count"] == 4
+        plot = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        assert plot["status"] == "empty"
+        assert plot["attempt_count"] == 2
+        assert plot["next_retry"] is not None
+        # Mixed: one exhausted, one still retryable -> item is partial.
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
+        assert item["status"] == "partial"
         tracker.close()
 
 

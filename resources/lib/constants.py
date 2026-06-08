@@ -75,6 +75,10 @@ SCHEMA_VERSION = 2
 RETRY_INTERVALS = (7, 30, 90)
 DEFAULT_MAX_RETRIES = 4
 
+# Days after a field exhausts before it gets ONE automatic re-attempt; if that
+# also finds nothing, the field is permanently exhausted (next_retry cleared).
+EXHAUSTED_AUTORETRY_DAYS = 180
+
 # Disable a provider after this many consecutive failures in a single scan
 PROVIDER_CIRCUIT_BREAKER_THRESHOLD = 5
 

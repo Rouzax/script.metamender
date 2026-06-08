@@ -18,7 +18,7 @@ Logging:
 from __future__ import annotations
 
 import time
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 import xbmc
@@ -28,9 +28,12 @@ from resources.lib.data.kodi import get_all_items, update_item
 from resources.lib.data.media_types import MediaType
 from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
-from resources.lib.constants import PROVIDER_CIRCUIT_BREAKER_THRESHOLD
+from resources.lib.constants import (
+    EXHAUSTED_AUTORETRY_DAYS,
+    PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
+)
 from resources.lib.engine.breaker import CircuitBreaker
-from resources.lib.engine.gaps import detect_gaps, is_placeholder_title
+from resources.lib.engine.gaps import is_field_empty, is_placeholder_title
 from resources.lib.engine.resolve import TMDB_ONLY, build_ratings, resolve_metadata
 from resources.lib.engine.staleness import compute_next_retry, is_rating_stale
 from resources.lib.providers.imdbapi import (
@@ -85,28 +88,52 @@ def _make_stats() -> Dict[str, Any]:
     }
 
 
-def _record_attempt_with_retry(
-    tracker: TrackerDB,
-    media_type_name: str,
-    identity: str,
-    max_retries: int,
-) -> None:
-    """Record an attempt and set next retry or mark exhausted.
+def _field_due(fs: Optional[Dict[str, Any]], today: str) -> bool:
+    """Whether a field should be (re)attempted this scan, given its status row.
 
-    Reads the current attempt count from the tracker, computes the
-    next retry date for attempt_count + 1, then calls record_attempt
-    (which increments the count). If retries are exhausted, marks the
-    item as exhausted.
+    None row -> first encounter (due). 'filled'/'checked'/'skipped' -> not due.
+    'empty'/'exhausted' -> due only if next_retry is set and has passed.
+    (A permanently-exhausted field has next_retry None -> not due.)
     """
-    tracker_item = tracker.get_item(media_type_name, identity)
-    current_count = tracker_item["attempt_count"] if tracker_item else 0
-    next_attempt = current_count + 1
-    next_retry_date = compute_next_retry(next_attempt, max_retries)
+    if fs is None:
+        return True
+    status = fs.get("status")
+    if status in ("filled", "checked", "skipped"):
+        return False
+    next_retry = fs.get("next_retry")
+    if not next_retry:
+        # 'empty' with no next_retry = never attempted yet -> due;
+        # 'exhausted' with no next_retry = permanent -> not due.
+        return status != "exhausted"
+    return next_retry <= today
 
-    tracker.record_attempt(media_type_name, identity, next_retry=next_retry_date)
 
-    if next_retry_date is None:
-        tracker.update_item_status(media_type_name, identity, "exhausted")
+def _rating_is_stale(
+    item: Dict[str, Any],
+    media_type: MediaType,
+    fs: Optional[Dict[str, Any]],
+    settings: Dict[str, Any],
+) -> bool:
+    """Return whether a filled rating is stale and should be re-fetched.
+
+    Uses the per-type minimum vote threshold (episodes use min_votes_episode,
+    movies/TV shows use min_votes_movie) and the staleness window. Returns
+    False when there is no recorded field status row to evaluate.
+    """
+    if fs is None:
+        return False
+    if media_type.name == "episode":
+        min_votes = settings.get("min_votes_episode", 20)
+    else:
+        min_votes = settings.get("min_votes_movie", 50)
+    stale_days = settings.get("stale_threshold_days", 365)
+    return is_rating_stale(
+        premiered=item.get(media_type.date_field, ""),
+        vote_count=fs.get("vote_count") or 0,
+        last_fetched=fs.get("fetched_at"),
+        min_votes=min_votes,
+        stale_threshold_days=stale_days,
+    )
 
 
 def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
@@ -389,111 +416,40 @@ def run_scan(
         )
         tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
 
-        # Detect gaps
-        gaps = detect_gaps(item, enabled_fields, media_type)
+        # Per-field gap construction. Each enabled, writable field is
+        # evaluated independently: its own field_status row decides whether
+        # it is due (first encounter, empty-and-due, or exhausted auto-retry)
+        # and whether a filled value is still present in Kodi or stale.
+        today = date.today().isoformat()
+        fs_map = tracker.get_field_status_map(media_type.name, identity)
 
-        # Check tracker state for retry gating and staleness
-        tracker_item = tracker.get_item(media_type.name, identity)
-        if tracker_item is not None:
-            # Skip exhausted items
-            if tracker_item["status"] == "exhausted":
-                log.debug(
-                    "Skipping exhausted item",
-                    event="scan.skip",
-                    title=title,
-                    media_type=media_type.name,
-                    attempt_count=tracker_item["attempt_count"],
-                )
-                tracker.mark_cycle_processed(media_type.name, identity)
-                stats["skipped"] += 1
+        candidate_fields = (
+            {_TMDB_TO_KODI.get(k, k) for k in _TMDB_TO_KODI}
+            & enabled_fields & media_type.backfill_fields
+        )
+
+        gaps = []  # type: List[str]
+        for field in sorted(candidate_fields):
+            fs = fs_map.get(field)
+            # Title is only a gap for episodes with a placeholder title
+            if field == "title":
+                if (media_type.name == "episode"
+                        and is_placeholder_title(item.get("title", ""))):
+                    if _field_due(fs, today):
+                        gaps.append(field)
                 continue
-
-            # Skip items not yet due for retry
-            next_retry = tracker_item.get("next_retry")
-            if next_retry and tracker_item["attempt_count"] > 0:
-                today = date.today().isoformat()
-                if next_retry > today:
-                    log.debug(
-                        "Skipping item, retry not due",
-                        event="scan.skip",
-                        title=title,
-                        media_type=media_type.name,
-                        next_retry=next_retry,
-                    )
-                    tracker.mark_cycle_processed(media_type.name, identity)
-                    stats["skipped"] += 1
-                    continue
-
-        if not gaps:
-            # Check rating staleness before declaring complete: even if
-            # the item has a rating, it might be based on too few votes
-            # for recent content.
-            if "rating" in enabled_fields and media_type.name in ("movie", "tvshow"):
-                min_votes = settings.get("min_votes_movie", 50)
-                stale_days = settings.get("stale_threshold_days", 365)
-                field_info = tracker.get_field_status(
-                    media_type.name, identity, "rating"
-                )
-                if field_info is not None:
-                    stale = is_rating_stale(
-                        premiered=item.get(media_type.date_field, ""),
-                        vote_count=field_info.get("vote_count") or 0,
-                        last_fetched=field_info.get("fetched_at"),
-                        min_votes=min_votes,
-                        stale_threshold_days=stale_days,
-                    )
-                    if stale:
-                        gaps.append("rating")
-                        log.debug(
-                            "Rating is stale, adding to gaps",
-                            event="scan.stale",
-                            title=title,
-                            media_type=media_type.name,
-                            vote_count=field_info.get("vote_count"),
-                            premiered=item.get(media_type.date_field, ""),
-                        )
-            elif "rating" in enabled_fields and media_type.name == "episode":
-                min_votes = settings.get("min_votes_episode", 20)
-                stale_days = settings.get("stale_threshold_days", 365)
-                field_info = tracker.get_field_status(
-                    media_type.name, identity, "rating"
-                )
-                if field_info is not None:
-                    stale = is_rating_stale(
-                        premiered=item.get(media_type.date_field, ""),
-                        vote_count=field_info.get("vote_count") or 0,
-                        last_fetched=field_info.get("fetched_at"),
-                        min_votes=min_votes,
-                        stale_threshold_days=stale_days,
-                    )
-                    if stale:
-                        gaps.append("rating")
-                        log.debug(
-                            "Rating is stale, adding to gaps",
-                            event="scan.stale",
-                            title=title,
-                            media_type=media_type.name,
-                            vote_count=field_info.get("vote_count"),
-                            premiered=item.get(media_type.date_field, ""),
-                        )
-
-        # First-encounter check: if any enabled field has no field_status
-        # entry, add it to gaps so the provider call establishes a baseline.
-        kodi_fields = {
-            _TMDB_TO_KODI.get(k, k)
-            for k in _TMDB_TO_KODI
-        } & enabled_fields & media_type.backfill_fields
-        checked = tracker.get_checked_fields(media_type.name, identity)
-        unchecked = kodi_fields - checked - set(gaps)
-        if unchecked:
-            gaps.extend(sorted(unchecked))
-            log.debug(
-                "First encounter, unchecked fields need provider call",
-                event="scan.first_check",
-                title=title,
-                media_type=media_type.name,
-                unchecked=sorted(unchecked),
-            )
+            kodi_empty = is_field_empty(field, item.get(field))
+            if fs is None:
+                gaps.append(field)  # first encounter: establish a baseline
+            elif fs.get("status") in ("filled", "checked"):
+                if field == "rating" and _rating_is_stale(
+                    item, media_type, fs, settings
+                ):
+                    gaps.append("rating")
+                elif kodi_empty:
+                    gaps.append(field)  # value disappeared from Kodi -> refill
+            elif _field_due(fs, today):
+                gaps.append(field)  # 'empty' due, or 'exhausted' auto-retry due
 
         if not gaps:
             tracker.update_item_status(media_type.name, identity, "complete")
@@ -622,21 +578,17 @@ def run_scan(
                         )
 
             if tmdb_data is None and imdb_data is None:
-                # No data found (not a provider failure): record the attempt so
-                # the item is retried, but do not count it as an error.
-                _record_attempt_with_retry(
-                    tracker, media_type.name, identity, max_retries,
+                # No data found (not a provider failure): fall through to the
+                # per-field post-process, which records a per-field retry
+                # attempt. No write happens and it is not counted as an error.
+                merged_data, source_map = {}, {}
+            else:
+                # Resolve best values per field
+                merged_data, source_map = resolve_metadata(
+                    tmdb_data, imdb_data,
+                    list(_TMDB_TO_KODI.keys()),
+                    rating_source, plot_source,
                 )
-                tracker.mark_cycle_processed(media_type.name, identity)
-                stats["processed"] += 1
-                continue
-
-            # Resolve best values per field
-            merged_data, source_map = resolve_metadata(
-                tmdb_data, imdb_data,
-                list(_TMDB_TO_KODI.keys()),
-                rating_source, plot_source,
-            )
 
         # --- Provider fetch: episodes (ID-based matching) ---
         elif media_type.name == "episode":
@@ -757,21 +709,17 @@ def run_scan(
                         )
 
             if tmdb_data is None and imdb_data is None:
-                # No data found (not a provider failure): record the attempt so
-                # the item is retried, but do not count it as an error.
-                _record_attempt_with_retry(
-                    tracker, media_type.name, identity, max_retries,
+                # No data found (not a provider failure): fall through to the
+                # per-field post-process, which records a per-field retry
+                # attempt. No write happens and it is not counted as an error.
+                merged_data, source_map = {}, {}
+            else:
+                # Resolve best values per field
+                merged_data, source_map = resolve_metadata(
+                    tmdb_data, imdb_data,
+                    list(_TMDB_TO_KODI.keys()),
+                    rating_source, plot_source,
                 )
-                tracker.mark_cycle_processed(media_type.name, identity)
-                stats["processed"] += 1
-                continue
-
-            # Resolve best values per field
-            merged_data, source_map = resolve_metadata(
-                tmdb_data, imdb_data,
-                list(_TMDB_TO_KODI.keys()),
-                rating_source, plot_source,
-            )
 
         else:
             continue
@@ -835,35 +783,60 @@ def run_scan(
                 written.update({"rating", "votes"})
                 written.discard("ratings")
 
-        # Record status for gap fields the provider did not (successfully) write
+        # Per-field post-process: record a "checked" for fields Kodi already
+        # has, and a per-field retry attempt (with backoff / exhaustion) for
+        # fields nothing could fill.
+        exhausted_fields = 0
+        gap_count = len(gaps)
         for gap_field in gaps:
             if gap_field in written:
-                continue
+                continue  # filled this pass (status already set to "filled")
+            # Was there an existing non-empty Kodi value the provider confirmed?
             tmdb_key = _KODI_TO_TMDB.get(gap_field, gap_field)
             kodi_val = item.get(gap_field)
             if kodi_val is None:
                 kodi_val = item.get(tmdb_key)
-            if kodi_val and kodi_val != "" and kodi_val != 0:
+            if not is_field_empty(gap_field, kodi_val):
                 tracker.set_field_status(media_type.name, identity, gap_field, "checked")
+                continue
+            # No data anywhere: record a per-field attempt with backoff / exhaust
+            prev = fs_map.get(gap_field) or {}
+            was_exhausted = prev.get("status") == "exhausted"
+            next_attempt = int(prev.get("attempt_count") or 0) + 1
+            if was_exhausted:
+                # This was the one-time auto-retry and it still found nothing:
+                # exhaust permanently (next_retry cleared).
+                tracker.set_field_status(media_type.name, identity, gap_field, "exhausted")
+                tracker.set_field_next_retry(media_type.name, identity, gap_field, None)
+                exhausted_fields += 1
+                continue
+            next_retry = compute_next_retry(next_attempt, max_retries)
+            tracker.record_field_attempt(
+                media_type.name, identity, gap_field, next_retry=next_retry
+            )
+            if next_retry is None:
+                # Reached max_retries: mark exhausted but schedule ONE auto-retry (D3)
+                tracker.set_field_status(media_type.name, identity, gap_field, "exhausted")
+                auto = (date.today() + timedelta(days=EXHAUSTED_AUTORETRY_DAYS)).isoformat()
+                tracker.set_field_next_retry(media_type.name, identity, gap_field, auto)
+                exhausted_fields += 1
             else:
                 tracker.set_field_status(media_type.name, identity, gap_field, "empty")
 
-        # Determine overall item status. "filled" or "checked" fields are
-        # resolved; truly empty fields remain gaps. A failed write leaves its
-        # fields unresolved (A9), so the item is not marked complete.
-        resolved = set(written)
-        for gap_field in gaps:
-            if gap_field not in resolved:
-                fs = tracker.get_field_status(media_type.name, identity, gap_field)
-                if fs and fs.get("status") == "checked":
-                    resolved.add(gap_field)
-        remaining_gaps = [g for g in gaps if g not in resolved]
-        if not remaining_gaps:
+        # Item rollup status. A failed write leaves its fields unresolved (A9),
+        # so they remain gaps and the item is not marked complete.
+        resolved = sum(1 for g in gaps if g in written)
+        for g in gaps:
+            if g not in written:
+                fs2 = tracker.get_field_status(media_type.name, identity, g)
+                if fs2 and fs2.get("status") == "checked":
+                    resolved += 1
+        if resolved == gap_count:
             tracker.update_item_status(media_type.name, identity, "complete")
+        elif exhausted_fields and (resolved + exhausted_fields) == gap_count:
+            tracker.update_item_status(media_type.name, identity, "exhausted")
         else:
-            _record_attempt_with_retry(
-                tracker, media_type.name, identity, max_retries,
-            )
+            tracker.update_item_status(media_type.name, identity, "partial")
 
         tracker.mark_cycle_processed(media_type.name, identity)
         stats["processed"] += 1
