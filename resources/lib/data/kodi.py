@@ -151,6 +151,65 @@ def get_all_items(
     return items
 
 
+def get_item_by_id(
+    media_type: MediaType,
+    item_id: int,
+) -> Optional[Dict[str, Any]]:
+    """Fetch a single library item by its Kodi database ID.
+
+    Uses GetXDetails with the same property set as get_all_items, so the
+    returned item has every field the scan engine expects. Returns None if
+    the item does not exist or the query fails (the caller decides how to
+    surface that to the user).
+
+    Args:
+        media_type: The media type to query (MOVIE, TVSHOW, or EPISODE).
+        item_id: The Kodi database ID for the item.
+
+    Returns:
+        The item dict, or None when not found / on error.
+    """
+    properties = _build_properties(media_type)
+    params = {
+        media_type.kodi_id_field: item_id,
+        "properties": properties,
+    }  # type: Dict[str, Any]
+
+    query = {
+        "jsonrpc": "2.0",
+        "method": media_type.kodi_get_method,
+        "params": params,
+        "id": 1,
+    }
+
+    try:
+        raw = xbmc.executeJSONRPC(json.dumps(query))
+        data = json.loads(raw)
+    except Exception:
+        log.exception(
+            "Failed to query item by id",
+            event="kodi.query",
+            media_type=media_type.name,
+            item_id=item_id,
+        )
+        return None
+
+    if "error" in data or "result" not in data:
+        log.warning(
+            "Item-by-id query returned an error",
+            event="kodi.query",
+            media_type=media_type.name,
+            item_id=item_id,
+            error=str(data.get("error", "no result key")),
+        )
+        return None
+
+    detail = data.get("result", {}).get(media_type.kodi_detail_key)
+    if not detail:
+        return None
+    return detail
+
+
 def update_item(
     item_id: int,
     media_type: MediaType,

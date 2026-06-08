@@ -377,6 +377,42 @@ def test_extract_fields_writes_full_firstaired():
     assert out["firstaired"] == "2019-06-04"
 
 
+def test_extract_fields_force_overwrites_nonempty_plot():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields(
+        {"plot": "English plot"}, ["plot"], MOVIE,
+        {"plot": "Bestaande NL plot"}, force=True,
+    )
+    assert out["plot"] == "English plot"  # force bypasses the empty-only guard
+
+
+def test_extract_fields_force_default_false_preserves_nonempty():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields(
+        {"plot": "English plot"}, ["plot"], MOVIE,
+        {"plot": "Bestaande NL plot"},
+    )
+    assert "plot" not in out  # default force=False keeps existing behavior
+
+
+def test_extract_fields_force_still_skips_same_value():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields(
+        {"plot": "Same plot"}, ["plot"], MOVIE,
+        {"plot": "Same plot"}, force=True,
+    )
+    assert "plot" not in out  # identical value is never rewritten, even with force
+
+
+def test_extract_fields_force_overwrites_nonplaceholder_episode_title():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields(
+        {"title": "Real Title"}, ["title"], EPISODE,
+        {"title": "Curated Episode Title"}, force=True,
+    )
+    assert out["title"] == "Real Title"  # force overwrites a non-placeholder title
+
+
 @patch("resources.lib.engine.scan.get_all_items")
 def test_run_scan_propagates_kodi_query_error(mock_get_all, tmp_path, kodi_stubs):
     """A failed Kodi query must abort the pass, not be treated as empty."""
@@ -1750,3 +1786,138 @@ def test_same_title_movies_get_separate_tracker_rows(tmp_path):
     assert db.get_item("movie", "tmdb:841")["kodi_id"] == 1
     assert db.get_item("movie", "tmdb:438631")["kodi_id"] == 2
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# run_scan force path (D3 "Update now")
+# ---------------------------------------------------------------------------
+
+
+class TestRunScanForce:
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_force_overwrites_nonempty_plot(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """A force run overwrites an existing non-empty plot."""
+        item = _make_movie_item(plot="Existing curated plot")
+        mock_fetch.return_value = _tmdb_movie_response(plot="Fresh provider plot")
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot"}),
+            "fake_key", _make_settings(),
+            items=[item], force=True,
+        )
+        tracker.close()
+
+        assert stats["updated"] >= 1
+        _, kwargs = mock_update.call_args
+        assert kwargs.get("plot") == "Fresh provider plot"
+
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_normal_scan_does_not_overwrite_nonempty_plot(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Control: without force, an existing non-empty plot is preserved."""
+        item = _make_movie_item(plot="Existing curated plot")
+        mock_fetch.return_value = _tmdb_movie_response(plot="Fresh provider plot")
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot"}),
+            "fake_key", _make_settings(),
+            items=[item],
+        )
+        tracker.close()
+
+        # plot was never written (empty-only guard); update may be called for
+        # nothing, so assert plot specifically is absent.
+        if mock_update.called:
+            _, kwargs = mock_update.call_args
+            assert "plot" not in kwargs
+
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_force_refetches_exhausted_field(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Force ignores exhaustion: a permanently exhausted field is refetched."""
+        item = _make_movie_item(plot="")
+        mock_fetch.return_value = _tmdb_movie_response(plot="Recovered plot")
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        # Mark plot permanently exhausted (next_retry None): a normal scan
+        # would never look at it again.
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "plot", "exhausted")
+        tracker.set_field_next_retry("movie", _MOVIE_IDENTITY, "plot", None)
+
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot"}),
+            "fake_key", _make_settings(),
+            items=[item], force=True,
+        )
+
+        assert mock_fetch.called
+        assert stats["updated"] >= 1
+        _, kwargs = mock_update.call_args
+        assert kwargs.get("plot") == "Recovered plot"
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_normal_scan_skips_exhausted_field(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Control: without force, a permanently exhausted field is not fetched."""
+        item = _make_movie_item(plot="")
+        mock_fetch.return_value = _tmdb_movie_response(plot="Recovered plot")
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "plot", "exhausted")
+        tracker.set_field_next_retry("movie", _MOVIE_IDENTITY, "plot", None)
+
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot"}),
+            "fake_key", _make_settings(),
+            items=[item],
+        )
+        tracker.close()
+
+        assert not mock_fetch.called
+
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_force_ignores_cycle_processed(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Force bypasses the cycle-processed resume skip."""
+        item = _make_movie_item(plot="Old plot")
+        mock_fetch.return_value = _tmdb_movie_response(plot="New plot")
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.mark_cycle_processed("movie", _MOVIE_IDENTITY)
+
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"plot"}),
+            "fake_key", _make_settings(),
+            items=[item], force=True,
+        )
+        tracker.close()
+
+        assert mock_fetch.called
+        assert stats["updated"] >= 1

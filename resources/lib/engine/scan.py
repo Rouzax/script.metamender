@@ -200,6 +200,7 @@ def _extract_fields(
     gap_fields: List[str],
     media_type: MediaType,
     item: Dict[str, Any],
+    force: bool = False,
 ) -> Dict[str, Any]:
     """Extract writable Kodi fields from provider data based on detected gaps.
 
@@ -208,6 +209,13 @@ def _extract_fields(
 
     For episode titles: only overwrites if provider returns a different,
     non-empty title and the current title is a placeholder.
+
+    When force is True (the "Update now" path, D3/D11), the empty-only guard
+    is skipped so a differing non-empty value IS overwritten, and the episode
+    placeholder rule is relaxed so a non-placeholder title is also overwritten.
+    The same-value skip, the runtime min->sec conversion, the firstaired
+    full-date guard, and the empty-provider-value skips all still apply: force
+    never rewrites identical data and never writes an empty provider value.
     """
     fields = {}  # type: Dict[str, Any]
 
@@ -232,10 +240,11 @@ def _extract_fields(
         if isinstance(value, (int, float)) and value == 0:
             continue
 
-        # Episode title: only overwrite placeholder titles with a different title
+        # Episode title: only overwrite placeholder titles with a different
+        # title, unless force is set (the user explicitly asked to correct it).
         if kodi_key == "title" and media_type.name == "episode":
             current_title = item.get("title", "")
-            if not is_placeholder_title(current_title):
+            if not force and not is_placeholder_title(current_title):
                 continue
             if value == current_title:
                 continue
@@ -255,11 +264,17 @@ def _extract_fields(
 
         current = item.get(kodi_key)
 
+        # Same-value skip: never rewrite identical data (applies in force mode
+        # too, so a forced correction does not churn unchanged fields).
+        if current is not None and current == value:
+            continue
+
         # Empty-only guard (A2): never overwrite an existing non-empty value
         # for these fields (plot, tagline, credits, genre, runtime, etc.).
         # First-encounter adds already-filled fields to gaps to establish a
-        # baseline; we must record them as checked, not clobber them.
-        if not is_empty(current):
+        # baseline; we must record them as checked, not clobber them. The
+        # forced "Update now" path (D3/D11) deliberately bypasses this guard.
+        if not force and not is_empty(current):
             continue
 
         fields[kodi_key] = value
@@ -279,6 +294,7 @@ def run_scan(
     items: Optional[List[Dict[str, Any]]] = None,
     kodi_filter: Optional[Dict[str, str]] = None,
     breaker: Optional[CircuitBreaker] = None,
+    force: bool = False,
 ) -> Dict[str, int]:
     """Run a single scan cycle for one media type.
 
@@ -308,6 +324,13 @@ def run_scan(
             media-type pass so a provider that fails repeatedly stays
             disabled across passes. When None, a fresh per-call breaker
             is created (single-pass / test convenience).
+        force: Single-item "Update now" force-correction path (D3/D11).
+            When True, every enabled candidate field is treated as a gap
+            (gating, exhaustion, checked/filled status, staleness, and the
+            cycle-processed resume skip are all bypassed), provider values
+            overwrite existing non-empty fields (via _extract_fields force),
+            and the ratings map is rebuilt regardless. Intended for
+            items=[one_item]. Has NO effect on normal scans (force=False).
 
     Returns:
         Stats dict with processed, skipped, updated, errors, and
@@ -370,11 +393,14 @@ def run_scan(
         title = _item_title(item, media_type)
         kodi_id = item.get(media_type.kodi_id_field, 0)
 
-        # Resume: skip items already processed in this cycle
-        pre_tracker = tracker.get_item(media_type.name, identity)
-        if pre_tracker and pre_tracker.get("cycle_processed"):
-            stats["skipped"] += 1
-            continue
+        # Resume: skip items already processed in this cycle. The force path
+        # (Update now) bypasses this so a just-scanned item can still be
+        # corrected on demand.
+        if not force:
+            pre_tracker = tracker.get_item(media_type.name, identity)
+            if pre_tracker and pre_tracker.get("cycle_processed"):
+                stats["skipped"] += 1
+                continue
 
         # Match source
         source = match_source(item.get("file", ""), sources)
@@ -429,27 +455,39 @@ def run_scan(
         )
 
         gaps = []  # type: List[str]
-        for field in sorted(candidate_fields):
-            fs = fs_map.get(field)
-            # Title is only a gap for episodes with a placeholder title
-            if field == "title":
-                if (media_type.name == "episode"
-                        and is_placeholder_title(item.get("title", ""))):
-                    if _field_due(fs, today):
-                        gaps.append(field)
-                continue
-            kodi_empty = is_field_empty(field, item.get(field))
-            if fs is None:
-                gaps.append(field)  # first encounter: establish a baseline
-            elif fs.get("status") in ("filled", "checked"):
-                if field == "rating" and _rating_is_stale(
-                    item, media_type, fs, settings
-                ):
-                    gaps.append("rating")
-                elif kodi_empty:
-                    gaps.append(field)  # value disappeared from Kodi -> refill
-            elif _field_due(fs, today):
-                gaps.append(field)  # 'empty' due, or 'exhausted' auto-retry due
+        if force:
+            # Force path (Update now): every enabled candidate field is a gap,
+            # ignoring gating, exhaustion, checked/filled status, and
+            # staleness. The title field only exists for episodes; for movies
+            # and TV shows it is never written, so skip it there.
+            # _extract_fields(force=True) handles the actual overwrite,
+            # including a non-placeholder episode title.
+            for field in sorted(candidate_fields):
+                if field == "title" and media_type.name != "episode":
+                    continue
+                gaps.append(field)
+        else:
+            for field in sorted(candidate_fields):
+                fs = fs_map.get(field)
+                # Title is only a gap for episodes with a placeholder title
+                if field == "title":
+                    if (media_type.name == "episode"
+                            and is_placeholder_title(item.get("title", ""))):
+                        if _field_due(fs, today):
+                            gaps.append(field)
+                    continue
+                kodi_empty = is_field_empty(field, item.get(field))
+                if fs is None:
+                    gaps.append(field)  # first encounter: establish a baseline
+                elif fs.get("status") in ("filled", "checked"):
+                    if field == "rating" and _rating_is_stale(
+                        item, media_type, fs, settings
+                    ):
+                        gaps.append("rating")
+                    elif kodi_empty:
+                        gaps.append(field)  # value disappeared from Kodi -> refill
+                elif _field_due(fs, today):
+                    gaps.append(field)  # 'empty' due, or 'exhausted' auto-retry due
 
         if not gaps:
             tracker.update_item_status(media_type.name, identity, "complete")
@@ -725,7 +763,7 @@ def run_scan(
             continue
 
         # Extract writable non-rating fields from resolved provider data
-        fields_to_write = _extract_fields(merged_data, gaps, media_type, item)
+        fields_to_write = _extract_fields(merged_data, gaps, media_type, item, force=force)
 
         # Build the named-slot ratings map when rating is in scope
         ratings_source = None  # type: Optional[str]

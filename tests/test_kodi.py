@@ -6,7 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from resources.lib.data.kodi import get_all_items, update_item, _build_properties
+from resources.lib.data.kodi import (
+    get_all_items,
+    get_item_by_id,
+    update_item,
+    _build_properties,
+)
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 
 
@@ -63,6 +68,46 @@ def test_get_all_movies_no_result_key(kodi_stubs):
     )
     items = get_all_items(MOVIE)
     assert items == []
+
+
+def test_get_item_by_id_returns_item(kodi_stubs):
+    response = {
+        "result": {
+            "moviedetails": {
+                "movieid": 7,
+                "title": "Air",
+                "plot": "Existing plot",
+                "uniqueid": {"tmdb": "12345"},
+            }
+        }
+    }
+    mock = MagicMock(return_value=json.dumps(response))
+    kodi_stubs["xbmc"].executeJSONRPC = mock
+    item = get_item_by_id(MOVIE, 7)
+    assert item is not None
+    assert item["title"] == "Air"
+    assert item["movieid"] == 7
+    # The request must use the GetMovieDetails method with the movieid param.
+    sent = json.loads(mock.call_args[0][0])
+    assert sent["method"] == "VideoLibrary.GetMovieDetails"
+    assert sent["params"]["movieid"] == 7
+
+
+def test_get_item_by_id_missing_returns_none(kodi_stubs):
+    response = {"error": {"code": -32602, "message": "Invalid params"}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps(response))
+    assert get_item_by_id(MOVIE, 999) is None
+
+
+def test_get_item_by_id_episode_detail_key(kodi_stubs):
+    response = {"result": {"episodedetails": {"episodeid": 5, "title": "Pilot"}}}
+    mock = MagicMock(return_value=json.dumps(response))
+    kodi_stubs["xbmc"].executeJSONRPC = mock
+    item = get_item_by_id(EPISODE, 5)
+    assert item["title"] == "Pilot"
+    sent = json.loads(mock.call_args[0][0])
+    assert sent["method"] == "VideoLibrary.GetEpisodeDetails"
+    assert sent["params"]["episodeid"] == 5
 
 
 def test_get_all_items_raises_on_rpc_error(kodi_stubs):

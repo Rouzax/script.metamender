@@ -418,3 +418,7 @@ msgstr ""
 msgctxt "#32334"
 msgid "Clear the exhausted state on fields that ran out of retry attempts so they are tried again on the next scan. Use this after fixing a misconfiguration or when a source has new data available."
 msgstr ""
+
+msgctxt "#32340"
+msgid "MetaMender: Update now"
+msgstr ""
