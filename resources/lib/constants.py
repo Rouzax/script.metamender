@@ -62,6 +62,10 @@ COUNTRY_CODES = ("NL", "BE", "DE", "AT", "GB", "US", "FR", "DK", "SE")
 BACKFILL_DB_FILENAME = "backfill.db"
 SOURCES_CONFIG_FILENAME = "sources.json"
 
+# Tracker SQLite schema version. Bump when the schema changes so future
+# migrations have a marker to branch on. Stored in scan_state on init.
+SCHEMA_VERSION = 2
+
 # Retry intervals in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
 RETRY_INTERVALS = (7, 30, 90)
 DEFAULT_MAX_RETRIES = 4
