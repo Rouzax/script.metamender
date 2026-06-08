@@ -442,3 +442,19 @@ def test_prune_orphans_cascades_field_status(tmp_path):
     ).fetchone()["c"]
     assert rows == 0
     db.close()
+
+
+def test_prune_orphans_multiple_items(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.upsert_item("movie", "tmdb:2", title="B")
+    db.upsert_item("movie", "tmdb:3", title="C")
+    db.update_last_seen("movie", "tmdb:1", "2026-01-01")
+    db.update_last_seen("movie", "tmdb:2", "2026-01-02")
+    db.update_last_seen("movie", "tmdb:3", "2026-06-07")  # recent, kept
+    removed = db.prune_orphans("movie", cutoff="2026-06-01")
+    assert removed == 2
+    assert db.get_item("movie", "tmdb:1") is None
+    assert db.get_item("movie", "tmdb:2") is None
+    assert db.get_item("movie", "tmdb:3") is not None
+    db.close()
