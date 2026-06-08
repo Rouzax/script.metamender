@@ -190,6 +190,11 @@ class TransientProviderError(Exception):
     malformed JSON). Counts toward the circuit breaker; the item is retried."""
 
 
+class KodiQueryError(Exception):
+    """A Kodi JSON-RPC query failed (RPC error or parse failure), as opposed
+    to returning an empty result. Callers must not treat this as 'no items'."""
+
+
 # =============================================================================
 # Structured Logger
 # =============================================================================

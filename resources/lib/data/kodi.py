@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 import xbmc
 
 from resources.lib.data.media_types import MediaType
-from resources.lib.utils import get_logger, log_timing
+from resources.lib.utils import KodiQueryError, get_logger, log_timing
 
 log = get_logger('kodi')
 
@@ -107,13 +107,26 @@ def get_all_items(
             data = json.loads(raw)
             timer.mark("parse")
         rpc_ms = int((time.perf_counter() - rpc_start) * 1000)
-    except Exception:
+    except Exception as exc:
         log.exception(
             "Failed to query library",
             event="kodi.query",
             media_type=media_type.name,
         )
-        return []
+        raise KodiQueryError(
+            "JSON-RPC query failed for {}".format(media_type.name)
+        ) from exc
+
+    if "error" in data or "result" not in data:
+        log.error(
+            "Library query returned an error",
+            event="kodi.query",
+            media_type=media_type.name,
+            error=str(data.get("error", "no result key")),
+        )
+        raise KodiQueryError(
+            "JSON-RPC error response for {}".format(media_type.name)
+        )
 
     result = data.get("result", {})
     items = result.get(media_type.kodi_result_key, [])

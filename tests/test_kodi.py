@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
+import pytest
+
 from resources.lib.data.kodi import get_all_items, update_item, _build_properties
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 
@@ -61,6 +63,31 @@ def test_get_all_movies_no_result_key(kodi_stubs):
     )
     items = get_all_items(MOVIE)
     assert items == []
+
+
+def test_get_all_items_raises_on_rpc_error(kodi_stubs):
+    from resources.lib.utils import KodiQueryError
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
+        return_value=json.dumps({"error": {"code": -32603, "message": "boom"}})
+    )
+    with pytest.raises(KodiQueryError):
+        get_all_items(MOVIE)
+
+
+def test_get_all_items_raises_on_exception(kodi_stubs):
+    from resources.lib.utils import KodiQueryError
+    def boom(_):
+        raise RuntimeError("rpc down")
+    kodi_stubs["xbmc"].executeJSONRPC = boom
+    with pytest.raises(KodiQueryError):
+        get_all_items(MOVIE)
+
+
+def test_get_all_items_empty_is_not_error(kodi_stubs):
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
+        return_value=json.dumps({"result": {"movies": []}})
+    )
+    assert get_all_items(MOVIE) == []
 
 
 def test_get_all_episodes(kodi_stubs):

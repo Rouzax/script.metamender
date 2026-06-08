@@ -341,6 +341,25 @@ def test_extract_fields_writes_full_firstaired():
     assert out["firstaired"] == "2019-06-04"
 
 
+@patch("resources.lib.engine.scan.get_all_items")
+def test_run_scan_propagates_kodi_query_error(mock_get_all, tmp_path, kodi_stubs):
+    """A failed Kodi query must abort the pass, not be treated as empty."""
+    from resources.lib.utils import KodiQueryError
+
+    mock_get_all.side_effect = KodiQueryError("rpc failed")
+
+    tracker = _make_tracker(tmp_path)
+    try:
+        with pytest.raises(KodiQueryError):
+            run_scan(
+                MOVIE, tracker, _make_source_config(),
+                frozenset({"rating"}),
+                "fake_key", _make_settings(),
+            )
+    finally:
+        tracker.close()
+
+
 # ---------------------------------------------------------------------------
 # Integration tests: run_scan
 # ---------------------------------------------------------------------------

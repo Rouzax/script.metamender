@@ -30,6 +30,7 @@ from resources.lib.constants import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_SCAN_INTERVAL_HOURS,
     LIBRARY_SCAN_DEBOUNCE_SEC,
+    SCAN_FAILURE_BACKOFF_SEC,
     SERVICE_SLEEP_INTERVAL_SEC,
     SOURCES_CONFIG_FILENAME,
 )
@@ -39,6 +40,7 @@ from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
 from resources.lib.utils import (
+    KodiQueryError,
     StructuredLogger,
     get_addon,
     get_bool_setting,
@@ -257,6 +259,7 @@ def run() -> None:
     monitor = MetaMendMonitor()
     tracker: Optional[TrackerDB] = None
     last_scan = 0.0  # Force scan on first loop iteration
+    next_retry_after = 0.0  # Backoff gate after a failed scan (both triggers)
 
     try:
         tracker = TrackerDB(_get_db_path())
@@ -278,6 +281,12 @@ def run() -> None:
                 if monitor.has_pending_scan(LIBRARY_SCAN_DEBOUNCE_SEC):
                     should_scan = True
                     reason = "library_event"
+
+                # Honor a post-failure backoff for BOTH trigger types so a
+                # persistently-failing Kodi query is not re-attempted every loop
+                # (the library-event trigger is independent of last_scan).
+                if should_scan and now < next_retry_after:
+                    should_scan = False
 
                 # Guard: skip while video is playing
                 if should_scan and xbmc.getCondVisibility("Player.HasVideo"):
@@ -324,10 +333,28 @@ def run() -> None:
                         tracker.start_new_cycle()
 
                     scan_start = time.perf_counter()
-                    all_stats = _run_scan(
-                        tracker, source_config, settings, monitor,
-                        kodi_filter=kodi_filter,
-                    )
+                    try:
+                        all_stats = _run_scan(
+                            tracker, source_config, settings, monitor,
+                            kodi_filter=kodi_filter,
+                        )
+                    except KodiQueryError:
+                        # A Kodi library query failed (RPC/parse error), which
+                        # is NOT an empty library. Treat the cycle as FAILED:
+                        # do not advance the schedule or the watermark, and do
+                        # not clear a library-event request, so it retries.
+                        # Set a short backoff instead of a full interval so the
+                        # next loop re-attempts soon without hammering Kodi.
+                        log.exception(
+                            "Scan aborted on Kodi query failure",
+                            event="service.scan_failed",
+                            reason=reason,
+                        )
+                        next_retry_after = time.time() + SCAN_FAILURE_BACKOFF_SEC
+                        continue
+                    finally:
+                        StructuredLogger.stop_scan_log()
+
                     elapsed = round(time.perf_counter() - scan_start, 2)
 
                     movie_stats = all_stats.get("movie", {})
@@ -343,7 +370,6 @@ def run() -> None:
                         total_elapsed_sec=elapsed,
                     )
 
-                    StructuredLogger.stop_scan_log()
                     last_scan = time.time()
                     monitor.clear_scan_request()
                     tracker.set_scan_state(
