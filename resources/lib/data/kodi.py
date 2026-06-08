@@ -25,7 +25,7 @@ log = get_logger('kodi')
 
 # Base properties requested for all media types
 _BASE_PROPERTIES = [
-    "title", "rating", "votes", "ratings", "uniqueid",
+    "title", "rating", "votes", "plot", "ratings", "uniqueid",
     "file", "dateadded",
 ]
 

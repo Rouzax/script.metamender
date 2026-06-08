@@ -222,4 +222,8 @@ def test_get_all_movies_requests_ratings_property(kodi_stubs):
     get_all_items(MOVIE)
     call_args = kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0]
     payload = json.loads(call_args)
-    assert "ratings" in payload["params"]["properties"]
+    props = payload["params"]["properties"]
+    assert "ratings" in props
+    # plot must remain requested: it is a backfill field and the empty-only
+    # overwrite guard depends on reading the current value (regression guard).
+    assert "plot" in props
