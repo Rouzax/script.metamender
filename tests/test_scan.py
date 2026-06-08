@@ -218,7 +218,9 @@ class TestExtractFields:
     def test_extracts_requested_fields(self):
         tmdb_data = _tmdb_movie_response()
         fields = _extract_fields(tmdb_data, ["rating", "plot"], MOVIE, {})
-        assert fields["rating"] == 7.5
+        # rating is no longer emitted by _extract_fields; it goes through the
+        # named-slot ratings path (build_ratings) instead.
+        assert "rating" not in fields
         assert fields["plot"] == "Great movie"
         assert "tagline" not in fields
 
@@ -242,10 +244,12 @@ class TestExtractFields:
         fields = _extract_fields(tmdb_data, ["runtime"], MOVIE, {})
         assert "runtime" not in fields
 
-    def test_converts_votes_to_string(self):
+    def test_does_not_emit_votes(self):
+        # votes is no longer emitted by _extract_fields; it lives inside the
+        # named-slot ratings map (build_ratings) instead.
         tmdb_data = _tmdb_movie_response(votes=1000)
         fields = _extract_fields(tmdb_data, ["votes"], MOVIE, {})
-        assert fields["votes"] == "1000"
+        assert "votes" not in fields
 
     def test_episode_title_replaces_placeholder(self):
         tmdb_data = _tmdb_episode_data(title="Real Title")
@@ -270,6 +274,59 @@ class TestExtractFields:
         tmdb_data = _tmdb_movie_response()
         fields = _extract_fields(tmdb_data, ["mpaa"], MOVIE, {})
         assert "mpaa" not in fields
+
+
+def test_extract_fields_converts_runtime_minutes_to_seconds():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields({"runtime": 114}, ["runtime"], MOVIE, {"runtime": 0})
+    assert out["runtime"] == 114 * 60
+
+
+def test_extract_fields_runtime_same_value_skipped():
+    from resources.lib.engine.scan import _extract_fields
+    # Kodi already has 114 min stored as 6840 s; provider says 114 min
+    out = _extract_fields({"runtime": 114}, ["runtime"], MOVIE, {"runtime": 6840})
+    assert "runtime" not in out
+
+
+def test_extract_fields_does_not_overwrite_nonempty_plot():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields(
+        {"plot": "English plot"}, ["plot"], MOVIE, {"plot": "Bestaande NL plot"}
+    )
+    assert "plot" not in out  # non-empty current value is preserved (A2)
+
+
+def test_extract_fields_fills_empty_plot():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields({"plot": "New plot"}, ["plot"], MOVIE, {"plot": ""})
+    assert out["plot"] == "New plot"
+
+
+def test_extract_fields_does_not_overwrite_nonempty_list_field():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields(
+        {"directors": ["TMDB Director"]}, ["director"], MOVIE,
+        {"director": ["Curated Director"]},
+    )
+    assert "director" not in out  # curated list preserved (A2)
+
+
+def test_extract_fields_skips_rating_and_votes():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields(
+        {"rating": 7.5, "votes": 100}, ["rating", "votes"], MOVIE,
+        {"rating": 0, "votes": "0"},
+    )
+    assert "rating" not in out and "votes" not in out  # handled by ratings path
+
+
+def test_extract_fields_episode_title_placeholder_still_overwritten():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields(
+        {"title": "Real Title"}, ["title"], EPISODE, {"title": "Episode 1"}
+    )
+    assert out["title"] == "Real Title"
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +465,7 @@ class TestRunScanMovies:
         )
         tracker.close()
 
-        assert stats["fields"]["rating"] >= 1
+        assert stats["fields"]["ratings"] >= 1
         assert stats["fields"]["plot"] >= 1
 
     @patch("resources.lib.engine.scan.get_all_items")
@@ -520,7 +577,9 @@ class TestRunScanMovies:
         field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
         assert field is not None
         assert field["status"] == "filled"
-        assert field["source"] == "tmdb"
+        # Rating now carries the chosen named slot as its source (themoviedb),
+        # and the vote_count comes from that slot (staleness provenance).
+        assert field["source"] == "themoviedb"
         assert field["vote_count"] == 1000
         tracker.close()
 
@@ -606,6 +665,93 @@ class TestRunScanMovies:
             assert field["source"] == "imdb"
             tracker.close()
         assert stats["updated"] >= 1
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_run_scan_writes_ratings_map_not_flat(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """Rating is written via the named-slot ratings map, not flat fields."""
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = _tmdb_movie_response(rating=7.5, votes=1000)
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+        )
+        tracker.close()
+
+        assert mock_update.called
+        _, kwargs = mock_update.call_args
+        assert "ratings" in kwargs
+        assert "themoviedb" in kwargs["ratings"]
+        assert kwargs["ratings"]["themoviedb"]["rating"] == 7.5
+        assert kwargs["ratings"]["themoviedb"]["votes"] == 1000
+        assert kwargs["ratings"]["themoviedb"]["default"] is True
+        # No flat rating/votes are emitted
+        assert "rating" not in kwargs
+        assert "votes" not in kwargs
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_run_scan_rating_unchanged_is_idempotent(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """An unchanged rating produces no ratings write on a second pass."""
+        item = _make_movie_item(rating=7.28)
+        item["ratings"] = {
+            "themoviedb": {"rating": 7.28, "votes": 2331, "default": True},
+        }
+        mock_get_all.return_value = [item]
+        mock_fetch.return_value = _tmdb_movie_response(rating=7.28, votes=2331)
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+        )
+
+        # No update_item call should carry a ratings change
+        for _, kwargs in mock_update.call_args_list:
+            assert "ratings" not in kwargs
+        # Rating is recorded as checked (confirmed unchanged), not failed
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field is not None
+        assert field["status"] == "checked"
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_run_scan_write_failure_does_not_mark_complete(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """A failed write must not mark the item complete (A9)."""
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = _tmdb_movie_response()
+        mock_update.return_value = False
+
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating", "plot"}),
+            "fake_key", _make_settings(),
+        )
+
+        assert stats["errors"] >= 1
+        assert stats["updated"] == 0
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
+        assert item is not None
+        assert item["status"] != "complete"
+        assert item["attempt_count"] == 1
+        tracker.close()
 
 
 class TestRunScanTVShows:

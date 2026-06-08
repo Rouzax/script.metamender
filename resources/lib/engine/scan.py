@@ -30,7 +30,7 @@ from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.constants import PROVIDER_CIRCUIT_BREAKER_THRESHOLD
 from resources.lib.engine.gaps import detect_gaps, is_placeholder_title
-from resources.lib.engine.resolve import TMDB_ONLY, resolve_metadata
+from resources.lib.engine.resolve import TMDB_ONLY, build_ratings, resolve_metadata
 from resources.lib.engine.staleness import compute_next_retry, is_rating_stale
 from resources.lib.providers.imdbapi import (
     fetch_episode as imdb_fetch_episode,
@@ -182,9 +182,14 @@ def _extract_fields(
         if kodi_key not in gap_fields:
             continue
 
+        # Rating and votes are written via the named-slot ratings map
+        # (see build_ratings + the scan write path), never as flat fields.
+        if kodi_key in ("rating", "votes"):
+            continue
+
         value = provider_data.get(tmdb_key)
 
-        # Skip empty values
+        # Skip empty provider values
         if value is None:
             continue
         if isinstance(value, str) and value == "":
@@ -194,29 +199,47 @@ def _extract_fields(
         if isinstance(value, (int, float)) and value == 0:
             continue
 
-        # Episode title: only overwrite placeholder titles with different titles
+        # Episode title: only overwrite placeholder titles with a different title
         if kodi_key == "title" and media_type.name == "episode":
             current_title = item.get("title", "")
             if not is_placeholder_title(current_title):
                 continue
             if value == current_title:
                 continue
+            fields[kodi_key] = value
+            continue
 
-        # Skip writing if the item already has the same value (first-encounter:
-        # provider confirmed existing data, no need to rewrite)
+        # Runtime: providers return minutes; Kodi stores seconds
+        if kodi_key == "runtime":
+            if not isinstance(value, (int, float)):
+                continue
+            value = int(value) * 60
+
         current = item.get(kodi_key)
-        if current is not None and current == value:
-            continue
-        if isinstance(current, list) and isinstance(value, list) and current == value:
-            continue
 
-        # Kodi expects votes as a string
-        if kodi_key == "votes" and isinstance(value, int):
-            value = str(value)
+        # Empty-only guard (A2): never overwrite an existing non-empty value
+        # for these fields (plot, tagline, credits, genre, runtime, etc.).
+        # First-encounter adds already-filled fields to gaps to establish a
+        # baseline; we must record them as checked, not clobber them.
+        if not _is_empty_current(current):
+            continue
 
         fields[kodi_key] = value
 
     return fields
+
+
+def _is_empty_current(value: Any) -> bool:
+    """Whether the item's current Kodi value counts as empty (overwrite OK)."""
+    if value is None:
+        return True
+    if isinstance(value, str) and value == "":
+        return True
+    if isinstance(value, (int, float)) and value == 0:
+        return True
+    if isinstance(value, list) and len(value) == 0:
+        return True
+    return False
 
 
 def run_scan(
@@ -776,16 +799,30 @@ def run_scan(
         else:
             continue
 
-        # Extract writable fields from resolved provider data
+        # Extract writable non-rating fields from resolved provider data
         fields_to_write = _extract_fields(merged_data, gaps, media_type, item)
 
+        # Build the named-slot ratings map when rating is in scope
+        ratings_source = None  # type: Optional[str]
+        ratings_votes = None  # type: Optional[int]
+        ratings_in_scope = "rating" in gaps or "votes" in gaps
+        if ratings_in_scope:
+            new_ratings, ratings_source, ratings_votes = build_ratings(
+                tmdb_data or {}, imdb_data or {}, item.get("ratings") or {},
+                rating_source,
+            )
+            if new_ratings is not None:
+                fields_to_write["ratings"] = new_ratings
+
+        ratings_written = "ratings" in fields_to_write
+        write_succeeded = False
+
         if fields_to_write:
-            success = update_item(kodi_id, media_type, title, **fields_to_write)
-            if success:
+            write_succeeded = update_item(kodi_id, media_type, title, **fields_to_write)
+            if write_succeeded:
                 stats["updated"] += 1
                 for field_name in fields_to_write:
                     stats["fields"][field_name] = stats["fields"].get(field_name, 0) + 1
-
                 log.info(
                     "Item updated",
                     event="scan.updated",
@@ -793,48 +830,51 @@ def run_scan(
                     media_type=media_type.name,
                     fields_written=list(fields_to_write.keys()),
                 )
-
-                # Update field status in tracker with per-field source
+                # field_status for non-rating written fields
                 for field_name in fields_to_write:
-                    vote_count = None  # type: Optional[int]
-                    if field_name == "rating":
-                        vote_count = merged_data.get("votes")
-                        if isinstance(vote_count, str):
-                            try:
-                                vote_count = int(vote_count)
-                            except ValueError:
-                                vote_count = None
+                    if field_name == "ratings":
+                        continue
                     tmdb_key = _KODI_TO_TMDB.get(field_name, field_name)
                     field_source = source_map.get(tmdb_key, "tmdb")
                     tracker.set_field_status(
-                        media_type.name,
-                        identity,
-                        field_name,
-                        "filled",
+                        media_type.name, identity, field_name, "filled",
                         source=field_source,
-                        vote_count=vote_count,
                     )
+                # field_status for the rating (+ votes mirror) when written
+                if ratings_written:
+                    for rf in ("rating", "votes"):
+                        tracker.set_field_status(
+                            media_type.name, identity, rf, "filled",
+                            source=ratings_source, vote_count=ratings_votes,
+                        )
             else:
                 stats["errors"] += 1
 
-        # Record status for fields not written by providers
-        for gap_field in gaps:
-            if gap_field not in fields_to_write:
-                tmdb_key = _KODI_TO_TMDB.get(gap_field, gap_field)
-                kodi_val = item.get(gap_field) or item.get(tmdb_key)
-                if kodi_val and kodi_val != "" and kodi_val != 0:
-                    tracker.set_field_status(
-                        media_type.name, identity, gap_field, "checked"
-                    )
-                else:
-                    tracker.set_field_status(
-                        media_type.name, identity, gap_field, "empty"
-                    )
+        # The set of fields considered successfully resolved this pass
+        written = set()  # type: set
+        if write_succeeded:
+            written = set(fields_to_write.keys())
+            if ratings_written:
+                written.update({"rating", "votes"})
+                written.discard("ratings")
 
-        # Determine overall item status: fields that were written ("filled")
-        # or confirmed unchanged ("checked") are resolved. Only truly empty
-        # fields (provider had no data) count as remaining gaps.
-        resolved = set(fields_to_write.keys())
+        # Record status for gap fields the provider did not (successfully) write
+        for gap_field in gaps:
+            if gap_field in written:
+                continue
+            tmdb_key = _KODI_TO_TMDB.get(gap_field, gap_field)
+            kodi_val = item.get(gap_field)
+            if kodi_val is None:
+                kodi_val = item.get(tmdb_key)
+            if kodi_val and kodi_val != "" and kodi_val != 0:
+                tracker.set_field_status(media_type.name, identity, gap_field, "checked")
+            else:
+                tracker.set_field_status(media_type.name, identity, gap_field, "empty")
+
+        # Determine overall item status. "filled" or "checked" fields are
+        # resolved; truly empty fields remain gaps. A failed write leaves its
+        # fields unresolved (A9), so the item is not marked complete.
+        resolved = set(written)
         for gap_field in gaps:
             if gap_field not in resolved:
                 fs = tracker.get_field_status(media_type.name, identity, gap_field)
