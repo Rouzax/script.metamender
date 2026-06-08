@@ -71,6 +71,21 @@ class TestIsPlaceholderTitle:
         # to see if it has a different title before overwriting
         assert is_placeholder_title("Episode 1") is True
 
+    def test_placeholder_danish_afsnit(self):
+        assert is_placeholder_title("Afsnit 4") is True
+        assert is_placeholder_title("Afsnit") is True
+
+    def test_placeholder_swedish_avsnitt(self):
+        assert is_placeholder_title("Avsnitt 2") is True
+
+    def test_placeholder_french_episode_accented(self):
+        assert is_placeholder_title("Épisode 6") is True
+        assert is_placeholder_title("Episode 6") is True
+
+    def test_placeholder_real_title_not_matched(self):
+        assert is_placeholder_title("Afsnittet om kärlek") is False
+        assert is_placeholder_title("The Pilot") is False
+
 
 class TestDetectGaps:
     def test_empty_rating_is_gap(self):

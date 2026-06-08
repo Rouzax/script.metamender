@@ -24,7 +24,8 @@ _NUMERIC_FIELDS = frozenset({"rating", "votes", "runtime"})
 _LIST_FIELDS = frozenset({"director", "writer", "genre", "studio", "country"})
 
 _PLACEHOLDER_RE = re.compile(
-    r"^(?:episode|aflevering|folge)(?:\s+\d+)?$|^\d+$|^$",
+    r"^(?:episode|aflevering|folge|afsnit|avsnitt|[ée]pisode)(?:\s+\d+)?$"
+    r"|^\d+$|^$",
     re.IGNORECASE,
 )
 
@@ -54,9 +55,12 @@ def is_placeholder_title(title: str) -> bool:
     """Check if an episode title is a placeholder.
 
     Matches (case-insensitive):
-        - "Episode N" or "Episode"
-        - "Aflevering N" or "Aflevering"
-        - "Folge N" or "Folge"
+        - "Episode N" or "Episode" (English)
+        - "Aflevering N" or "Aflevering" (Dutch)
+        - "Folge N" or "Folge" (German)
+        - "Afsnit N" or "Afsnit" (Danish)
+        - "Avsnitt N" or "Avsnitt" (Swedish)
+        - "Épisode N" or "Épisode" or "Episode N" (French)
         - Bare number ("1", "23")
         - Empty string
 
