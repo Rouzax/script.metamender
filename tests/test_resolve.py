@@ -6,6 +6,7 @@ from resources.lib.engine.resolve import (
     PREFER_IMDB,
     PREFER_TMDB,
     TMDB_ONLY,
+    build_ratings,
     resolve_field,
     resolve_metadata,
 )
@@ -224,3 +225,89 @@ class TestResolveMetadata:
 
         assert merged["rating"] == 8.0
         assert sources["rating"] == "imdb"
+
+
+# =============================================================================
+# Tests: build_ratings
+# =============================================================================
+
+
+def test_build_ratings_adds_both_slots_default_tmdb():
+    m, src, votes = build_ratings(
+        {"rating": 7.28, "votes": 2331}, {"rating": 8.1, "votes": 450000},
+        {}, PREFER_TMDB,
+    )
+    assert m["themoviedb"] == {"rating": 7.28, "votes": 2331, "default": True}
+    assert m["imdb"] == {"rating": 8.1, "votes": 450000, "default": False}
+    assert src == "themoviedb"
+    assert votes == 2331
+
+
+def test_build_ratings_default_follows_imdb_preference():
+    m, src, votes = build_ratings(
+        {"rating": 7.0, "votes": 10}, {"rating": 8.0, "votes": 9000},
+        {}, PREFER_IMDB,
+    )
+    assert m["imdb"]["default"] is True
+    assert m["themoviedb"]["default"] is False
+    assert src == "imdb"
+    assert votes == 9000
+
+
+def test_build_ratings_preserves_other_sources():
+    current = {"trakt": {"rating": 6.45, "votes": 13378, "default": True}}
+    m, src, votes = build_ratings(
+        {"rating": 6.6, "votes": 2558}, {}, current, PREFER_TMDB,
+    )
+    assert "trakt" in m
+    assert m["trakt"]["rating"] == 6.45 and m["trakt"]["votes"] == 13378
+    assert m["trakt"]["default"] is False  # default moved to our slot
+    assert m["themoviedb"]["default"] is True
+
+
+def test_build_ratings_tmdb_only_omits_imdb_slot():
+    m, src, votes = build_ratings(
+        {"rating": 7.0, "votes": 100}, {"rating": 8.0, "votes": 5000},
+        {}, TMDB_ONLY,
+    )
+    assert "themoviedb" in m
+    assert "imdb" not in m
+
+
+def test_build_ratings_no_change_returns_none():
+    current = {"themoviedb": {"rating": 7.28, "votes": 2331, "default": True}}
+    m, src, votes = build_ratings(
+        {"rating": 7.28, "votes": 2331}, {}, current, PREFER_TMDB,
+    )
+    assert m is None  # idempotent: same value -> no write (A3/A4)
+
+
+def test_build_ratings_tolerates_float_precision():
+    # Kodi stored 7.28 as 7.28000020980835; provider says 7.28 -> no change
+    current = {"themoviedb": {"rating": 7.28000020980835, "votes": 2331, "default": True}}
+    m, src, votes = build_ratings(
+        {"rating": 7.28, "votes": 2331}, {}, current, PREFER_TMDB,
+    )
+    assert m is None
+
+
+def test_build_ratings_detects_real_change():
+    current = {"themoviedb": {"rating": 7.0, "votes": 100, "default": True}}
+    m, src, votes = build_ratings(
+        {"rating": 7.5, "votes": 5000}, {}, current, PREFER_TMDB,
+    )
+    assert m is not None
+    assert m["themoviedb"]["rating"] == 7.5
+
+
+def test_build_ratings_skips_zero_and_out_of_range():
+    # 0.0 rating is "no data"; Kodi also rejects <=0 / >10
+    m, src, votes = build_ratings(
+        {"rating": 0.0, "votes": 0}, {}, {}, PREFER_TMDB,
+    )
+    assert m is None
+
+
+def test_build_ratings_no_candidates_returns_none():
+    m, src, votes = build_ratings({}, {}, {"trakt": {"rating": 6.0, "votes": 5}}, PREFER_TMDB)
+    assert m is None
