@@ -651,15 +651,13 @@ def run_scan(
 
             if not imdb_id and not tmdb_id:
                 log.debug(
-                    "Episode has no IMDB or TMDB ID, skipping",
+                    "Episode has no usable ID, skipping (re-checked each scan)",
                     event="scan.skip",
                     title=title,
-                )
-                _record_attempt_with_retry(
-                    tracker, media_type.name, identity, max_retries,
+                    media_type=media_type.name,
                 )
                 tracker.mark_cycle_processed(media_type.name, identity)
-                stats["processed"] += 1
+                stats["skipped"] += 1
                 continue
 
             # TMDB path first: match by TMDB episode ID in season data

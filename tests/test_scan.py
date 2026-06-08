@@ -892,10 +892,14 @@ class TestRunScanEpisodes:
         tracker.close()
 
     @patch("resources.lib.engine.scan.get_all_items")
-    def test_episode_without_imdb_or_tmdb_id_records_attempt(
+    def test_no_id_episode_skipped_not_attempted(
         self, mock_get_all, tmp_path, kodi_stubs
     ):
-        """Episode with only TVDB ID records attempt and eventually exhausts."""
+        """Episode with no tmdb/imdb id (tvdb only): skipped cleanly.
+
+        No attempt recorded, no error, not exhausted; re-checked for free
+        on the next scan (D4/A11).
+        """
         ep = _make_episode_item(tmdb_id=None)
         ep["uniqueid"] = {"tvdb": "12345"}
         mock_get_all.return_value = [ep]
@@ -908,10 +912,44 @@ class TestRunScanEpisodes:
             show_id_map={"Test Show": "55555"},
         )
 
+        assert stats["skipped"] >= 1
+        assert stats["errors"] == 0
+
+        # The item is upserted (it has a tvdb id) but no attempt was recorded
+        # and it is not exhausted.
         item = tracker.get_item("episode", "Test Show S01E01")
         assert item is not None
-        assert item["attempt_count"] == 1
-        assert stats["processed"] >= 1
+        assert item["attempt_count"] == 0
+        assert item["status"] != "exhausted"
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_episode_not_found_in_season_not_counted_as_error(
+        self, mock_fetch_season, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """Episode has a tmdb id absent from the fetched season: safe skip.
+
+        Not a provider error (data reality), so errors stays 0. A retry
+        attempt may still be recorded (A11).
+        """
+        ep = _make_episode_item(episode=1, tmdb_id="00000")
+        mock_get_all.return_value = [ep]
+        mock_fetch_season.return_value = [_tmdb_episode_data(tmdb_id="99999")]
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        show_map = {"Test Show": "55555"}
+        stats = run_scan(
+            EPISODE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            show_id_map=show_map,
+        )
+
+        assert stats["errors"] == 0
+        assert stats["updated"] == 0
         tracker.close()
 
 
