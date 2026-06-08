@@ -215,6 +215,11 @@ def _extract_fields(
                 continue
             value = int(value) * 60
 
+        # firstaired: only write a full ISO date; skip bare-year values
+        if kodi_key == "firstaired":
+            if not (isinstance(value, str) and len(value) == 10 and value[4] == "-" and value[7] == "-"):
+                continue
+
         current = item.get(kodi_key)
 
         # Empty-only guard (A2): never overwrite an existing non-empty value

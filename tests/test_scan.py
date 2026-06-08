@@ -329,6 +329,18 @@ def test_extract_fields_episode_title_placeholder_still_overwritten():
     assert out["title"] == "Real Title"
 
 
+def test_extract_fields_skips_bare_year_firstaired():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields({"firstaired": "2019"}, ["firstaired"], EPISODE, {"firstaired": ""})
+    assert "firstaired" not in out
+
+
+def test_extract_fields_writes_full_firstaired():
+    from resources.lib.engine.scan import _extract_fields
+    out = _extract_fields({"firstaired": "2019-06-04"}, ["firstaired"], EPISODE, {"firstaired": ""})
+    assert out["firstaired"] == "2019-06-04"
+
+
 # ---------------------------------------------------------------------------
 # Integration tests: run_scan
 # ---------------------------------------------------------------------------
