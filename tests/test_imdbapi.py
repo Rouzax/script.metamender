@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 from resources.lib.providers.imdbapi import (
@@ -15,6 +16,7 @@ from resources.lib.providers.imdbapi import (
     fetch_movie,
     fetch_season,
 )
+from resources.lib.utils import TransientProviderError
 
 
 # =============================================================================
@@ -220,7 +222,7 @@ class TestRuntimeMinutes:
 
 
 class TestFetchMovie:
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_all_fields(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
 
@@ -238,7 +240,7 @@ class TestFetchMovie:
         assert result["premiered"] == "1999"
         assert result["metacritic"] == 73
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_handles_missing_metacritic(self, mock_get: MagicMock) -> None:
         response = dict(MOVIE_RESPONSE)
         response["metacritic"] = None
@@ -249,7 +251,7 @@ class TestFetchMovie:
         assert result is not None
         assert result["metacritic"] is None
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_handles_missing_rating(self, mock_get: MagicMock) -> None:
         response = dict(MOVIE_RESPONSE)
         response["rating"] = None
@@ -261,15 +263,14 @@ class TestFetchMovie:
         assert result["rating"] == 0.0
         assert result["votes"] == 0
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
-    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = requests.ConnectionError("timeout")
 
-        result = fetch_movie("tt0133093")
+        with pytest.raises(TransientProviderError):
+            fetch_movie("tt0133093")
 
-        assert result is None
-
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
 
@@ -277,22 +278,21 @@ class TestFetchMovie:
 
         assert result is None
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
-    def test_returns_none_on_invalid_json(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_invalid_json(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, raise_for_json=True)
 
-        result = fetch_movie("tt0133093")
+        with pytest.raises(TransientProviderError):
+            fetch_movie("tt0133093")
 
-        assert result is None
-
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_no_auth_headers(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
 
         fetch_movie("tt0133093")
 
         call_kwargs = mock_get.call_args
-        params = call_kwargs[1].get("params", {})
+        params = call_kwargs[1].get("params") or {}
         assert "api_key" not in params
         assert "apikey" not in params
 
@@ -303,7 +303,7 @@ class TestFetchMovie:
 
 
 class TestFetchEpisode:
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_episode_fields(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, EPISODE_RESPONSE)
 
@@ -318,15 +318,14 @@ class TestFetchEpisode:
         assert result["writers"] == ["Shawn Ryan", "Matthew Quirk"]
         assert result["runtime"] == 50
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
-    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = requests.ConnectionError("timeout")
 
-        result = fetch_episode("tt27356735")
+        with pytest.raises(TransientProviderError):
+            fetch_episode("tt27356735")
 
-        assert result is None
-
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
 
@@ -341,7 +340,7 @@ class TestFetchEpisode:
 
 
 class TestFetchSeason:
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_episode_list(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {
             "episodes": SEASON_RESPONSE_PAGE1["episodes"],
@@ -363,7 +362,7 @@ class TestFetchSeason:
         assert ep1["runtime"] == 50
         assert ep1["firstaired"] == "2025-01-23"
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_auto_paginates(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = [
             _mock_response(200, SEASON_RESPONSE_PAGE1),
@@ -378,7 +377,7 @@ class TestFetchSeason:
         assert result[2]["title"] == "Government Property"
         assert mock_get.call_count == 2
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_pagination_passes_token(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = [
             _mock_response(200, SEASON_RESPONSE_PAGE1),
@@ -390,7 +389,7 @@ class TestFetchSeason:
         second_call_params = mock_get.call_args_list[1][1]["params"]
         assert second_call_params["pageToken"] == "page2token"
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_handles_empty_season(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {"episodes": []})
 
@@ -399,15 +398,14 @@ class TestFetchSeason:
         assert result is not None
         assert result == []
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
-    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = requests.ConnectionError("timeout")
 
-        result = fetch_season("tt13918776", 2)
+        with pytest.raises(TransientProviderError):
+            fetch_season("tt13918776", 2)
 
-        assert result is None
-
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
 
@@ -422,7 +420,7 @@ class TestFetchSeason:
 
 
 class TestFetchCertificates:
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_groups_by_country(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, CERTIFICATES_RESPONSE)
 
@@ -433,7 +431,7 @@ class TestFetchCertificates:
         assert "US" in result
         assert "GB" in result
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_preserves_multiple_entries_per_country(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, CERTIFICATES_RESPONSE)
 
@@ -446,7 +444,7 @@ class TestFetchCertificates:
         assert result["NL"][1]["rating"] == "12"
         assert result["NL"][1]["attributes"] == ["re-rating"]
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_preserves_attributes(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, CERTIFICATES_RESPONSE)
 
@@ -457,7 +455,7 @@ class TestFetchCertificates:
         assert result["US"][0]["attributes"] == ["certificate #36569"]
         assert result["US"][1]["attributes"] == []
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_single_entry_country(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, CERTIFICATES_RESPONSE)
 
@@ -467,7 +465,7 @@ class TestFetchCertificates:
         assert len(result["GB"]) == 1
         assert result["GB"][0]["rating"] == "15"
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_handles_empty_certificates(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {"certificates": []})
 
@@ -476,15 +474,14 @@ class TestFetchCertificates:
         assert result is not None
         assert result == {}
 
-    @patch("resources.lib.providers.imdbapi.requests.get")
-    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = requests.ConnectionError("timeout")
 
-        result = fetch_certificates("tt0133093")
+        with pytest.raises(TransientProviderError):
+            fetch_certificates("tt0133093")
 
-        assert result is None
-
-    @patch("resources.lib.providers.imdbapi.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
 

@@ -18,7 +18,7 @@ from resources.lib.providers.tmdb import (
     fetch_tvshow,
     resolve_id,
 )
-from resources.lib.utils import ApiKeyError
+from resources.lib.utils import ApiKeyError, TransientProviderError
 
 
 # =============================================================================
@@ -348,7 +348,7 @@ class TestNormalizeCerts:
 
 
 class TestFetchMovie:
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_all_fields(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
 
@@ -369,14 +369,14 @@ class TestFetchMovie:
             "South Korea",
         ]
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_directors_parsed(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         result = fetch_movie("666277", "fake_key")
         assert result is not None
         assert result["directors"] == ["Celine Song"]
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_writers_parsed_and_deduplicated(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         result = fetch_movie("666277", "fake_key")
@@ -384,7 +384,7 @@ class TestFetchMovie:
         # Celine Song appears once in fixture with job=Writer, department=Writing
         assert result["writers"] == ["Celine Song"]
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_trailer_formatted_as_youtube_url(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         result = fetch_movie("666277", "fake_key")
@@ -392,7 +392,7 @@ class TestFetchMovie:
         expected = "plugin://plugin.video.youtube/?action=play_video&videoid=kA244xewjcI"
         assert result["trailer"] == expected
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_trailer_none_when_no_trailer(self, mock_get: MagicMock) -> None:
         response = dict(MOVIE_RESPONSE)
         response["videos"] = {"results": []}
@@ -401,7 +401,7 @@ class TestFetchMovie:
         assert result is not None
         assert result["trailer"] is None
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_certifications_parsed(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         result = fetch_movie("666277", "fake_key")
@@ -412,41 +412,41 @@ class TestFetchMovie:
             "DE": "6",
         }
 
-    @patch("resources.lib.providers.tmdb.requests.get")
-    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         import requests as req
 
         mock_get.side_effect = req.ConnectionError("timeout")
-        result = fetch_movie("666277", "fake_key")
-        assert result is None
+        with pytest.raises(TransientProviderError):
+            fetch_movie("666277", "fake_key")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(401)
         with pytest.raises(ApiKeyError) as exc_info:
             fetch_movie("666277", "fake_key")
         assert exc_info.value.provider == "tmdb"
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
         result = fetch_movie("666277", "fake_key")
         assert result is None
 
-    @patch("resources.lib.providers.tmdb.requests.get")
-    def test_returns_none_on_invalid_json(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_invalid_json(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, raise_for_json=True)
-        result = fetch_movie("666277", "fake_key")
-        assert result is None
+        with pytest.raises(TransientProviderError):
+            fetch_movie("666277", "fake_key")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_passes_language_param(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         fetch_movie("666277", "fake_key", language="nl-NL")
         call_kwargs = mock_get.call_args
         assert call_kwargs[1]["params"]["language"] == "nl-NL"
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_se_certifications_normalized(self, mock_get: MagicMock) -> None:
         response = dict(MOVIE_RESPONSE)
         response["release_dates"] = {
@@ -471,7 +471,7 @@ class TestFetchMovie:
 
 
 class TestFetchSeason:
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_episode_list(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
 
@@ -491,7 +491,7 @@ class TestFetchSeason:
         assert ep1["firstaired"] == "2025-01-23"
         assert ep1["runtime"] == 51
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_tmdb_id_per_episode(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
 
@@ -501,7 +501,7 @@ class TestFetchSeason:
         assert result[0]["tmdb_id"] == "4014249"
         assert result[1]["tmdb_id"] == "4053246"
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_episode_directors_and_writers(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
 
@@ -516,7 +516,7 @@ class TestFetchSeason:
         assert ep2["directors"] == ["Guy Ferland"]
         assert ep2["writers"] == ["Tiffany Shaw Ho"]
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_handles_empty_episodes(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {"episodes": []})
 
@@ -525,21 +525,21 @@ class TestFetchSeason:
         assert result is not None
         assert result == []
 
-    @patch("resources.lib.providers.tmdb.requests.get")
-    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         import requests as req
 
         mock_get.side_effect = req.ConnectionError("timeout")
-        result = fetch_season("129552", 2, "fake_key")
-        assert result is None
+        with pytest.raises(TransientProviderError):
+            fetch_season("129552", 2, "fake_key")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(401)
         with pytest.raises(ApiKeyError):
             fetch_season("129552", 2, "fake_key")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
         result = fetch_season("129552", 2, "fake_key")
@@ -552,7 +552,7 @@ class TestFetchSeason:
 
 
 class TestFetchTvshow:
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_metadata(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, TVSHOW_RESPONSE)
 
@@ -564,7 +564,7 @@ class TestFetchTvshow:
         assert result["plot"] == "An FBI agent unravels a conspiracy."
         assert result["genres"] == ["Action & Adventure", "Drama"]
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_certifications_parsed(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, TVSHOW_RESPONSE)
 
@@ -577,25 +577,25 @@ class TestFetchTvshow:
             "NL": "16",
         }
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(401)
         with pytest.raises(ApiKeyError):
             fetch_tvshow("129552", "fake_key")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
         result = fetch_tvshow("129552", "fake_key")
         assert result is None
 
-    @patch("resources.lib.providers.tmdb.requests.get")
-    def test_returns_none_on_invalid_json(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_invalid_json(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, raise_for_json=True)
-        result = fetch_tvshow("129552", "fake_key")
-        assert result is None
+        with pytest.raises(TransientProviderError):
+            fetch_tvshow("129552", "fake_key")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_se_tv_certs_normalized(self, mock_get: MagicMock) -> None:
         response = dict(TVSHOW_RESPONSE)
         response["content_ratings"] = {

@@ -185,6 +185,11 @@ class ApiKeyError(Exception):
         super().__init__("Invalid API key for {}".format(provider))
 
 
+class TransientProviderError(Exception):
+    """A provider request failed transiently (429, 5xx, timeout, connection,
+    malformed JSON). Counts toward the circuit breaker; the item is retried."""
+
+
 # =============================================================================
 # Structured Logger
 # =============================================================================

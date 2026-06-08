@@ -22,7 +22,8 @@ from typing import Dict, List, Optional
 
 import requests
 
-from resources.lib.constants import TMDB_BASE_URL
+from resources.lib.constants import METAMENDER_USER_AGENT, TMDB_BASE_URL
+from resources.lib.providers.http import provider_get
 from resources.lib.utils import ApiKeyError, get_logger, log_timing
 
 log = get_logger('tmdb')
@@ -148,6 +149,7 @@ def resolve_id(
                 url,
                 params={"api_key": api_key, "external_source": source},
                 timeout=10,
+                headers={"User-Agent": METAMENDER_USER_AGENT},
             )
     except requests.RequestException:
         log.exception(
@@ -220,37 +222,11 @@ def fetch_movie(
     }
 
     rpc_start = time.perf_counter()
-    try:
-        with log_timing(log, "tmdb.movie", tmdb_id=tmdb_id):
-            resp = requests.get(url, params=params, timeout=10)
-    except requests.RequestException:
-        log.exception(
-            "Request failed",
-            event="tmdb.error",
-            tmdb_id=tmdb_id,
+    with log_timing(log, "tmdb.movie", tmdb_id=tmdb_id):
+        data = provider_get(
+            url, logger=log, label="tmdb.movie", params=params, provider="tmdb",
         )
-        return None
-
-    if resp.status_code == 401:
-        raise ApiKeyError("tmdb")
-
-    if resp.status_code != 200:
-        log.warning(
-            "Unexpected status",
-            event="tmdb.error",
-            tmdb_id=tmdb_id,
-            status_code=resp.status_code,
-        )
-        return None
-
-    try:
-        data = resp.json()
-    except ValueError:
-        log.exception(
-            "Invalid JSON",
-            event="tmdb.error",
-            tmdb_id=tmdb_id,
-        )
+    if data is None:
         return None
 
     elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
@@ -315,43 +291,14 @@ def fetch_season(
     }
 
     rpc_start = time.perf_counter()
-    try:
-        with log_timing(
-            log, "tmdb.season",
-            tmdb_id=show_tmdb_id, season=season_number,
-        ):
-            resp = requests.get(url, params=params, timeout=10)
-    except requests.RequestException:
-        log.exception(
-            "Request failed",
-            event="tmdb.error",
-            tmdb_id=show_tmdb_id,
-            season=season_number,
+    with log_timing(
+        log, "tmdb.season",
+        tmdb_id=show_tmdb_id, season=season_number,
+    ):
+        data = provider_get(
+            url, logger=log, label="tmdb.season", params=params, provider="tmdb",
         )
-        return None
-
-    if resp.status_code == 401:
-        raise ApiKeyError("tmdb")
-
-    if resp.status_code != 200:
-        log.warning(
-            "Unexpected status",
-            event="tmdb.error",
-            tmdb_id=show_tmdb_id,
-            season=season_number,
-            status_code=resp.status_code,
-        )
-        return None
-
-    try:
-        data = resp.json()
-    except ValueError:
-        log.exception(
-            "Invalid JSON",
-            event="tmdb.error",
-            tmdb_id=show_tmdb_id,
-            season=season_number,
-        )
+    if data is None:
         return None
 
     elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
@@ -405,37 +352,11 @@ def fetch_tvshow(
     }
 
     rpc_start = time.perf_counter()
-    try:
-        with log_timing(log, "tmdb.tvshow", tmdb_id=tmdb_id):
-            resp = requests.get(url, params=params, timeout=10)
-    except requests.RequestException:
-        log.exception(
-            "Request failed",
-            event="tmdb.error",
-            tmdb_id=tmdb_id,
+    with log_timing(log, "tmdb.tvshow", tmdb_id=tmdb_id):
+        data = provider_get(
+            url, logger=log, label="tmdb.tvshow", params=params, provider="tmdb",
         )
-        return None
-
-    if resp.status_code == 401:
-        raise ApiKeyError("tmdb")
-
-    if resp.status_code != 200:
-        log.warning(
-            "Unexpected status",
-            event="tmdb.error",
-            tmdb_id=tmdb_id,
-            status_code=resp.status_code,
-        )
-        return None
-
-    try:
-        data = resp.json()
-    except ValueError:
-        log.exception(
-            "Invalid JSON",
-            event="tmdb.error",
-            tmdb_id=tmdb_id,
-        )
+    if data is None:
         return None
 
     elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
@@ -480,31 +401,15 @@ def fetch_episode_external_ids(
         TMDB_BASE_URL, show_tmdb_id, season_number, episode_number,
     )
 
-    try:
-        with log_timing(
-            log, "tmdb.episode_ids",
-            tmdb_id=show_tmdb_id, season=season_number, episode=episode_number,
-        ):
-            resp = requests.get(
-                url, params={"api_key": api_key}, timeout=10,
-            )
-    except requests.RequestException:
-        log.exception(
-            "External IDs request failed",
-            event="tmdb.error",
-            tmdb_id=show_tmdb_id,
+    with log_timing(
+        log, "tmdb.episode_ids",
+        tmdb_id=show_tmdb_id, season=season_number, episode=episode_number,
+    ):
+        data = provider_get(
+            url, logger=log, label="tmdb.episode_ids",
+            params={"api_key": api_key}, provider="tmdb",
         )
-        return None
-
-    if resp.status_code == 401:
-        raise ApiKeyError("tmdb")
-
-    if resp.status_code != 200:
-        return None
-
-    try:
-        data = resp.json()
-    except ValueError:
+    if data is None:
         return None
 
     imdb_id = data.get("imdb_id")

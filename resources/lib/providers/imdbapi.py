@@ -20,9 +20,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
-import requests
-
 from resources.lib.constants import IMDBAPI_BASE_URL
+from resources.lib.providers.http import provider_get
 from resources.lib.utils import get_logger, log_timing
 
 log = get_logger('imdb')
@@ -91,34 +90,11 @@ def fetch_movie(imdb_id: str) -> Optional[Dict[str, Any]]:
     url = "{}/titles/{}".format(IMDBAPI_BASE_URL, imdb_id)
 
     rpc_start = time.perf_counter()
-    try:
-        with log_timing(log, "imdb.movie", imdb_id=imdb_id):
-            resp = requests.get(url, timeout=10)
-    except requests.RequestException:
-        log.exception(
-            "Request failed",
-            event="imdb.error",
-            imdb_id=imdb_id,
+    with log_timing(log, "imdb.movie", imdb_id=imdb_id):
+        data = provider_get(
+            url, logger=log, label="imdb.movie", provider="imdb",
         )
-        return None
-
-    if resp.status_code != 200:
-        log.warning(
-            "Unexpected status",
-            event="imdb.error",
-            imdb_id=imdb_id,
-            status_code=resp.status_code,
-        )
-        return None
-
-    try:
-        data = resp.json()
-    except ValueError:
-        log.exception(
-            "Invalid JSON",
-            event="imdb.error",
-            imdb_id=imdb_id,
-        )
+    if data is None:
         return None
 
     elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
@@ -166,34 +142,11 @@ def fetch_episode(imdb_id: str) -> Optional[Dict[str, Any]]:
     url = "{}/titles/{}".format(IMDBAPI_BASE_URL, imdb_id)
 
     rpc_start = time.perf_counter()
-    try:
-        with log_timing(log, "imdb.episode", imdb_id=imdb_id):
-            resp = requests.get(url, timeout=10)
-    except requests.RequestException:
-        log.exception(
-            "Request failed",
-            event="imdb.error",
-            imdb_id=imdb_id,
+    with log_timing(log, "imdb.episode", imdb_id=imdb_id):
+        data = provider_get(
+            url, logger=log, label="imdb.episode", provider="imdb",
         )
-        return None
-
-    if resp.status_code != 200:
-        log.warning(
-            "Unexpected status",
-            event="imdb.error",
-            imdb_id=imdb_id,
-            status_code=resp.status_code,
-        )
-        return None
-
-    try:
-        data = resp.json()
-    except ValueError:
-        log.exception(
-            "Invalid JSON",
-            event="imdb.error",
-            imdb_id=imdb_id,
-        )
+    if data is None:
         return None
 
     elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
@@ -243,40 +196,15 @@ def fetch_season(
 
         url = "{}/titles/{}/episodes".format(IMDBAPI_BASE_URL, show_imdb_id)
 
-        try:
-            with log_timing(
-                log, "imdb.season",
-                imdb_id=show_imdb_id, season=season,
-            ):
-                resp = requests.get(url, params=params, timeout=10)
-        except requests.RequestException:
-            log.exception(
-                "Request failed",
-                event="imdb.error",
-                imdb_id=show_imdb_id,
-                season=season,
+        with log_timing(
+            log, "imdb.season",
+            imdb_id=show_imdb_id, season=season,
+        ):
+            data = provider_get(
+                url, logger=log, label="imdb.season",
+                params=params, provider="imdb",
             )
-            return None
-
-        if resp.status_code != 200:
-            log.warning(
-                "Unexpected status",
-                event="imdb.error",
-                imdb_id=show_imdb_id,
-                season=season,
-                status_code=resp.status_code,
-            )
-            return None
-
-        try:
-            data = resp.json()
-        except ValueError:
-            log.exception(
-                "Invalid JSON",
-                event="imdb.error",
-                imdb_id=show_imdb_id,
-                season=season,
-            )
+        if data is None:
             return None
 
         for ep in data.get("episodes", []):
@@ -325,34 +253,11 @@ def fetch_certificates(
     url = "{}/titles/{}/certificates".format(IMDBAPI_BASE_URL, imdb_id)
 
     rpc_start = time.perf_counter()
-    try:
-        with log_timing(log, "imdb.certificates", imdb_id=imdb_id):
-            resp = requests.get(url, timeout=10)
-    except requests.RequestException:
-        log.exception(
-            "Request failed",
-            event="imdb.error",
-            imdb_id=imdb_id,
+    with log_timing(log, "imdb.certificates", imdb_id=imdb_id):
+        data = provider_get(
+            url, logger=log, label="imdb.certificates", provider="imdb",
         )
-        return None
-
-    if resp.status_code != 200:
-        log.warning(
-            "Unexpected status",
-            event="imdb.error",
-            imdb_id=imdb_id,
-            status_code=resp.status_code,
-        )
-        return None
-
-    try:
-        data = resp.json()
-    except ValueError:
-        log.exception(
-            "Invalid JSON",
-            event="imdb.error",
-            imdb_id=imdb_id,
-        )
+    if data is None:
         return None
 
     elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
