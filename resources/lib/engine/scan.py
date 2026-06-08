@@ -23,6 +23,7 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 import xbmc
 
+from resources.lib.data.identity import compute_identity
 from resources.lib.data.kodi import get_all_items, update_item
 from resources.lib.data.media_types import MediaType
 from resources.lib.data.sources import match_source
@@ -81,7 +82,7 @@ def _make_stats() -> Dict[str, Any]:
 def _record_attempt_with_retry(
     tracker: TrackerDB,
     media_type_name: str,
-    title: str,
+    identity: str,
     max_retries: int,
 ) -> None:
     """Record an attempt and set next retry or mark exhausted.
@@ -91,22 +92,22 @@ def _record_attempt_with_retry(
     (which increments the count). If retries are exhausted, marks the
     item as exhausted.
     """
-    tracker_item = tracker.get_item(media_type_name, title)
+    tracker_item = tracker.get_item(media_type_name, identity)
     current_count = tracker_item["attempt_count"] if tracker_item else 0
     next_attempt = current_count + 1
     next_retry_date = compute_next_retry(next_attempt, max_retries)
 
-    tracker.record_attempt(media_type_name, title, next_retry=next_retry_date)
+    tracker.record_attempt(media_type_name, identity, next_retry=next_retry_date)
 
     if next_retry_date is None:
-        tracker.update_item_status(media_type_name, title, "exhausted")
+        tracker.update_item_status(media_type_name, identity, "exhausted")
 
 
 def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
-    """Build the tracker key for an item.
+    """Build the display title for an item (logging/UI, not the tracker key).
 
-    Movies and TV shows use the title directly.
-    Episodes use "ShowTitle S01E02" format.
+    The tracker key is produced separately by compute_identity. Movies and TV
+    shows use the title directly; episodes use "ShowTitle S01E02" format.
     """
     if media_type.name == "episode":
         return "{showtitle} S{season:02d}E{episode:02d}".format(
@@ -315,11 +316,12 @@ def run_scan(
                     media_type=media_type.name,
                 )
 
+        identity = compute_identity(item, media_type)
         title = _item_title(item, media_type)
         kodi_id = item.get(media_type.kodi_id_field, 0)
 
         # Resume: skip items already processed in this cycle
-        pre_tracker = tracker.get_item(media_type.name, title)
+        pre_tracker = tracker.get_item(media_type.name, identity)
         if pre_tracker and pre_tracker.get("cycle_processed"):
             stats["skipped"] += 1
             continue
@@ -352,7 +354,8 @@ def run_scan(
         # Sync to tracker
         tracker.upsert_item(
             media_type.name,
-            title,
+            identity,
+            title=title,
             kodi_id=kodi_id,
             tmdb_id=tmdb_id,
             imdb_id=imdb_id,
@@ -361,12 +364,13 @@ def run_scan(
             premiered=item.get(media_type.date_field, ""),
             date_added=item.get("dateadded", ""),
         )
+        tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
 
         # Detect gaps
         gaps = detect_gaps(item, enabled_fields, media_type)
 
         # Check tracker state for retry gating and staleness
-        tracker_item = tracker.get_item(media_type.name, title)
+        tracker_item = tracker.get_item(media_type.name, identity)
         if tracker_item is not None:
             # Skip exhausted items
             if tracker_item["status"] == "exhausted":
@@ -377,7 +381,7 @@ def run_scan(
                     media_type=media_type.name,
                     attempt_count=tracker_item["attempt_count"],
                 )
-                tracker.mark_cycle_processed(media_type.name, title)
+                tracker.mark_cycle_processed(media_type.name, identity)
                 stats["skipped"] += 1
                 continue
 
@@ -393,7 +397,7 @@ def run_scan(
                         media_type=media_type.name,
                         next_retry=next_retry,
                     )
-                    tracker.mark_cycle_processed(media_type.name, title)
+                    tracker.mark_cycle_processed(media_type.name, identity)
                     stats["skipped"] += 1
                     continue
 
@@ -405,7 +409,7 @@ def run_scan(
                 min_votes = settings.get("min_votes_movie", 50)
                 stale_days = settings.get("stale_threshold_days", 365)
                 field_info = tracker.get_field_status(
-                    media_type.name, title, "rating"
+                    media_type.name, identity, "rating"
                 )
                 if field_info is not None:
                     stale = is_rating_stale(
@@ -429,7 +433,7 @@ def run_scan(
                 min_votes = settings.get("min_votes_episode", 20)
                 stale_days = settings.get("stale_threshold_days", 365)
                 field_info = tracker.get_field_status(
-                    media_type.name, title, "rating"
+                    media_type.name, identity, "rating"
                 )
                 if field_info is not None:
                     stale = is_rating_stale(
@@ -456,7 +460,7 @@ def run_scan(
             _TMDB_TO_KODI.get(k, k)
             for k in _TMDB_TO_KODI
         } & enabled_fields & media_type.backfill_fields
-        checked = tracker.get_checked_fields(media_type.name, title)
+        checked = tracker.get_checked_fields(media_type.name, identity)
         unchecked = kodi_fields - checked - set(gaps)
         if unchecked:
             gaps.extend(sorted(unchecked))
@@ -469,8 +473,8 @@ def run_scan(
             )
 
         if not gaps:
-            tracker.update_item_status(media_type.name, title, "complete")
-            tracker.mark_cycle_processed(media_type.name, title)
+            tracker.update_item_status(media_type.name, identity, "complete")
+            tracker.mark_cycle_processed(media_type.name, identity)
             stats["skipped"] += 1
             continue
 
@@ -533,7 +537,7 @@ def run_scan(
                         )
 
                 if tmdb_id:
-                    tracker.upsert_item(media_type.name, title, tmdb_id=tmdb_id)
+                    tracker.upsert_item(media_type.name, identity, tmdb_id=tmdb_id)
 
             # Fetch TMDB data
             if tmdb_id and not tmdb_disabled:
@@ -576,7 +580,7 @@ def run_scan(
                 uid = item.get("uniqueid", {})
                 uid["imdb"] = enriched_imdb
                 update_item(kodi_id, media_type, title, uniqueid=uid)
-                tracker.upsert_item(media_type.name, title, imdb_id=enriched_imdb)
+                tracker.upsert_item(media_type.name, identity, imdb_id=enriched_imdb)
                 imdb_id = enriched_imdb
                 log.info(
                     "Enriched IMDB ID from TMDB",
@@ -613,9 +617,9 @@ def run_scan(
             if tmdb_data is None and imdb_data is None:
                 stats["errors"] += 1
                 _record_attempt_with_retry(
-                    tracker, media_type.name, title, max_retries,
+                    tracker, media_type.name, identity, max_retries,
                 )
-                tracker.mark_cycle_processed(media_type.name, title)
+                tracker.mark_cycle_processed(media_type.name, identity)
                 stats["processed"] += 1
                 continue
 
@@ -644,9 +648,9 @@ def run_scan(
                     title=title,
                 )
                 _record_attempt_with_retry(
-                    tracker, media_type.name, title, max_retries,
+                    tracker, media_type.name, identity, max_retries,
                 )
-                tracker.mark_cycle_processed(media_type.name, title)
+                tracker.mark_cycle_processed(media_type.name, identity)
                 stats["processed"] += 1
                 continue
 
@@ -686,7 +690,7 @@ def run_scan(
                                         uid = item.get("uniqueid", {})
                                         uid["imdb"] = enriched_imdb
                                         update_item(kodi_id, media_type, title, uniqueid=uid)
-                                        tracker.upsert_item(media_type.name, title, imdb_id=enriched_imdb)
+                                        tracker.upsert_item(media_type.name, identity, imdb_id=enriched_imdb)
                                         imdb_id = enriched_imdb
                                         log.info(
                                             "Enriched IMDB ID from TMDB",
@@ -756,9 +760,9 @@ def run_scan(
             if tmdb_data is None and imdb_data is None:
                 stats["errors"] += 1
                 _record_attempt_with_retry(
-                    tracker, media_type.name, title, max_retries,
+                    tracker, media_type.name, identity, max_retries,
                 )
-                tracker.mark_cycle_processed(media_type.name, title)
+                tracker.mark_cycle_processed(media_type.name, identity)
                 stats["processed"] += 1
                 continue
 
@@ -804,7 +808,7 @@ def run_scan(
                     field_source = source_map.get(tmdb_key, "tmdb")
                     tracker.set_field_status(
                         media_type.name,
-                        title,
+                        identity,
                         field_name,
                         "filled",
                         source=field_source,
@@ -820,11 +824,11 @@ def run_scan(
                 kodi_val = item.get(gap_field) or item.get(tmdb_key)
                 if kodi_val and kodi_val != "" and kodi_val != 0:
                     tracker.set_field_status(
-                        media_type.name, title, gap_field, "checked"
+                        media_type.name, identity, gap_field, "checked"
                     )
                 else:
                     tracker.set_field_status(
-                        media_type.name, title, gap_field, "empty"
+                        media_type.name, identity, gap_field, "empty"
                     )
 
         # Determine overall item status: fields that were written ("filled")
@@ -833,18 +837,18 @@ def run_scan(
         resolved = set(fields_to_write.keys())
         for gap_field in gaps:
             if gap_field not in resolved:
-                fs = tracker.get_field_status(media_type.name, title, gap_field)
+                fs = tracker.get_field_status(media_type.name, identity, gap_field)
                 if fs and fs.get("status") == "checked":
                     resolved.add(gap_field)
         remaining_gaps = [g for g in gaps if g not in resolved]
         if not remaining_gaps:
-            tracker.update_item_status(media_type.name, title, "complete")
+            tracker.update_item_status(media_type.name, identity, "complete")
         else:
             _record_attempt_with_retry(
-                tracker, media_type.name, title, max_retries,
+                tracker, media_type.name, identity, max_retries,
             )
 
-        tracker.mark_cycle_processed(media_type.name, title)
+        tracker.mark_cycle_processed(media_type.name, identity)
         stats["processed"] += 1
 
     elapsed = round(time.perf_counter() - scan_start, 2)

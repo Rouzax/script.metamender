@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from resources.lib.data.identity import compute_identity
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.engine.scan import (
     _extract_fields,
@@ -81,6 +82,10 @@ def _make_movie_item(
         "trailer": "",
         "runtime": 0,
     }
+
+
+# Identity the scan computes for the default movie fixture (tmdb uniqueid wins).
+_MOVIE_IDENTITY = compute_identity(_make_movie_item(), MOVIE)
 
 
 def _make_tvshow_item(title="Test Show", tmdb_id="99999"):
@@ -349,9 +354,9 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         # Pre-populate field_status so first-encounter check passes
-        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
-        tracker.set_field_status("movie", "Test Movie", "rating", "checked")
-        tracker.set_field_status("movie", "Test Movie", "plot", "checked")
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "rating", "checked")
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "plot", "checked")
 
         run_scan(
             MOVIE, tracker, _make_source_config(),
@@ -422,7 +427,7 @@ class TestRunScanMovies:
             "fake_key", _make_settings(),
         )
 
-        item = tracker.get_item("movie", "Test Movie")
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item is not None
         assert item["attempt_count"] == 1
         tracker.close()
@@ -466,7 +471,7 @@ class TestRunScanMovies:
             "fake_key", _make_settings(),
         )
 
-        item = tracker.get_item("movie", "Test Movie")
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item is not None
         assert item["status"] == "complete"
         tracker.close()
@@ -490,7 +495,7 @@ class TestRunScanMovies:
             "fake_key", _make_settings(),
         )
 
-        item = tracker.get_item("movie", "Test Movie")
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item is not None
         assert item["attempt_count"] == 1
         tracker.close()
@@ -512,7 +517,7 @@ class TestRunScanMovies:
             "fake_key", _make_settings(),
         )
 
-        field = tracker.get_field_status("movie", "Test Movie", "rating")
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
         assert field is not None
         assert field["status"] == "filled"
         assert field["source"] == "tmdb"
@@ -531,9 +536,9 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         # Pre-populate field_status so first-encounter doesn't trigger
-        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
-        tracker.set_field_status("movie", "Test Movie", "rating", "checked")
-        tracker.set_field_status("movie", "Test Movie", "plot", "checked")
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "rating", "checked")
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "plot", "checked")
 
         run_scan(
             MOVIE, tracker, _make_source_config(),
@@ -541,7 +546,7 @@ class TestRunScanMovies:
             "fake_key", _make_settings(),
         )
 
-        db_item = tracker.get_item("movie", "Test Movie")
+        db_item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert db_item is not None
         assert db_item["status"] == "complete"
         assert not mock_fetch.called
@@ -596,7 +601,7 @@ class TestRunScanMovies:
             )
 
             assert stats["updated"] >= 1
-            field = tracker.get_field_status("movie", "Test Movie", "rating")
+            field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
             assert field is not None
             assert field["source"] == "imdb"
             tracker.close()
@@ -830,8 +835,8 @@ class TestRunScanStaleness:
         mock_get_all.return_value = [_make_movie_item()]
         tracker = _make_tracker(tmp_path)
         # Pre-seed tracker as exhausted
-        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
-        tracker.update_item_status("movie", "Test Movie", "exhausted")
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.update_item_status("movie", _MOVIE_IDENTITY, "exhausted")
 
         stats = run_scan(
             MOVIE, tracker, _make_source_config(),
@@ -851,9 +856,9 @@ class TestRunScanStaleness:
     ):
         mock_get_all.return_value = [_make_movie_item()]
         tracker = _make_tracker(tmp_path)
-        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
         # Set next_retry to far future
-        tracker.record_attempt("movie", "Test Movie", next_retry="2099-01-01")
+        tracker.record_attempt("movie", _MOVIE_IDENTITY, next_retry="2099-01-01")
 
         stats = run_scan(
             MOVIE, tracker, _make_source_config(),
@@ -876,9 +881,9 @@ class TestRunScanStaleness:
         mock_update.return_value = True
 
         tracker = _make_tracker(tmp_path)
-        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
         # Set next_retry to past
-        tracker.record_attempt("movie", "Test Movie", next_retry="2020-01-01")
+        tracker.record_attempt("movie", _MOVIE_IDENTITY, next_retry="2020-01-01")
 
         stats = run_scan(
             MOVIE, tracker, _make_source_config(),
@@ -899,10 +904,10 @@ class TestRunScanStaleness:
         mock_fetch.return_value = None  # TMDB returns nothing
 
         tracker = _make_tracker(tmp_path)
-        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
         # Simulate 3 previous attempts (max is 4)
         for _ in range(3):
-            tracker.record_attempt("movie", "Test Movie", next_retry="2020-01-01")
+            tracker.record_attempt("movie", _MOVIE_IDENTITY, next_retry="2020-01-01")
 
         settings = _make_settings()
         settings["max_retries"] = 4
@@ -913,7 +918,7 @@ class TestRunScanStaleness:
             "fake_key", settings,
         )
 
-        item = tracker.get_item("movie", "Test Movie")
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item["status"] == "exhausted"
         assert item["attempt_count"] == 4
         tracker.close()
@@ -928,18 +933,18 @@ class TestRunScanStaleness:
         mock_fetch.return_value = None
 
         tracker = _make_tracker(tmp_path)
-        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
 
         # First scan
         run_scan(MOVIE, tracker, _make_source_config(),
                  frozenset({"rating"}), "fake_key", _make_settings())
 
-        item = tracker.get_item("movie", "Test Movie")
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
         assert item["attempt_count"] == 1
         assert item["next_retry"] is not None
 
         # Set next_retry to past so second scan processes the item
-        tracker.record_attempt("movie", "Test Movie", next_retry="2020-01-01")
+        tracker.record_attempt("movie", _MOVIE_IDENTITY, next_retry="2020-01-01")
         # attempt_count is now 2 from the manual record_attempt
 
         # Start new cycle so cycle_processed is reset
@@ -947,7 +952,7 @@ class TestRunScanStaleness:
         run_scan(MOVIE, tracker, _make_source_config(),
                  frozenset({"rating"}), "fake_key", _make_settings())
 
-        item = tracker.get_item("movie", "Test Movie")
+        item = tracker.get_item("movie", _MOVIE_IDENTITY)
         # Should be 3: 1 from first scan + 1 manual + 1 from second scan
         assert item["attempt_count"] == 3
         tracker.close()
@@ -999,3 +1004,16 @@ class TestRunScanWithItems:
         assert not mock_get_all.called
         assert not mock_fetch.called
         assert stats["processed"] == 0
+
+
+def test_same_title_movies_get_separate_tracker_rows(tmp_path):
+    # Two movies named "Dune", different years and tmdb ids
+    from resources.lib.data.tracker import TrackerDB
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    a = {"title": "Dune", "year": 1984, "uniqueid": {"tmdb": "841"}}
+    b = {"title": "Dune", "year": 2021, "uniqueid": {"tmdb": "438631"}}
+    db.upsert_item("movie", compute_identity(a, MOVIE), title="Dune", kodi_id=1)
+    db.upsert_item("movie", compute_identity(b, MOVIE), title="Dune", kodi_id=2)
+    assert db.get_item("movie", "tmdb:841")["kodi_id"] == 1
+    assert db.get_item("movie", "tmdb:438631")["kodi_id"] == 2
+    db.close()
