@@ -539,19 +539,6 @@ class TrackerDB:
                 title=identity,
             )
 
-    def get_unprocessed_items(self, media_type: str) -> List[Dict[str, Any]]:
-        """Get items not yet processed in this cycle.
-
-        Excludes items with status 'exhausted' or 'complete'.
-        """
-        cursor = self._conn.execute(
-            "SELECT * FROM items "
-            "WHERE media_type = ? AND cycle_processed = 0 "
-            "AND status NOT IN ('exhausted', 'complete')",
-            (media_type,),
-        )
-        return [dict(r) for r in cursor.fetchall()]
-
     def set_scan_state(self, key: str, value: str) -> None:
         """Insert or replace a key-value pair in the scan_state table."""
         try:

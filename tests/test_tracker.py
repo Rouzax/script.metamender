@@ -233,36 +233,6 @@ def test_start_new_cycle_resets_processed(tmp_path):
     db.close()
 
 
-def test_get_unprocessed_in_cycle(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
-    db.upsert_item("movie", "Movie B", kodi_id=2, tmdb_id="2")
-    db.mark_cycle_processed("movie", "Movie A")
-    unprocessed = db.get_unprocessed_items("movie")
-    assert len(unprocessed) == 1
-    assert unprocessed[0]["title"] == "Movie B"
-    db.close()
-
-
-def test_get_unprocessed_excludes_exhausted(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
-    db.upsert_item("movie", "Movie B", kodi_id=2, tmdb_id="2")
-    db.update_item_status("movie", "Movie A", "exhausted")
-    unprocessed = db.get_unprocessed_items("movie")
-    assert len(unprocessed) == 1
-    assert unprocessed[0]["title"] == "Movie B"
-    db.close()
-
-
-def test_get_unprocessed_excludes_complete(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
-    db.update_item_status("movie", "Movie A", "complete")
-    assert db.get_unprocessed_items("movie") == []
-    db.close()
-
-
 def test_scan_state_persistence(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.set_scan_state("omdb_calls_today", "42")

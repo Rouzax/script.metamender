@@ -131,6 +131,15 @@ def get_all_items(
     result = data.get("result", {})
     items = result.get(media_type.kodi_result_key, [])
 
+    total = result.get("limits", {}).get("total", 0)
+    if total >= 99999:
+        log.warning(
+            "Library query hit the result ceiling; some items may be missing",
+            event="kodi.truncated",
+            total=total,
+            media_type=media_type.name,
+        )
+
     log.info(
         "Library queried",
         event="kodi.query",

@@ -13,7 +13,6 @@ Logging:
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Optional
 
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.sources import load_source_config
@@ -52,7 +51,7 @@ def run() -> None:
 
     log.info("Manual scan started", event="manual.start")
 
-    tracker = None  # type: Optional[TrackerDB]
+    tracker = None
 
     try:
         settings = _load_settings()
@@ -65,7 +64,7 @@ def run() -> None:
         enabled_fields = settings["enabled_fields"]
 
         scan_start = time.perf_counter()
-        all_stats = {}  # type: Dict[str, Dict[str, Any]]
+        all_stats = {}
 
         # One breaker for the whole manual cycle (shared across passes).
         breaker = CircuitBreaker()

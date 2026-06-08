@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, FrozenSet, Optional  # noqa: F401
+from typing import Any, Dict, Optional
 
 import xbmc
 import xbmcvfs
@@ -189,7 +189,7 @@ def _run_scan(
         Dict keyed by media type name with stats dicts as values.
     """
     tmdb_api_key = settings["tmdb_api_key"]
-    enabled_fields = settings["enabled_fields"]  # type: FrozenSet[str]
+    enabled_fields = settings["enabled_fields"]
 
     all_stats = {}  # type: Dict[str, Dict[str, int]]
 

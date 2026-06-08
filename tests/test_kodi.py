@@ -254,3 +254,16 @@ def test_get_all_movies_requests_ratings_property(kodi_stubs):
     # plot must remain requested: it is a backfill field and the empty-only
     # overwrite guard depends on reading the current value (regression guard).
     assert "plot" in props
+
+
+def test_get_all_items_warns_at_ceiling(kodi_stubs, monkeypatch):
+    import json as _j
+    from resources.lib.data import kodi
+    from resources.lib.data.media_types import MOVIE
+    big = {"result": {"movies": [{"movieid": i} for i in range(5)],
+                      "limits": {"start": 0, "end": 99999, "total": 99999}}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=_j.dumps(big))
+    warnings = []
+    monkeypatch.setattr(kodi.log, "warning", lambda *a, **k: warnings.append((a, k)))
+    kodi.get_all_items(MOVIE)
+    assert any(k.get("event") == "kodi.truncated" for a, k in warnings)
