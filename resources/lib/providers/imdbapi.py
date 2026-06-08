@@ -124,8 +124,8 @@ def fetch_movie(imdb_id: str) -> Optional[Dict[str, Any]]:
         event="imdb.movie",
         imdb_id=imdb_id,
         title=data.get("primaryTitle", ""),
-        fields=len(result),
-        elapsed_ms=elapsed_ms,
+        field_count=len(result),
+        duration_ms=elapsed_ms,
     )
 
     return result
@@ -166,7 +166,7 @@ def fetch_episode(imdb_id: str) -> Optional[Dict[str, Any]]:
         event="imdb.episode",
         imdb_id=imdb_id,
         title=data.get("primaryTitle", ""),
-        elapsed_ms=elapsed_ms,
+        duration_ms=elapsed_ms,
     )
 
     return result
@@ -186,44 +186,44 @@ def fetch_season(
 
     rpc_start = time.perf_counter()
 
-    while True:
-        params = {
-            "season": str(season),
-            "pageSize": "50",
-        }  # type: Dict[str, str]
-        if page_token:
-            params["pageToken"] = page_token
+    with log_timing(
+        log, "imdb.season",
+        imdb_id=show_imdb_id, season=season,
+    ):
+        while True:
+            params = {
+                "season": str(season),
+                "pageSize": "50",
+            }  # type: Dict[str, str]
+            if page_token:
+                params["pageToken"] = page_token
 
-        url = "{}/titles/{}/episodes".format(IMDBAPI_BASE_URL, show_imdb_id)
+            url = "{}/titles/{}/episodes".format(IMDBAPI_BASE_URL, show_imdb_id)
 
-        with log_timing(
-            log, "imdb.season",
-            imdb_id=show_imdb_id, season=season,
-        ):
             data = provider_get(
                 url, logger=log, label="imdb.season",
                 params=params, provider="imdb",
             )
-        if data is None:
-            return None
+            if data is None:
+                return None
 
-        for ep in data.get("episodes", []):
-            episodes.append({
-                "imdb_id": ep.get("id", ""),
-                "episode_number": ep.get("episodeNumber", 0),
-                "season_number": int(ep.get("season", season)),
-                "title": ep.get("title", ""),
-                "rating": _parse_rating(ep),
-                "votes": _parse_votes(ep),
-                "plot": ep.get("plot", ""),
-                "runtime": _runtime_minutes(ep.get("runtimeSeconds")),
-                "firstaired": _format_release_date(ep.get("releaseDate")),
-            })
+            for ep in data.get("episodes", []):
+                episodes.append({
+                    "imdb_id": ep.get("id", ""),
+                    "episode_number": ep.get("episodeNumber", 0),
+                    "season_number": int(ep.get("season", season)),
+                    "title": ep.get("title", ""),
+                    "rating": _parse_rating(ep),
+                    "votes": _parse_votes(ep),
+                    "plot": ep.get("plot", ""),
+                    "runtime": _runtime_minutes(ep.get("runtimeSeconds")),
+                    "firstaired": _format_release_date(ep.get("releaseDate")),
+                })
 
-        next_token = data.get("nextPageToken")
-        if not next_token:
-            break
-        page_token = next_token
+            next_token = data.get("nextPageToken")
+            if not next_token:
+                break
+            page_token = next_token
 
     elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
 
@@ -233,7 +233,7 @@ def fetch_season(
         imdb_id=show_imdb_id,
         season=season,
         episodes=len(episodes),
-        elapsed_ms=elapsed_ms,
+        duration_ms=elapsed_ms,
     )
 
     return episodes
@@ -283,7 +283,7 @@ def fetch_certificates(
         event="imdb.certificates",
         imdb_id=imdb_id,
         countries=len(grouped),
-        elapsed_ms=elapsed_ms,
+        duration_ms=elapsed_ms,
     )
 
     return grouped

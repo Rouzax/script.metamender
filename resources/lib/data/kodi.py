@@ -145,7 +145,7 @@ def get_all_items(
         event="kodi.query",
         media_type=media_type.name,
         count=len(items),
-        elapsed_ms=rpc_ms,
+        duration_ms=rpc_ms,
     )
 
     return items

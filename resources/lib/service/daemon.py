@@ -409,7 +409,7 @@ def run() -> None:
                         finally:
                             StructuredLogger.stop_scan_log()
 
-                        elapsed = round(time.perf_counter() - scan_start, 2)
+                        duration_ms = int((time.perf_counter() - scan_start) * 1000)
 
                         movie_stats = all_stats.get("movie", {})
                         tvshow_stats = all_stats.get("tvshow", {})
@@ -421,7 +421,7 @@ def run() -> None:
                             movies_updated=movie_stats.get("updated", 0),
                             tvshows_updated=tvshow_stats.get("updated", 0),
                             episodes_updated=episode_stats.get("updated", 0),
-                            total_elapsed_sec=elapsed,
+                            duration_ms=duration_ms,
                         )
 
                         last_scan = time.time()

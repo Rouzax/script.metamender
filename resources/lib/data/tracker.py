@@ -150,11 +150,11 @@ class TrackerDB:
                 "Failed to upsert item",
                 event="tracker.error",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
             )
             return -1
 
-        log.debug("Item upserted", event="tracker.upsert", media_type=media_type, title=identity)
+        log.debug("Item upserted", event="tracker.upsert", media_type=media_type, identity=identity)
         return cursor.lastrowid  # type: ignore[return-value]
 
     def get_item(self, media_type: str, identity: str) -> Optional[Dict[str, Any]]:
@@ -193,7 +193,7 @@ class TrackerDB:
                 "Failed to update item status",
                 event="tracker.error",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
                 status=status,
             )
             return
@@ -203,14 +203,14 @@ class TrackerDB:
                 "Item marked as exhausted",
                 event="tracker.exhausted",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
                 status=status,
             )
         else:
             log.debug(
                 "Item status updated",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
                 status=status,
             )
 
@@ -237,7 +237,7 @@ class TrackerDB:
                 "Failed to record attempt",
                 event="tracker.error",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
             )
             return
 
@@ -254,7 +254,7 @@ class TrackerDB:
             "Attempt recorded",
             event="tracker.attempt",
             media_type=media_type,
-            title=identity,
+            identity=identity,
             next_retry=next_retry,
             attempt_count=attempt_count,
         )
@@ -272,7 +272,7 @@ class TrackerDB:
                 "Failed to update last_seen",
                 event="tracker.error",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
             )
 
     def prune_orphans(self, media_type: str, cutoff: str) -> int:
@@ -354,7 +354,7 @@ class TrackerDB:
                 "Cannot update field status: item not found",
                 event="tracker.field_update",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
                 field=field,
             )
             return
@@ -379,7 +379,7 @@ class TrackerDB:
                 "Failed to update field status",
                 event="tracker.error",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
                 field=field,
             )
             return
@@ -388,7 +388,7 @@ class TrackerDB:
             "Field status updated",
             event="tracker.field_update",
             media_type=media_type,
-            title=identity,
+            identity=identity,
             field=field,
             status=status,
         )
@@ -405,7 +405,7 @@ class TrackerDB:
             log.warning(
                 "Cannot record field attempt: item not found",
                 event="tracker.field_update",
-                media_type=media_type, title=identity, field=field,
+                media_type=media_type, identity=identity, field=field,
             )
             return
         try:
@@ -421,7 +421,7 @@ class TrackerDB:
             log.exception(
                 "Failed to record field attempt",
                 event="tracker.error",
-                media_type=media_type, title=identity, field=field,
+                media_type=media_type, identity=identity, field=field,
             )
 
     def set_field_next_retry(
@@ -442,7 +442,7 @@ class TrackerDB:
             log.exception(
                 "Failed to set field next_retry",
                 event="tracker.error",
-                media_type=media_type, title=identity, field=field,
+                media_type=media_type, identity=identity, field=field,
             )
 
     def get_field_status(
@@ -454,7 +454,7 @@ class TrackerDB:
             log.debug(
                 "Item not found for field status query",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
                 field=field,
             )
             return None
@@ -489,7 +489,7 @@ class TrackerDB:
             log.debug(
                 "Item not found for fields by status query",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
                 status=status,
             )
             return []
@@ -536,7 +536,7 @@ class TrackerDB:
                 "Failed to mark cycle processed",
                 event="tracker.error",
                 media_type=media_type,
-                title=identity,
+                identity=identity,
             )
 
     def reset_exhausted_fields(self) -> int:

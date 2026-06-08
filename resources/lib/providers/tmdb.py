@@ -265,8 +265,8 @@ def fetch_movie(
         event="tmdb.movie",
         tmdb_id=tmdb_id,
         title=data.get("title", ""),
-        fields=len(result),
-        elapsed_ms=elapsed_ms,
+        field_count=len(result),
+        duration_ms=elapsed_ms,
     )
 
     return result
@@ -327,7 +327,7 @@ def fetch_season(
         tmdb_id=show_tmdb_id,
         season=season_number,
         episodes=len(episodes),
-        elapsed_ms=elapsed_ms,
+        duration_ms=elapsed_ms,
     )
 
     return episodes
@@ -379,8 +379,8 @@ def fetch_tvshow(
         event="tmdb.tvshow",
         tmdb_id=tmdb_id,
         title=data.get("name", ""),
-        fields=len(result),
-        elapsed_ms=elapsed_ms,
+        field_count=len(result),
+        duration_ms=elapsed_ms,
     )
 
     return result

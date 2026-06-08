@@ -661,7 +661,7 @@ def test_10_logging_completeness(t):
     tmdb_calls = [l for l in logged if "event=tmdb.movie" in l]
     t.check("has tmdb.movie", len(tmdb_calls) >= 1)
     if tmdb_calls:
-        t.check("tmdb.movie has elapsed_ms", "elapsed_ms=" in tmdb_calls[0])
+        t.check("tmdb.movie has duration_ms", "duration_ms=" in tmdb_calls[0])
         t.check("tmdb.movie has tmdb_id", "tmdb_id=" in tmdb_calls[0])
         t.check("tmdb.movie has title", "title=" in tmdb_calls[0])
 
@@ -1461,15 +1461,15 @@ def test_27_provider_logs(t):
             line = tmdb_lines[0]
             t.check("tmdb.movie has tmdb_id", "tmdb_id=" in line)
             t.check("tmdb.movie has title", "title=" in line)
-            t.check("tmdb.movie has elapsed_ms", "elapsed_ms=" in line)
-            t.check("tmdb.movie has fields", "fields=" in line)
+            t.check("tmdb.movie has duration_ms", "duration_ms=" in line)
+            t.check("tmdb.movie has field_count", "field_count=" in line)
 
         imdb_lines = logs.find("event=imdb.movie")
         if imdb_lines:
             line = imdb_lines[0]
             t.check("imdb.movie has imdb_id", "imdb_id=" in line)
             t.check("imdb.movie has title", "title=" in line)
-            t.check("imdb.movie has elapsed_ms", "elapsed_ms=" in line)
+            t.check("imdb.movie has duration_ms", "duration_ms=" in line)
         else:
             t.check("imdb.movie present (or TMDB-only mode)", True)
     finally:
@@ -1557,7 +1557,7 @@ def test_29_episode_provider_logs(t):
             t.check("has imdb_id=tt8865002", "imdb_id=tt8865002" in line,
                     "line: {}".format(line[:100]))
             t.check("has title", "title=" in line)
-            t.check("has elapsed_ms", "elapsed_ms=" in line)
+            t.check("has duration_ms", "duration_ms=" in line)
     finally:
         set_episode(4311, plot=orig_plot)
 
@@ -1599,15 +1599,15 @@ def test_30_log_consistency(t):
         t.check("no malformed events", len(bad_events) == 0,
                 "bad: {}".format(bad_events[:3]))
 
-        elapsed_lines = [l for l in logs.lines if "elapsed_ms=" in l]
-        bad_elapsed = []
-        elapsed_re = re.compile(r"elapsed_ms=(\d+)")
-        for line in elapsed_lines:
-            m = elapsed_re.search(line)
+        duration_lines = [l for l in logs.lines if "duration_ms=" in l]
+        bad_duration = []
+        duration_re = re.compile(r"duration_ms=(\d+)")
+        for line in duration_lines:
+            m = duration_re.search(line)
             if not m or int(m.group(1)) <= 0:
-                bad_elapsed.append(line[:80])
-        t.check("all elapsed_ms positive", len(bad_elapsed) == 0,
-                "bad: {}".format(bad_elapsed[:3]))
+                bad_duration.append(line[:80])
+        t.check("all duration_ms positive", len(bad_duration) == 0,
+                "bad: {}".format(bad_duration[:3]))
 
         completes = logs.find("event=scan.complete")
         if completes:

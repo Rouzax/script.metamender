@@ -499,6 +499,7 @@ def run_scan(
             "Processing item",
             event="scan.processing",
             title=title,
+            identity=identity,
             media_type=media_type.name,
             tmdb_id=tmdb_id,
             gaps=gaps,
@@ -535,6 +536,7 @@ def run_scan(
                         "TMDB API key invalid",
                         event="scan.apikey",
                         provider="tmdb",
+                        identity=identity,
                     )
                     break
                 except TransientProviderError:
@@ -544,6 +546,7 @@ def run_scan(
                             event="scan.breaker",
                             provider="tmdb",
                             threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
+                            identity=identity,
                         )
 
                 if tmdb_id:
@@ -565,6 +568,7 @@ def run_scan(
                         "TMDB API key invalid",
                         event="scan.apikey",
                         provider="tmdb",
+                        identity=identity,
                     )
                     break
                 except TransientProviderError:
@@ -574,6 +578,7 @@ def run_scan(
                             event="scan.breaker",
                             provider="tmdb",
                             threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
+                            identity=identity,
                         )
 
             # Enrich: if TMDB returned an IMDB ID and the item lacks one, write it
@@ -604,6 +609,7 @@ def run_scan(
                         "IMDb API key invalid",
                         event="scan.apikey",
                         provider="imdb",
+                        identity=identity,
                     )
                     break
                 except TransientProviderError:
@@ -613,6 +619,7 @@ def run_scan(
                             event="scan.breaker",
                             provider="imdb",
                             threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
+                            identity=identity,
                         )
 
             if tmdb_data is None and imdb_data is None:
@@ -710,6 +717,7 @@ def run_scan(
                             "TMDB API key invalid",
                             event="scan.apikey",
                             provider="tmdb",
+                            identity=identity,
                         )
                         break
                     except TransientProviderError:
@@ -719,6 +727,7 @@ def run_scan(
                                 event="scan.breaker",
                                 provider="tmdb",
                                 threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
+                                identity=identity,
                             )
 
             # IMDb path: direct episode fetch by IMDB ID
@@ -735,6 +744,7 @@ def run_scan(
                         "IMDb API key invalid",
                         event="scan.apikey",
                         provider="imdb",
+                        identity=identity,
                     )
                     break
                 except TransientProviderError:
@@ -744,6 +754,7 @@ def run_scan(
                             event="scan.breaker",
                             provider="imdb",
                             threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
+                            identity=identity,
                         )
 
             if tmdb_data is None and imdb_data is None:
@@ -790,6 +801,7 @@ def run_scan(
                     "Item updated",
                     event="scan.updated",
                     title=title,
+                    identity=identity,
                     media_type=media_type.name,
                     fields_written=list(fields_to_write.keys()),
                 )
