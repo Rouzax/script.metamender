@@ -14,6 +14,8 @@ Logging:
         - service.scan_error (ERROR): Scan failed
         - service.skip_playback (DEBUG): Scan skipped because video is playing
         - service.library_scan_finished (INFO): Library scan event received
+        - service.orphans_pruned (INFO/DEBUG): Orphan prune result (INFO when >0)
+        - service.prune_skip (DEBUG): Prune skipped (targeted scan or disabled)
 """
 from __future__ import annotations
 
@@ -257,9 +259,19 @@ def _maybe_prune_orphans(
     if kodi_filter is not None:
         # Targeted scan: last_seen was only refreshed for a subset of items.
         # Pruning here would delete the rest of the library. Never prune.
+        log.debug(
+            "Prune skipped: targeted scan",
+            event="service.prune_skip",
+            reason="targeted",
+        )
         return
     retention = settings["orphan_retention_days"]
     if retention <= 0:
+        log.debug(
+            "Prune skipped: disabled",
+            event="service.prune_skip",
+            reason="disabled",
+        )
         return
     cutoff = (date.today() - timedelta(days=retention)).isoformat()
     total_removed = 0
@@ -270,6 +282,13 @@ def _maybe_prune_orphans(
             "Pruned orphaned tracker rows",
             event="service.orphans_pruned",
             removed=total_removed,
+            retention_days=retention,
+        )
+    else:
+        log.debug(
+            "Prune ran, no orphans removed",
+            event="service.orphans_pruned",
+            removed=0,
             retention_days=retention,
         )
 

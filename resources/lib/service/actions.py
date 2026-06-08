@@ -8,10 +8,15 @@ settings action button).
 Logging:
     Logger: 'actions'
     Key events:
+        - actions.reset_exhausted_start (INFO): Reset-exhausted-fields action starting
         - actions.reset_exhausted (INFO): Reset-exhausted-fields action finished
+        - actions.update_now_start (INFO): Update-now force scan starting
         - actions.update_now (INFO): Update-now force scan finished
+        - actions.update_now_invalid (WARNING): Update-now bad dbtype/dbid
+        - actions.update_now_notfound (WARNING): Update-now item not in library
+        - actions.skip_no_key (WARNING): Update-now skipped, no TMDB API key
         - actions.locked (INFO): Update-now skipped, a scan is running
-        - actions.error (ERROR): Action handler failed
+        - actions.error (ERROR): Action handler raised an unexpected exception
 """
 from __future__ import annotations
 
@@ -65,6 +70,11 @@ def reset_exhausted() -> None:
     """Reset all exhausted field_status rows and notify the user."""
     _init_logging()
 
+    log.info(
+        "Reset exhausted fields action starting",
+        event="actions.reset_exhausted_start",
+    )
+
     tracker = None
     try:
         tracker = TrackerDB(_get_db_path())
@@ -96,11 +106,18 @@ def update_now(dbtype: str, dbid: str) -> None:
     """
     _init_logging()
 
+    log.info(
+        "Update now action starting",
+        event="actions.update_now_start",
+        media_type=dbtype,
+        item_id=str(dbid),
+    )
+
     media_type: Optional[MediaType] = _DBTYPE_TO_MEDIA_TYPE.get(dbtype)
     if media_type is None:
         log.warning(
             "Update now called with unknown dbtype",
-            event="actions.error",
+            event="actions.update_now_invalid",
             dbtype=dbtype,
         )
         notify("Cannot update this item type")
@@ -111,7 +128,7 @@ def update_now(dbtype: str, dbid: str) -> None:
     except (TypeError, ValueError):
         log.warning(
             "Update now called with invalid dbid",
-            event="actions.error",
+            event="actions.update_now_invalid",
             dbid=str(dbid),
         )
         notify("Cannot update this item type")
@@ -131,7 +148,7 @@ def update_now(dbtype: str, dbid: str) -> None:
         if item is None:
             log.warning(
                 "Update now could not find the item",
-                event="actions.error",
+                event="actions.update_now_notfound",
                 media_type=media_type.name,
                 item_id=item_id,
             )
@@ -143,7 +160,7 @@ def update_now(dbtype: str, dbid: str) -> None:
         if not tmdb_api_key:
             log.warning(
                 "No TMDB API key configured, cannot update",
-                event="actions.error",
+                event="actions.skip_no_key",
             )
             notify("No TMDB API key configured")
             return

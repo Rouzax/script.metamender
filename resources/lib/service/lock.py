@@ -5,13 +5,21 @@ interpreters but the SAME Kodi process, so a Home-window (10000) property is
 visible to both and serves as a mutex preventing concurrent scans (which would
 otherwise contend on the SQLite tracker).
 
-Logging: none (callers log).
+Logging:
+    Logger: 'lock'
+    Key events:
+        - service.lock_reclaimed (WARNING): A stale lock was reclaimed (prior
+          scan likely crashed). Normal acquire/release are not logged.
 """
 from __future__ import annotations
 
 import time
 
 import xbmcgui
+
+from resources.lib.utils import get_logger
+
+log = get_logger('lock')
 
 _PROP = "metamender_scan_lock"
 # Reclaim a lock older than this, so a crashed scan never wedges scanning
@@ -41,6 +49,11 @@ def acquire_scan_lock() -> bool:
             age = _STALE_SECONDS + 1
         if age < _STALE_SECONDS:
             return False
+        log.warning(
+            "Reclaimed stale scan lock (previous scan likely crashed)",
+            event="service.lock_reclaimed",
+            age_sec=int(age),
+        )
     win.setProperty(_PROP, str(_now()))
     return True
 

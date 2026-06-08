@@ -678,7 +678,7 @@ def test_10_logging_completeness(t):
     if completes:
         t.check("scan.complete has processed", "processed=" in completes[0])
         t.check("scan.complete has updated", "updated=" in completes[0])
-        t.check("scan.complete has elapsed", "total_elapsed_sec=" in completes[0])
+        t.check("scan.complete has elapsed", "duration_ms=" in completes[0])
 
 
 # ===========================================================================
@@ -1520,7 +1520,7 @@ def test_28_scan_lifecycle_logs(t):
             t.check("scan.complete has updated", "updated=" in line)
             t.check("scan.complete has errors", "errors=" in line)
             t.check("scan.complete has elapsed",
-                    "total_elapsed_sec=" in line)
+                    "duration_ms=" in line)
     finally:
         set_movie(6, plot=orig_plot)
 

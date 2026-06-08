@@ -413,6 +413,14 @@ def fetch_episode_external_ids(
         return None
 
     imdb_id = data.get("imdb_id")
+    log.info(
+        "Episode external IDs fetched",
+        event="tmdb.episode_ids",
+        tmdb_id=show_tmdb_id,
+        season=season_number,
+        episode=episode_number,
+        has_imdb=bool(imdb_id),
+    )
     if imdb_id:
         return str(imdb_id)
     return None

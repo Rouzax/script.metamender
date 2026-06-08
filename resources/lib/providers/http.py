@@ -43,6 +43,9 @@ def provider_get(
     try:
         resp = requests.get(url, params=params, timeout=timeout, headers=_HEADERS)
     except requests.RequestException as exc:
+        # Deliberate warning() not exception(): this fires on every transient
+        # failure (429/timeout/conn reset), so a stack trace per occurrence
+        # would be log noise. The error=str(exc) kwarg carries the cause.
         logger.warning(
             "Transient request failure",
             event="{}.transient".format(label),
@@ -55,12 +58,19 @@ def provider_get(
         try:
             return resp.json()
         except ValueError:
+            # Deliberate warning() not exception(): malformed JSON is a
+            # transient provider hiccup that can recur; a stack trace per
+            # occurrence would be log noise.
             logger.warning(
                 "Malformed JSON",
                 event="{}.transient".format(label),
             )
             raise TransientProviderError("malformed json")
     if status == 404:
+        logger.debug(
+            "No data found (404)",
+            event="{}.nodata".format(label),
+        )
         return None
     if status == 401:
         raise ApiKeyError(provider or label)

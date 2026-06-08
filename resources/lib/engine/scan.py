@@ -14,6 +14,9 @@ Logging:
         - scan.stale (DEBUG): Rating detected as stale, re-added to gaps
         - scan.processing (DEBUG): Starting to process a single item
         - scan.updated (INFO): Item metadata written to Kodi
+        - scan.field_exhausted (DEBUG): A field gave up (permanent or auto-retry)
+        - scan.breaker (WARNING): A provider tripped, or both providers down (scope="both")
+        - scan.apikey (ERROR): A provider rejected the API key (terminal)
 """
 from __future__ import annotations
 
@@ -349,6 +352,7 @@ def run_scan(
         "Scan starting",
         event="scan.start",
         media_type=media_type.name,
+        force=force,
     )
 
     if items is None:
@@ -358,6 +362,8 @@ def run_scan(
     season_cache = {}  # type: Dict[str, Optional[List[Dict[str, Any]]]]
     # Track whether we need a rate-limit sleep before the next API call
     needs_sleep = False
+    # Running total of fields that hit exhaustion this scan (per-item below).
+    exhausted_fields_total = 0
 
     for item in items:
         # Check for Kodi shutdown
@@ -517,7 +523,8 @@ def run_scan(
             if breaker.both_disabled():
                 log.warning(
                     "Both providers disabled, stopping scan",
-                    event="scan.circuit_breaker",
+                    event="scan.breaker",
+                    scope="both",
                     media_type=media_type.name,
                     processed=stats["processed"],
                 )
@@ -532,7 +539,7 @@ def run_scan(
                     needs_sleep = True
                     breaker.record_success("tmdb")
                 except ApiKeyError:
-                    log.error(
+                    log.exception(
                         "TMDB API key invalid",
                         event="scan.apikey",
                         provider="tmdb",
@@ -564,7 +571,7 @@ def run_scan(
                     needs_sleep = True
                     breaker.record_success("tmdb")
                 except ApiKeyError:
-                    log.error(
+                    log.exception(
                         "TMDB API key invalid",
                         event="scan.apikey",
                         provider="tmdb",
@@ -605,7 +612,7 @@ def run_scan(
                     needs_sleep = True
                     breaker.record_success("imdb")
                 except ApiKeyError:
-                    log.error(
+                    log.exception(
                         "IMDb API key invalid",
                         event="scan.apikey",
                         provider="imdb",
@@ -640,7 +647,8 @@ def run_scan(
             if breaker.both_disabled():
                 log.warning(
                     "Both providers disabled, stopping scan",
-                    event="scan.circuit_breaker",
+                    event="scan.breaker",
+                    scope="both",
                     media_type=media_type.name,
                     processed=stats["processed"],
                 )
@@ -713,7 +721,7 @@ def run_scan(
                             needs_sleep = True
                         breaker.record_success("tmdb")
                     except ApiKeyError:
-                        log.error(
+                        log.exception(
                             "TMDB API key invalid",
                             event="scan.apikey",
                             provider="tmdb",
@@ -740,7 +748,7 @@ def run_scan(
                     needs_sleep = True
                     breaker.record_success("imdb")
                 except ApiKeyError:
-                    log.error(
+                    log.exception(
                         "IMDb API key invalid",
                         event="scan.apikey",
                         provider="imdb",
@@ -859,6 +867,14 @@ def run_scan(
                 tracker.set_field_status(media_type.name, identity, gap_field, "exhausted")
                 tracker.set_field_next_retry(media_type.name, identity, gap_field, None)
                 exhausted_fields += 1
+                log.debug(
+                    "Field exhausted",
+                    event="scan.field_exhausted",
+                    title=title,
+                    identity=identity,
+                    field=gap_field,
+                    permanent=True,
+                )
                 continue
             next_retry = compute_next_retry(next_attempt, max_retries)
             tracker.record_field_attempt(
@@ -870,8 +886,18 @@ def run_scan(
                 auto = (date.today() + timedelta(days=EXHAUSTED_AUTORETRY_DAYS)).isoformat()
                 tracker.set_field_next_retry(media_type.name, identity, gap_field, auto)
                 exhausted_fields += 1
+                log.debug(
+                    "Field exhausted",
+                    event="scan.field_exhausted",
+                    title=title,
+                    identity=identity,
+                    field=gap_field,
+                    permanent=False,
+                )
             else:
                 tracker.set_field_status(media_type.name, identity, gap_field, "empty")
+
+        exhausted_fields_total += exhausted_fields
 
         # Item rollup status. A failed write leaves its fields unresolved (A9),
         # so they remain gaps and the item is not marked complete.
@@ -891,18 +917,19 @@ def run_scan(
         tracker.mark_cycle_processed(media_type.name, identity)
         stats["processed"] += 1
 
-    elapsed = round(time.perf_counter() - scan_start, 2)
     log.info(
         "Scan complete",
         event="scan.complete",
         media_type=media_type.name,
+        force=force,
         processed=stats["processed"],
         skipped=stats["skipped"],
         updated=stats["updated"],
         errors=stats["errors"],
+        exhausted_fields=exhausted_fields_total,
         tmdb_disabled=breaker.is_disabled("tmdb"),
         imdb_disabled=breaker.is_disabled("imdb"),
-        total_elapsed_sec=elapsed,
+        duration_ms=int((time.perf_counter() - scan_start) * 1000),
     )
 
     return stats
