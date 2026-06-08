@@ -145,6 +145,23 @@ def test_set_field_status_updates_existing(tmp_path):
     db.close()
 
 
+def test_set_field_status_checked_preserves_vote_metadata(tmp_path):
+    # A4: confirming a rating "checked" must NOT erase the staleness metadata
+    # (source/vote_count/fetched_at) recorded when it was last filled.
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.set_field_status("movie", "tmdb:1", "rating", "filled",
+                        source="themoviedb", vote_count=12)
+    first = db.get_field_status("movie", "tmdb:1", "rating")
+    db.set_field_status("movie", "tmdb:1", "rating", "checked")  # no source/votes
+    fs = db.get_field_status("movie", "tmdb:1", "rating")
+    assert fs["status"] == "checked"
+    assert fs["vote_count"] == 12
+    assert fs["source"] == "themoviedb"
+    assert fs["fetched_at"] == first["fetched_at"]
+    db.close()
+
+
 def test_get_field_status_not_found(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")

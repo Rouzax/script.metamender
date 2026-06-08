@@ -341,9 +341,12 @@ class TrackerDB:
         source: Optional[str] = None,
         vote_count: Optional[int] = None,
     ) -> None:
-        """Insert or replace a field_status row for the given item and field.
+        """Insert or update a field_status row for the given item and field.
 
-        Sets fetched_at to today's date when status is "filled".
+        Sets fetched_at to today's date when status is "filled". On update, a
+        None source/vote_count/fetched_at does NOT erase the existing value
+        (COALESCE): confirming a rating "checked" preserves the staleness
+        metadata (vote_count, fetched_at) recorded when it was last filled.
         """
         item_id = self._get_item_id(media_type, identity)
         if item_id is None:
@@ -364,8 +367,10 @@ class TrackerDB:
                 "(item_id, field, status, source, vote_count, fetched_at) "
                 "VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(item_id, field) DO UPDATE SET "
-                "status = excluded.status, source = excluded.source, "
-                "vote_count = excluded.vote_count, fetched_at = excluded.fetched_at",
+                "status = excluded.status, "
+                "source = COALESCE(excluded.source, field_status.source), "
+                "vote_count = COALESCE(excluded.vote_count, field_status.vote_count), "
+                "fetched_at = COALESCE(excluded.fetched_at, field_status.fetched_at)",
                 (item_id, field, status, source, vote_count, fetched_at),
             )
             self._conn.commit()
