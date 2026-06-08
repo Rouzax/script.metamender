@@ -254,6 +254,17 @@
                     <default>true</default>
                 </setting>
             </group>
+            <group id="maintenance" label="32330">
+                <setting id="orphan_retention_days" type="integer" label="32331" help="32332">
+                    <default>30</default>
+                    <constraints>
+                        <minimum>0</minimum>
+                        <maximum>365</maximum>
+                        <step>1</step>
+                    </constraints>
+                    <control type="slider" format="integer" />
+                </setting>
+            </group>
             <group id="debugging" label="32320">
                 <setting id="logging" type="boolean" label="32321" help="32322">
                     <level>2</level>

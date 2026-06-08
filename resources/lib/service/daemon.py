@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import date, timedelta
 from typing import Any, Dict, Optional
 
 import xbmc
@@ -137,6 +138,7 @@ def _load_settings() -> Dict[str, Any]:
         "scan_interval": get_int_setting("scan_interval", DEFAULT_SCAN_INTERVAL_HOURS),
         "show_notifications": get_bool_setting("show_notifications"),
         "resume_interrupted": get_bool_setting("resume_interrupted"),
+        "orphan_retention_days": get_int_setting("orphan_retention_days", 30),
     }
 
 
@@ -234,6 +236,42 @@ def _run_scan(
     all_stats[EPISODE.name] = episode_stats
 
     return all_stats
+
+
+def _maybe_prune_orphans(
+    tracker: TrackerDB,
+    settings: Dict[str, Any],
+    kodi_filter: Optional[Dict[str, str]],
+) -> None:
+    """Prune orphaned tracker rows, but ONLY after a full scan.
+
+    CRITICAL CORRECTNESS GUARD: pruning compares each item's `last_seen`
+    stamp against a retention cutoff. A targeted/library-event scan
+    (kodi_filter is not None) only stamps `last_seen` on the few new items
+    it touches, so pruning after one would wrongly delete EVERYTHING not in
+    that small set. Only a full scan (kodi_filter is None) refreshes
+    `last_seen` for the whole library, so pruning is safe only then.
+
+    A retention of 0 disables pruning entirely.
+    """
+    if kodi_filter is not None:
+        # Targeted scan: last_seen was only refreshed for a subset of items.
+        # Pruning here would delete the rest of the library. Never prune.
+        return
+    retention = settings["orphan_retention_days"]
+    if retention <= 0:
+        return
+    cutoff = (date.today() - timedelta(days=retention)).isoformat()
+    total_removed = 0
+    for mt in (MOVIE, TVSHOW, EPISODE):
+        total_removed += tracker.prune_orphans(mt.name, cutoff=cutoff)
+    if total_removed:
+        log.info(
+            "Pruned orphaned tracker rows",
+            event="service.orphans_pruned",
+            removed=total_removed,
+            retention_days=retention,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +430,12 @@ def run() -> None:
                             "last_scan_completed",
                             time.strftime("%Y-%m-%d %H:%M:%S"),
                         )
+
+                        # Prune orphaned tracker rows. Guarded to run only
+                        # after a FULL scan (kodi_filter is None); see
+                        # _maybe_prune_orphans for why a targeted scan must
+                        # never prune.
+                        _maybe_prune_orphans(tracker, settings, kodi_filter)
 
                         # Notification
                         if settings["show_notifications"]:

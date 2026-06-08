@@ -398,3 +398,15 @@ msgstr ""
 msgctxt "#32322"
 msgid "Write detailed diagnostic information to a log file in the addon data folder (addon_data/script.metamender/logs/)."
 msgstr ""
+
+msgctxt "#32330"
+msgid "Maintenance"
+msgstr ""
+
+msgctxt "#32331"
+msgid "Orphan retention (days)"
+msgstr ""
+
+msgctxt "#32332"
+msgid "After a full scan, remove tracker entries for items not seen in the library for this many days (for example, deleted movies or episodes). Set to 0 to never remove them."
+msgstr ""
