@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 
+from resources.lib.constants import SCHEMA_VERSION
 from resources.lib.data.tracker import TrackerDB
 
 
@@ -258,4 +259,99 @@ def test_scan_state_update(tmp_path):
 def test_scan_state_not_found(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     assert db.get_scan_state("nonexistent") is None
+    db.close()
+
+
+# ----------------------------------------------------------------------
+# Task 3: new schema (columns, version, busy_timeout)
+# ----------------------------------------------------------------------
+
+
+def test_items_has_identity_column(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    cols = {r["name"] for r in db._conn.execute("PRAGMA table_info(items)")}
+    assert "identity" in cols
+    assert "last_seen" in cols
+    db.close()
+
+
+def test_field_status_has_retry_columns(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    cols = {r["name"] for r in db._conn.execute("PRAGMA table_info(field_status)")}
+    assert "attempt_count" in cols
+    assert "next_retry" in cols
+    db.close()
+
+
+def test_identity_is_unique_key(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    idx = db._conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='items'"
+    ).fetchone()["sql"]
+    assert "UNIQUE(media_type, identity)" in idx
+    db.close()
+
+
+def test_schema_version_recorded(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    assert db.get_scan_state("schema_version") == str(SCHEMA_VERSION)
+    db.close()
+
+
+def test_busy_timeout_set(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    val = db._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert val >= 5000
+    db.close()
+
+
+# ----------------------------------------------------------------------
+# Task 4: identity-keyed item CRUD (backward-compatible)
+# ----------------------------------------------------------------------
+
+
+def test_upsert_with_distinct_identity_and_title(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:438631", title="Dune", tmdb_id="438631")
+    item = db.get_item("movie", "tmdb:438631")
+    assert item is not None
+    assert item["identity"] == "tmdb:438631"
+    assert item["title"] == "Dune"
+    db.close()
+
+
+def test_remakes_do_not_collide(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Dune (1984)", title="Dune", kodi_id=1)
+    db.upsert_item("movie", "Dune (2021)", title="Dune", kodi_id=2)
+    a = db.get_item("movie", "Dune (1984)")
+    b = db.get_item("movie", "Dune (2021)")
+    assert a["kodi_id"] == 1
+    assert b["kodi_id"] == 2
+    db.close()
+
+
+def test_upsert_does_not_clobber_title_when_omitted(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="Real Title", kodi_id=1)
+    db.upsert_item("movie", "tmdb:1", imdb_id="tt9")  # no title -> keep existing
+    item = db.get_item("movie", "tmdb:1")
+    assert item["title"] == "Real Title"
+    assert item["imdb_id"] == "tt9"
+    db.close()
+
+
+def test_title_defaults_to_identity_when_omitted_on_insert(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Some Title", kodi_id=1)  # legacy-style call
+    item = db.get_item("movie", "Some Title")
+    assert item["title"] == "Some Title"
+    db.close()
+
+
+def test_update_last_seen(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A", kodi_id=1)
+    db.update_last_seen("movie", "tmdb:1", "2026-06-08")
+    assert db.get_item("movie", "tmdb:1")["last_seen"] == "2026-06-08"
     db.close()

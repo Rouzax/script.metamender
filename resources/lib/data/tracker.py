@@ -18,6 +18,7 @@ import sqlite3
 from datetime import date
 from typing import Any, Dict, List, Optional
 
+from resources.lib.constants import SCHEMA_VERSION
 from resources.lib.utils import get_logger
 
 log = get_logger('tracker')
@@ -26,6 +27,7 @@ _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     media_type TEXT NOT NULL,
+    identity TEXT NOT NULL,
     title TEXT NOT NULL,
     kodi_id INTEGER,
     tmdb_id TEXT,
@@ -35,11 +37,12 @@ CREATE TABLE IF NOT EXISTS items (
     premiered TEXT,
     date_added TEXT,
     last_scanned TEXT,
+    last_seen TEXT,
     next_retry TEXT,
     attempt_count INTEGER DEFAULT 0,
     status TEXT DEFAULT 'pending',
     cycle_processed INTEGER DEFAULT 0,
-    UNIQUE(media_type, title)
+    UNIQUE(media_type, identity)
 );
 
 CREATE TABLE IF NOT EXISTS field_status (
@@ -49,6 +52,8 @@ CREATE TABLE IF NOT EXISTS field_status (
     status TEXT DEFAULT 'empty',
     source TEXT,
     vote_count INTEGER,
+    attempt_count INTEGER DEFAULT 0,
+    next_retry TEXT,
     fetched_at TEXT,
     UNIQUE(item_id, field)
 );
@@ -61,6 +66,7 @@ CREATE TABLE IF NOT EXISTS scan_state (
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_next_retry ON items(next_retry);
 CREATE INDEX IF NOT EXISTS idx_items_cycle ON items(cycle_processed);
+CREATE INDEX IF NOT EXISTS idx_items_last_seen ON items(last_seen);
 CREATE INDEX IF NOT EXISTS idx_field_status ON field_status(item_id, field);
 """
 
@@ -78,11 +84,17 @@ class TrackerDB:
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
-        """Create tables and indexes if they do not exist."""
+        """Create tables and indexes if they do not exist, record version."""
         self._conn.executescript(_SCHEMA_SQL)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO scan_state (key, value) VALUES ('schema_version', ?)",
+            (str(SCHEMA_VERSION),),
+        )
+        self._conn.commit()
 
     def close(self) -> None:
         """Close the database connection."""
@@ -92,35 +104,38 @@ class TrackerDB:
     # Item CRUD
     # ------------------------------------------------------------------
 
-    def upsert_item(self, media_type: str, title: str, **kwargs: Any) -> int:
-        """Insert or update an item keyed on (media_type, title).
+    def upsert_item(
+        self, media_type: str, identity: str, title: Optional[str] = None, **kwargs: Any
+    ) -> int:
+        """Insert or update an item keyed on (media_type, identity).
 
-        On conflict, only the supplied kwargs are updated; columns not
-        mentioned in kwargs keep their existing values.
+        `title` is display-only. When omitted it defaults to `identity` on
+        insert and is left unchanged on update. Other supplied kwargs update
+        their columns; unmentioned columns keep their existing values.
 
-        Returns:
-            The row id of the inserted or updated item.
+        Returns the row id of the inserted or updated item.
         """
-        # Filter to accepted columns only
         cols = {k: v for k, v in kwargs.items() if k in _UPSERT_KWARGS}
 
-        # Build the SET clause: each column uses COALESCE(excluded.col, col)
-        # when the caller supplies a value, or keeps the existing value when
-        # the caller does not.
         set_parts = []
         for col in _UPSERT_KWARGS:
             if col in cols:
                 set_parts.append("{col} = excluded.{col}".format(col=col))
             else:
                 set_parts.append("{col} = items.{col}".format(col=col))
+        # title: update only when explicitly provided, else keep existing
+        if title is not None:
+            set_parts.append("title = excluded.title")
+        else:
+            set_parts.append("title = items.title")
 
-        insert_cols = ["media_type", "title"] + list(cols.keys())
+        insert_cols = ["media_type", "identity", "title"] + list(cols.keys())
         placeholders = ", ".join(["?"] * len(insert_cols))
-        values = [media_type, title] + list(cols.values())
+        values = [media_type, identity, title if title is not None else identity] + list(cols.values())
 
         sql = (
             "INSERT INTO items ({cols}) VALUES ({placeholders}) "
-            "ON CONFLICT(media_type, title) DO UPDATE SET {sets}"
+            "ON CONFLICT(media_type, identity) DO UPDATE SET {sets}"
         ).format(
             cols=", ".join(insert_cols),
             placeholders=placeholders,
@@ -135,24 +150,18 @@ class TrackerDB:
                 "Failed to upsert item",
                 event="tracker.error",
                 media_type=media_type,
-                title=title,
+                title=identity,
             )
             return -1
 
-        log.debug(
-            "Item upserted",
-            event="tracker.upsert",
-            media_type=media_type,
-            title=title,
-        )
-
+        log.debug("Item upserted", event="tracker.upsert", media_type=media_type, title=identity)
         return cursor.lastrowid  # type: ignore[return-value]
 
-    def get_item(self, media_type: str, title: str) -> Optional[Dict[str, Any]]:
-        """Get an item by (media_type, title), or None if not found."""
+    def get_item(self, media_type: str, identity: str) -> Optional[Dict[str, Any]]:
+        """Get an item by (media_type, identity), or None if not found."""
         cursor = self._conn.execute(
-            "SELECT * FROM items WHERE media_type = ? AND title = ?",
-            (media_type, title),
+            "SELECT * FROM items WHERE media_type = ? AND identity = ?",
+            (media_type, identity),
         )
         row = cursor.fetchone()
         if row is None:
@@ -170,13 +179,13 @@ class TrackerDB:
         return [dict(r) for r in cursor.fetchall()]
 
     def update_item_status(
-        self, media_type: str, title: str, status: str
+        self, media_type: str, identity: str, status: str
     ) -> None:
         """Update the status column for an item."""
         try:
             self._conn.execute(
-                "UPDATE items SET status = ? WHERE media_type = ? AND title = ?",
-                (status, media_type, title),
+                "UPDATE items SET status = ? WHERE media_type = ? AND identity = ?",
+                (status, media_type, identity),
             )
             self._conn.commit()
         except sqlite3.Error:
@@ -184,7 +193,7 @@ class TrackerDB:
                 "Failed to update item status",
                 event="tracker.error",
                 media_type=media_type,
-                title=title,
+                title=identity,
                 status=status,
             )
             return
@@ -194,21 +203,21 @@ class TrackerDB:
                 "Item marked as exhausted",
                 event="tracker.exhausted",
                 media_type=media_type,
-                title=title,
+                title=identity,
                 status=status,
             )
         else:
             log.debug(
                 "Item status updated",
                 media_type=media_type,
-                title=title,
+                title=identity,
                 status=status,
             )
 
     def record_attempt(
         self,
         media_type: str,
-        title: str,
+        identity: str,
         next_retry: Optional[str] = None,
     ) -> None:
         """Increment attempt_count, set last_scanned to today, set next_retry."""
@@ -219,8 +228,8 @@ class TrackerDB:
                 "SET attempt_count = attempt_count + 1, "
                 "    last_scanned = ?, "
                 "    next_retry = ? "
-                "WHERE media_type = ? AND title = ?",
-                (today, next_retry, media_type, title),
+                "WHERE media_type = ? AND identity = ?",
+                (today, next_retry, media_type, identity),
             )
             self._conn.commit()
         except sqlite3.Error:
@@ -228,15 +237,15 @@ class TrackerDB:
                 "Failed to record attempt",
                 event="tracker.error",
                 media_type=media_type,
-                title=title,
+                title=identity,
             )
             return
 
         # Query the new attempt_count for the log message
         cursor = self._conn.execute(
             "SELECT attempt_count FROM items "
-            "WHERE media_type = ? AND title = ?",
-            (media_type, title),
+            "WHERE media_type = ? AND identity = ?",
+            (media_type, identity),
         )
         row = cursor.fetchone()
         attempt_count = row["attempt_count"] if row else None
@@ -245,20 +254,36 @@ class TrackerDB:
             "Attempt recorded",
             event="tracker.attempt",
             media_type=media_type,
-            title=title,
+            title=identity,
             next_retry=next_retry,
             attempt_count=attempt_count,
         )
+
+    def update_last_seen(self, media_type: str, identity: str, today: str) -> None:
+        """Record that this item was present in the Kodi library on `today`."""
+        try:
+            self._conn.execute(
+                "UPDATE items SET last_seen = ? WHERE media_type = ? AND identity = ?",
+                (today, media_type, identity),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to update last_seen",
+                event="tracker.error",
+                media_type=media_type,
+                title=identity,
+            )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _get_item_id(self, media_type: str, title: str) -> Optional[int]:
-        """Look up the row id for an item by (media_type, title)."""
+    def _get_item_id(self, media_type: str, identity: str) -> Optional[int]:
+        """Look up the row id for an item by (media_type, identity)."""
         cursor = self._conn.execute(
-            "SELECT id FROM items WHERE media_type = ? AND title = ?",
-            (media_type, title),
+            "SELECT id FROM items WHERE media_type = ? AND identity = ?",
+            (media_type, identity),
         )
         row = cursor.fetchone()
         if row is None:
@@ -272,7 +297,7 @@ class TrackerDB:
     def set_field_status(
         self,
         media_type: str,
-        title: str,
+        identity: str,
         field: str,
         status: str,
         source: Optional[str] = None,
@@ -282,13 +307,13 @@ class TrackerDB:
 
         Sets fetched_at to today's date when status is "filled".
         """
-        item_id = self._get_item_id(media_type, title)
+        item_id = self._get_item_id(media_type, identity)
         if item_id is None:
             log.warning(
                 "Cannot update field status: item not found",
                 event="tracker.field_update",
                 media_type=media_type,
-                title=title,
+                title=identity,
                 field=field,
             )
             return
@@ -308,7 +333,7 @@ class TrackerDB:
                 "Failed to update field status",
                 event="tracker.error",
                 media_type=media_type,
-                title=title,
+                title=identity,
                 field=field,
             )
             return
@@ -317,21 +342,21 @@ class TrackerDB:
             "Field status updated",
             event="tracker.field_update",
             media_type=media_type,
-            title=title,
+            title=identity,
             field=field,
             status=status,
         )
 
     def get_field_status(
-        self, media_type: str, title: str, field: str
+        self, media_type: str, identity: str, field: str
     ) -> Optional[Dict[str, Any]]:
         """Get a single field_status row, or None if not found."""
-        item_id = self._get_item_id(media_type, title)
+        item_id = self._get_item_id(media_type, identity)
         if item_id is None:
             log.debug(
                 "Item not found for field status query",
                 media_type=media_type,
-                title=title,
+                title=identity,
                 field=field,
             )
             return None
@@ -346,15 +371,15 @@ class TrackerDB:
         return dict(row)
 
     def get_fields_by_status(
-        self, media_type: str, title: str, status: str
+        self, media_type: str, identity: str, status: str
     ) -> List[Dict[str, Any]]:
         """Get all field_status rows matching a given status for an item."""
-        item_id = self._get_item_id(media_type, title)
+        item_id = self._get_item_id(media_type, identity)
         if item_id is None:
             log.debug(
                 "Item not found for fields by status query",
                 media_type=media_type,
-                title=title,
+                title=identity,
                 status=status,
             )
             return []
@@ -365,9 +390,9 @@ class TrackerDB:
         )
         return [dict(r) for r in cursor.fetchall()]
 
-    def get_checked_fields(self, media_type: str, title: str) -> set:
+    def get_checked_fields(self, media_type: str, identity: str) -> set:
         """Return the set of field names that have any field_status entry."""
-        item_id = self._get_item_id(media_type, title)
+        item_id = self._get_item_id(media_type, identity)
         if item_id is None:
             return set()
         cursor = self._conn.execute(
@@ -398,13 +423,13 @@ class TrackerDB:
             items_reset=cursor.rowcount,
         )
 
-    def mark_cycle_processed(self, media_type: str, title: str) -> None:
+    def mark_cycle_processed(self, media_type: str, identity: str) -> None:
         """Mark an item as processed in the current cycle."""
         try:
             self._conn.execute(
                 "UPDATE items SET cycle_processed = 1 "
-                "WHERE media_type = ? AND title = ?",
-                (media_type, title),
+                "WHERE media_type = ? AND identity = ?",
+                (media_type, identity),
             )
             self._conn.commit()
         except sqlite3.Error:
@@ -412,7 +437,7 @@ class TrackerDB:
                 "Failed to mark cycle processed",
                 event="tracker.error",
                 media_type=media_type,
-                title=title,
+                title=identity,
             )
 
     def get_unprocessed_items(self, media_type: str) -> List[Dict[str, Any]]:
