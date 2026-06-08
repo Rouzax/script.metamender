@@ -212,3 +212,14 @@ def test_get_all_items_no_filter(kodi_stubs):
     payload = json.loads(call_args)
     assert "filter" not in payload["params"]
     assert "tvshowid" not in payload["params"]
+
+
+def test_get_all_movies_requests_ratings_property(kodi_stubs):
+    response = {"result": {"movies": []}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
+        return_value=json.dumps(response)
+    )
+    get_all_items(MOVIE)
+    call_args = kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0]
+    payload = json.loads(call_args)
+    assert "ratings" in payload["params"]["properties"]
