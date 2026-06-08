@@ -1408,6 +1408,139 @@ class TestRunScanPerFieldRetry:
 
 
 # ---------------------------------------------------------------------------
+# Integration tests: one-time auto-retry of exhausted fields (D3)
+# ---------------------------------------------------------------------------
+
+
+class TestRunScanExhaustedAutoRetry:
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_exhausted_field_schedules_autoretry(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """A field reaching max_retries with no data exhausts but keeps a
+        next_retry well in the future (the one-time auto-retry), not None."""
+        from datetime import timedelta as _td
+
+        from resources.lib.constants import EXHAUSTED_AUTORETRY_DAYS
+
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = None  # provider finds nothing
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        # Seed to one attempt below max (4): the next attempt exhausts.
+        for _ in range(3):
+            tracker.record_field_attempt(
+                "movie", _MOVIE_IDENTITY, "rating", next_retry="2020-01-01"
+            )
+
+        settings = _make_settings()
+        settings["max_retries"] = 4
+
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", settings,
+        )
+
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field is not None
+        assert field["status"] == "exhausted"
+        # The auto-retry is scheduled, not permanent.
+        assert field["next_retry"] is not None
+        # It is well in the future (~EXHAUSTED_AUTORETRY_DAYS out).
+        floor = (date.today() + _td(days=150)).isoformat()
+        assert field["next_retry"] > floor
+        expected = (
+            date.today() + timedelta(days=EXHAUSTED_AUTORETRY_DAYS)
+        ).isoformat()
+        assert field["next_retry"] == expected
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_autoretry_still_empty_goes_permanent(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """An exhausted field whose auto-retry has come due and still finds no
+        data goes permanently exhausted (next_retry None) and is not attempted
+        again on a later scan."""
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = None  # still nothing on the auto-retry
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        # Already exhausted with the auto-retry now in the past (due).
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "rating", "exhausted")
+        tracker.set_field_next_retry(
+            "movie", _MOVIE_IDENTITY, "rating", "2020-01-01"
+        )
+
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+        )
+
+        # The auto-retry ran (provider was called) and found nothing -> permanent.
+        assert mock_fetch.called
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field is not None
+        assert field["status"] == "exhausted"
+        assert field["next_retry"] is None
+
+        # A later scan must not attempt the now-permanent field again.
+        mock_fetch.reset_mock()
+        tracker.start_new_cycle()
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+        )
+        assert not mock_fetch.called
+        field2 = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field2["status"] == "exhausted"
+        assert field2["next_retry"] is None
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_autoretry_with_data_fills(
+        self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """An exhausted field whose auto-retry comes due and now finds data is
+        filled (and the value is written)."""
+        mock_get_all.return_value = [_make_movie_item()]
+        # Provider now returns a rating for the field that was exhausted.
+        mock_fetch.return_value = _tmdb_movie_response()
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        # Exhausted with the auto-retry now due.
+        tracker.set_field_status("movie", _MOVIE_IDENTITY, "rating", "exhausted")
+        tracker.set_field_next_retry(
+            "movie", _MOVIE_IDENTITY, "rating", "2020-01-01"
+        )
+
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+        )
+
+        assert mock_fetch.called
+        # The value was written to Kodi.
+        assert mock_update.called
+        field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        assert field is not None
+        assert field["status"] == "filled"
+        tracker.close()
+
+
+# ---------------------------------------------------------------------------
 # Tests: pre-built items parameter
 # ---------------------------------------------------------------------------
 
