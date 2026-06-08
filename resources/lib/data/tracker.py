@@ -322,9 +322,12 @@ class TrackerDB:
 
         try:
             self._conn.execute(
-                "INSERT OR REPLACE INTO field_status "
+                "INSERT INTO field_status "
                 "(item_id, field, status, source, vote_count, fetched_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(item_id, field) DO UPDATE SET "
+                "status = excluded.status, source = excluded.source, "
+                "vote_count = excluded.vote_count, fetched_at = excluded.fetched_at",
                 (item_id, field, status, source, vote_count, fetched_at),
             )
             self._conn.commit()
@@ -346,6 +349,37 @@ class TrackerDB:
             field=field,
             status=status,
         )
+
+    def record_field_attempt(
+        self, media_type: str, identity: str, field: str, next_retry: Optional[str] = None
+    ) -> None:
+        """Increment a field's attempt_count and set its next_retry.
+
+        Creates the field_status row (status 'empty') if it does not exist.
+        """
+        item_id = self._get_item_id(media_type, identity)
+        if item_id is None:
+            log.warning(
+                "Cannot record field attempt: item not found",
+                event="tracker.field_update",
+                media_type=media_type, title=identity, field=field,
+            )
+            return
+        try:
+            self._conn.execute(
+                "INSERT INTO field_status (item_id, field, status, attempt_count, next_retry) "
+                "VALUES (?, ?, 'empty', 1, ?) "
+                "ON CONFLICT(item_id, field) DO UPDATE SET "
+                "attempt_count = field_status.attempt_count + 1, next_retry = excluded.next_retry",
+                (item_id, field, next_retry),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record field attempt",
+                event="tracker.error",
+                media_type=media_type, title=identity, field=field,
+            )
 
     def get_field_status(
         self, media_type: str, identity: str, field: str

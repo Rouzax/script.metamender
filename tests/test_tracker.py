@@ -354,4 +354,45 @@ def test_update_last_seen(tmp_path):
     db.upsert_item("movie", "tmdb:1", title="A", kodi_id=1)
     db.update_last_seen("movie", "tmdb:1", "2026-06-08")
     assert db.get_item("movie", "tmdb:1")["last_seen"] == "2026-06-08"
+
+
+# ----------------------------------------------------------------------
+# Task 5: per-field retry storage
+# ----------------------------------------------------------------------
+
+
+def test_record_field_attempt_increments_and_sets_retry(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.set_field_status("movie", "tmdb:1", "plot", "empty")
+    db.record_field_attempt("movie", "tmdb:1", "plot", next_retry="2026-06-15")
+    fs = db.get_field_status("movie", "tmdb:1", "plot")
+    assert fs["attempt_count"] == 1
+    assert fs["next_retry"] == "2026-06-15"
+    db.record_field_attempt("movie", "tmdb:1", "plot", next_retry="2026-07-15")
+    fs = db.get_field_status("movie", "tmdb:1", "plot")
+    assert fs["attempt_count"] == 2
+    assert fs["next_retry"] == "2026-07-15"
+    db.close()
+
+
+def test_record_field_attempt_creates_row_if_missing(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.record_field_attempt("movie", "tmdb:1", "rating", next_retry="2026-06-15")
+    fs = db.get_field_status("movie", "tmdb:1", "rating")
+    assert fs is not None
+    assert fs["attempt_count"] == 1
+    db.close()
+
+
+def test_set_field_status_preserves_attempt_count(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.record_field_attempt("movie", "tmdb:1", "plot", next_retry="2026-06-15")
+    db.set_field_status("movie", "tmdb:1", "plot", "filled", source="tmdb")
+    fs = db.get_field_status("movie", "tmdb:1", "plot")
+    assert fs["status"] == "filled"
+    assert fs["attempt_count"] == 1  # not reset by a status update
+    db.close()
     db.close()
