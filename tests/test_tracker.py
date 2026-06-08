@@ -395,4 +395,50 @@ def test_set_field_status_preserves_attempt_count(tmp_path):
     assert fs["status"] == "filled"
     assert fs["attempt_count"] == 1  # not reset by a status update
     db.close()
+
+
+# ----------------------------------------------------------------------
+# Task 6: orphan pruning
+# ----------------------------------------------------------------------
+
+
+def test_prune_orphans_removes_long_absent(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.update_last_seen("movie", "tmdb:1", "2026-01-01")  # long ago
+    removed = db.prune_orphans("movie", cutoff="2026-06-01")
+    assert removed == 1
+    assert db.get_item("movie", "tmdb:1") is None
+    db.close()
+
+
+def test_prune_orphans_keeps_recent(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.update_last_seen("movie", "tmdb:1", "2026-06-07")
+    removed = db.prune_orphans("movie", cutoff="2026-06-01")
+    assert removed == 0
+    assert db.get_item("movie", "tmdb:1") is not None
+    db.close()
+
+
+def test_prune_orphans_keeps_null_last_seen(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")  # never stamped
+    removed = db.prune_orphans("movie", cutoff="2026-06-01")
+    assert removed == 0
+    db.close()
+
+
+def test_prune_orphans_cascades_field_status(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.set_field_status("movie", "tmdb:1", "plot", "empty")
+    db.update_last_seen("movie", "tmdb:1", "2026-01-01")
+    item_id = db._get_item_id("movie", "tmdb:1")
+    db.prune_orphans("movie", cutoff="2026-06-01")
+    rows = db._conn.execute(
+        "SELECT COUNT(*) c FROM field_status WHERE item_id = ?", (item_id,)
+    ).fetchone()["c"]
+    assert rows == 0
     db.close()

@@ -275,6 +275,44 @@ class TrackerDB:
                 title=identity,
             )
 
+    def prune_orphans(self, media_type: str, cutoff: str) -> int:
+        """Delete items of this type whose last_seen is older than `cutoff`.
+
+        Items with a NULL last_seen are kept (never confirmed present yet).
+        Associated field_status rows are deleted too. `cutoff` is an ISO date
+        string (callers pass today minus the retention window). Returns the
+        number of items removed.
+        """
+        try:
+            ids = [
+                r["id"] for r in self._conn.execute(
+                    "SELECT id FROM items WHERE media_type = ? "
+                    "AND last_seen IS NOT NULL AND last_seen < ?",
+                    (media_type, cutoff),
+                )
+            ]
+            if not ids:
+                return 0
+            placeholders = ", ".join(["?"] * len(ids))
+            self._conn.execute(
+                "DELETE FROM field_status WHERE item_id IN ({})".format(placeholders), ids
+            )
+            self._conn.execute(
+                "DELETE FROM items WHERE id IN ({})".format(placeholders), ids
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to prune orphans", event="tracker.error", media_type=media_type
+            )
+            return 0
+
+        log.info(
+            "Pruned orphaned items", event="tracker.prune",
+            media_type=media_type, removed=len(ids),
+        )
+        return len(ids)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
