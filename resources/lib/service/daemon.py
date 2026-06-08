@@ -2,7 +2,7 @@
 Background service daemon for MetaMender.
 
 Runs as a Kodi service, periodically scanning the library for
-metadata gaps and backfilling from TMDB and OMDB.
+metadata gaps and backfilling from TMDB and IMDb.
 
 Logging:
     Logger: 'service'
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, FrozenSet, Optional
+from typing import Any, Dict, FrozenSet, Optional  # noqa: F401
 
 import xbmc
 import xbmcvfs
@@ -108,10 +108,11 @@ def _load_settings() -> Dict[str, Any]:
     """Read all settings needed by the scan engine.
 
     Returns:
-        Dict with tmdb_api_key, omdb_api_key, enabled_fields (FrozenSet),
-        min_votes_movie, min_votes_episode, stale_threshold_days,
-        max_retries, rate_limit, scan_interval, show_notifications,
-        and resume_interrupted.
+        Dict with tmdb_api_key, rating_source, plot_source,
+        enabled_fields (FrozenSet), min_votes_movie,
+        min_votes_episode, stale_threshold_days, max_retries,
+        rate_limit, scan_interval, show_notifications, and
+        resume_interrupted.
     """
     # Build enabled fields from individual toggles
     fields: set = set()
@@ -121,7 +122,8 @@ def _load_settings() -> Dict[str, Any]:
 
     return {
         "tmdb_api_key": get_setting("tmdb_api_key"),
-        "omdb_api_key": get_setting("omdb_api_key"),
+        "rating_source": get_int_setting("rating_source", 0),
+        "plot_source": get_int_setting("plot_source", 0),
         "enabled_fields": frozenset(fields),
         "min_votes_movie": get_int_setting("min_votes_movie", 50),
         "min_votes_episode": get_int_setting("min_votes_episode", 20),
@@ -173,6 +175,7 @@ def _run_scan(
     source_config: Dict[str, Any],
     settings: Dict[str, Any],
     monitor: MetaMendMonitor,
+    kodi_filter: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Dict[str, int]]:
     """Run scan for MOVIE, TVSHOW, and EPISODE in order.
 
@@ -196,6 +199,7 @@ def _run_scan(
             tmdb_api_key=tmdb_api_key,
             settings=settings,
             monitor=monitor,
+            kodi_filter=kodi_filter,
         )
         all_stats[media_type.name] = stats
 
@@ -215,6 +219,7 @@ def _run_scan(
         settings=settings,
         monitor=monitor,
         show_id_map=show_id_map,
+        kodi_filter=kodi_filter,
     )
     all_stats[EPISODE.name] = episode_stats
 
@@ -287,10 +292,21 @@ def run() -> None:
                 if should_scan:
                     StructuredLogger.start_scan_log()
 
+                    kodi_filter = None  # type: Optional[Dict[str, str]]
+                    if reason == "library_event":
+                        last_completed = tracker.get_scan_state("last_scan_completed")
+                        if last_completed:
+                            kodi_filter = {
+                                "field": "dateadded",
+                                "operator": "after",
+                                "value": last_completed,
+                            }
+
                     log.info(
                         "Scan triggered",
                         event="service.scan_trigger",
                         reason=reason,
+                        targeted=kodi_filter is not None,
                     )
 
                     source_config = load_source_config(
@@ -301,7 +317,10 @@ def run() -> None:
                         tracker.start_new_cycle()
 
                     scan_start = time.perf_counter()
-                    all_stats = _run_scan(tracker, source_config, settings, monitor)
+                    all_stats = _run_scan(
+                        tracker, source_config, settings, monitor,
+                        kodi_filter=kodi_filter,
+                    )
                     elapsed = round(time.perf_counter() - scan_start, 2)
 
                     movie_stats = all_stats.get("movie", {})
@@ -320,6 +339,10 @@ def run() -> None:
                     StructuredLogger.stop_scan_log()
                     last_scan = time.time()
                     monitor.clear_scan_request()
+                    tracker.set_scan_state(
+                        "last_scan_completed",
+                        time.strftime("%Y-%m-%d %H:%M:%S"),
+                    )
 
                     # Notification
                     if settings["show_notifications"]:

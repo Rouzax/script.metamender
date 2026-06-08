@@ -38,7 +38,7 @@ DEFAULT_RATE_LIMIT_SEC = 0.25
 DEFAULT_RETRY_DAYS = 30
 
 # Seconds to wait after library scan/clean finishes before triggering a rating scan
-LIBRARY_SCAN_DEBOUNCE_SEC = 60
+LIBRARY_SCAN_DEBOUNCE_SEC = 300
 
 # =============================================================================
 # Rating Defaults
@@ -66,8 +66,8 @@ SOURCES_CONFIG_FILENAME = "sources.json"
 RETRY_INTERVALS = (7, 30, 90)
 DEFAULT_MAX_RETRIES = 4
 
-# OMDB daily call budget (safety margin below free tier limit of 1000)
-OMDB_DAILY_LIMIT = 950
+# Disable a provider after this many consecutive failures in a single scan
+PROVIDER_CIRCUIT_BREAKER_THRESHOLD = 5
 
 # =============================================================================
 # Inference Config
@@ -81,7 +81,7 @@ CONFIG_FILENAME = "inference.json"
 # =============================================================================
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
-OMDB_BASE_URL = "https://www.omdbapi.com/"
+IMDBAPI_BASE_URL = "https://api.imdbapi.dev"
 FSK_API_URL = "https://www.fsk.de/fskapi/ReleaseSearch"
 BBFC_SEARCH_URL = "https://www.bbfc.co.uk/search"
 KIJKWIJZER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"

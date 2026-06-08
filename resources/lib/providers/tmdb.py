@@ -281,6 +281,7 @@ def fetch_movie(
         "premiered": data.get("release_date", ""),
         "original_title": data.get("original_title", ""),
         "certifications": certifications,
+        "imdb_id": data.get("imdb_id", ""),
     }
 
     log.info(
@@ -358,7 +359,9 @@ def fetch_season(
     episodes = []  # type: List[Dict]
     for ep in data.get("episodes", []):
         crew = {"crew": ep.get("crew", [])}
+        ep_id = ep.get("id")
         episodes.append({
+            "tmdb_id": str(ep_id) if ep_id is not None else "",
             "episode_number": ep.get("episode_number", 0),
             "season_number": ep.get("season_number", season_number),
             "title": ep.get("name", ""),
@@ -398,7 +401,7 @@ def fetch_tvshow(
     params = {
         "api_key": api_key,
         "language": language,
-        "append_to_response": "content_ratings",
+        "append_to_response": "content_ratings,external_ids",
     }
 
     rpc_start = time.perf_counter()
@@ -447,6 +450,7 @@ def fetch_tvshow(
         "plot": data.get("overview", ""),
         "genres": [g["name"] for g in data.get("genres", []) if "name" in g],
         "certifications": certifications,
+        "imdb_id": data.get("external_ids", {}).get("imdb_id", ""),
     }
 
     log.info(
@@ -459,3 +463,51 @@ def fetch_tvshow(
     )
 
     return result
+
+
+def fetch_episode_external_ids(
+    show_tmdb_id: str,
+    season_number: int,
+    episode_number: int,
+    api_key: str,
+) -> Optional[str]:
+    """Fetch the IMDB ID for a specific episode from TMDB.
+
+    Returns the IMDB ID string (e.g., "tt1234567") or None if not
+    available or on failure.
+    """
+    url = "{}/tv/{}/season/{}/episode/{}/external_ids".format(
+        TMDB_BASE_URL, show_tmdb_id, season_number, episode_number,
+    )
+
+    try:
+        with log_timing(
+            log, "tmdb.episode_ids",
+            tmdb_id=show_tmdb_id, season=season_number, episode=episode_number,
+        ):
+            resp = requests.get(
+                url, params={"api_key": api_key}, timeout=10,
+            )
+    except requests.RequestException:
+        log.exception(
+            "External IDs request failed",
+            event="tmdb.error",
+            tmdb_id=show_tmdb_id,
+        )
+        return None
+
+    if resp.status_code == 401:
+        raise ApiKeyError("tmdb")
+
+    if resp.status_code != 200:
+        return None
+
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+
+    imdb_id = data.get("imdb_id")
+    if imdb_id:
+        return str(imdb_id)
+    return None

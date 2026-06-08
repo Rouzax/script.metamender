@@ -1,8 +1,10 @@
 """Tests for scan orchestrator."""
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict  # noqa: F401 (used in type comments)
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.engine.scan import (
@@ -10,6 +12,18 @@ from resources.lib.engine.scan import (
     _item_title,
     run_scan,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_imdb_providers():
+    """Patch IMDb provider functions to return None by default.
+
+    Tests that need IMDb data override these with per-test patches.
+    """
+    with patch("resources.lib.engine.scan.imdb_fetch_movie", return_value=None), \
+         patch("resources.lib.engine.scan.imdb_fetch_episode", return_value=None), \
+         patch("resources.lib.engine.scan.tmdb_fetch_episode_ids", return_value=None):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +165,7 @@ def _tmdb_tvshow_response(**overrides):
 def _tmdb_episode_data(**overrides):
     # type: (...) -> Dict[str, Any]
     base = {
+        "tmdb_id": "99999",
         "episode_number": 1,
         "season_number": 1,
         "title": "Pilot",
@@ -260,7 +275,7 @@ class TestExtractFields:
 class TestRunScanMovies:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_processes_movie_with_gaps(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -282,7 +297,7 @@ class TestRunScanMovies:
         assert mock_update.called
 
     @patch("resources.lib.engine.scan.get_all_items")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_skips_item_without_ids(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -302,7 +317,7 @@ class TestRunScanMovies:
         assert not mock_fetch.called
 
     @patch("resources.lib.engine.scan.get_all_items")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_skips_disabled_source(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -324,14 +339,20 @@ class TestRunScanMovies:
         assert not mock_fetch.called
 
     @patch("resources.lib.engine.scan.get_all_items")
-    @patch("resources.lib.engine.scan.fetch_movie")
-    def test_skips_item_with_no_gaps(
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_skips_item_with_no_gaps_and_checked_fields(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
+        """Item with filled data AND field_status entries should be skipped."""
         item = _make_movie_item(rating=7.5, plot="A great plot")
         mock_get_all.return_value = [item]
 
         tracker = _make_tracker(tmp_path)
+        # Pre-populate field_status so first-encounter check passes
+        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        tracker.set_field_status("movie", "Test Movie", "rating", "checked")
+        tracker.set_field_status("movie", "Test Movie", "plot", "checked")
+
         run_scan(
             MOVIE, tracker, _make_source_config(),
             frozenset({"rating", "plot"}),
@@ -342,7 +363,7 @@ class TestRunScanMovies:
         assert not mock_fetch.called
 
     @patch("resources.lib.engine.scan.get_all_items")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_abort_requested_stops_scan(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -366,7 +387,7 @@ class TestRunScanMovies:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_stats_count_fields(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -387,7 +408,7 @@ class TestRunScanMovies:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_tmdb_returns_none_records_attempt(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -408,7 +429,7 @@ class TestRunScanMovies:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_update_failure_counts_error(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -429,7 +450,7 @@ class TestRunScanMovies:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_complete_item_sets_tracker_status(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -452,7 +473,7 @@ class TestRunScanMovies:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_partial_fill_records_attempt(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -476,7 +497,7 @@ class TestRunScanMovies:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_field_status_set_for_filled(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -500,15 +521,20 @@ class TestRunScanMovies:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_no_gap_item_marked_complete_without_fetch(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
-        """Items with no gaps are marked complete without calling TMDB."""
+        """Items with no gaps and all fields checked are marked complete."""
         item = _make_movie_item(rating=8.0, plot="Filled")
         mock_get_all.return_value = [item]
 
         tracker = _make_tracker(tmp_path)
+        # Pre-populate field_status so first-encounter doesn't trigger
+        tracker.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="12345")
+        tracker.set_field_status("movie", "Test Movie", "rating", "checked")
+        tracker.set_field_status("movie", "Test Movie", "plot", "checked")
+
         run_scan(
             MOVIE, tracker, _make_source_config(),
             frozenset({"rating", "plot"}),
@@ -524,7 +550,7 @@ class TestRunScanMovies:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.resolve_id")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_resolves_tmdb_id_when_missing(
         self, mock_fetch, mock_update, mock_resolve, mock_get_all,
         tmp_path, kodi_stubs
@@ -546,13 +572,41 @@ class TestRunScanMovies:
 
         mock_resolve.assert_called_once()
         mock_fetch.assert_called_once_with("55555", "fake_key", "en-US")
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_tmdb_returns_none_falls_back_to_imdb(
+        self, mock_tmdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """When TMDB returns None but IMDb has data, uses IMDb data."""
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_tmdb.return_value = None
+        mock_update.return_value = True
+
+        with patch(
+            "resources.lib.engine.scan.imdb_fetch_movie",
+            return_value={"rating": 8.0, "votes": 5000, "plot": "IMDb plot"},
+        ):
+            tracker = _make_tracker(tmp_path)
+            stats = run_scan(
+                MOVIE, tracker, _make_source_config(),
+                frozenset({"rating", "plot"}),
+                "fake_key", _make_settings(),
+            )
+
+            assert stats["updated"] >= 1
+            field = tracker.get_field_status("movie", "Test Movie", "rating")
+            assert field is not None
+            assert field["source"] == "imdb"
+            tracker.close()
         assert stats["updated"] >= 1
 
 
 class TestRunScanTVShows:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_tvshow")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
     def test_processes_tvshow(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -575,7 +629,7 @@ class TestRunScanTVShows:
 class TestRunScanEpisodes:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_season")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
     def test_processes_episode(
         self, mock_fetch_season, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -598,20 +652,20 @@ class TestRunScanEpisodes:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_season")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
     def test_caches_season_data(
         self, mock_fetch_season, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
         """Two episodes from the same season should only call fetch_season once."""
-        ep1 = _make_episode_item(episode=1, title="Episode 1")
+        ep1 = _make_episode_item(episode=1, title="Episode 1", tmdb_id="11111")
         ep1["episodeid"] = 100
-        ep2 = _make_episode_item(episode=2, title="Episode 2")
+        ep2 = _make_episode_item(episode=2, title="Episode 2", tmdb_id="22222")
         ep2["episodeid"] = 101
 
         mock_get_all.return_value = [ep1, ep2]
         mock_fetch_season.return_value = [
-            _tmdb_episode_data(episode_number=1),
-            _tmdb_episode_data(episode_number=2, title="Second"),
+            _tmdb_episode_data(tmdb_id="11111", episode_number=1),
+            _tmdb_episode_data(tmdb_id="22222", episode_number=2, title="Second"),
         ]
         mock_update.return_value = True
 
@@ -630,13 +684,14 @@ class TestRunScanEpisodes:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_season")
-    def test_episode_not_found_in_season(
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_episode_not_found_by_tmdb_id(
         self, mock_fetch_season, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
-        """Episode not in season data should record attempt."""
-        mock_get_all.return_value = [_make_episode_item(episode=99)]
-        mock_fetch_season.return_value = [_tmdb_episode_data(episode_number=1)]
+        """Episode with tmdb_id not matching any episode in season data."""
+        ep = _make_episode_item(episode=1, tmdb_id="00000")
+        mock_get_all.return_value = [ep]
+        mock_fetch_season.return_value = [_tmdb_episode_data(tmdb_id="99999")]
         mock_update.return_value = True
 
         tracker = _make_tracker(tmp_path)
@@ -648,17 +703,40 @@ class TestRunScanEpisodes:
             show_id_map=show_map,
         )
 
-        item = tracker.get_item("episode", "Test Show S01E99")
+        item = tracker.get_item("episode", "Test Show S01E01")
         assert item is not None
         assert item["attempt_count"] == 1
         assert stats["updated"] == 0
+        tracker.close()
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    def test_episode_without_imdb_or_tmdb_id_records_attempt(
+        self, mock_get_all, tmp_path, kodi_stubs
+    ):
+        """Episode with only TVDB ID records attempt and eventually exhausts."""
+        ep = _make_episode_item(tmdb_id=None)
+        ep["uniqueid"] = {"tvdb": "12345"}
+        mock_get_all.return_value = [ep]
+
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            EPISODE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            show_id_map={"Test Show": "55555"},
+        )
+
+        item = tracker.get_item("episode", "Test Show S01E01")
+        assert item is not None
+        assert item["attempt_count"] == 1
+        assert stats["processed"] >= 1
         tracker.close()
 
 
 class TestRunScanSourceLanguage:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_uses_source_language(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -680,12 +758,12 @@ class TestRunScanSourceLanguage:
         )
         tracker.close()
 
-        mock_fetch.assert_called_once_with("12345", "fake_key", "nl-NL")
+        mock_fetch.assert_called_with("12345", "fake_key", "nl-NL")
 
 
 class TestRunScanApiKeyError:
     @patch("resources.lib.engine.scan.get_all_items")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_api_key_error_stops_scan(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -713,7 +791,7 @@ class TestRunScanApiKeyError:
 class TestRunScanMultipleItems:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_processes_multiple_movies(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -745,7 +823,7 @@ class TestRunScanMultipleItems:
 class TestRunScanStaleness:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_skips_exhausted_item(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -767,7 +845,7 @@ class TestRunScanStaleness:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_skips_item_before_retry_date(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -789,7 +867,7 @@ class TestRunScanStaleness:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_processes_item_past_retry_date(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -813,7 +891,7 @@ class TestRunScanStaleness:
         assert stats["updated"] >= 1
 
     @patch("resources.lib.engine.scan.get_all_items")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_marks_exhausted_after_max_retries(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -842,7 +920,7 @@ class TestRunScanStaleness:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_attempt_count_increments_correctly(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -864,6 +942,8 @@ class TestRunScanStaleness:
         tracker.record_attempt("movie", "Test Movie", next_retry="2020-01-01")
         # attempt_count is now 2 from the manual record_attempt
 
+        # Start new cycle so cycle_processed is reset
+        tracker.start_new_cycle()
         run_scan(MOVIE, tracker, _make_source_config(),
                  frozenset({"rating"}), "fake_key", _make_settings())
 
@@ -881,7 +961,7 @@ class TestRunScanStaleness:
 class TestRunScanWithItems:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.update_item")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_items_param_skips_kodi_query(
         self, mock_fetch, mock_update, mock_get_all, tmp_path, kodi_stubs
     ):
@@ -903,7 +983,7 @@ class TestRunScanWithItems:
         assert stats["updated"] >= 1
 
     @patch("resources.lib.engine.scan.get_all_items")
-    @patch("resources.lib.engine.scan.fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_empty_items_list_processes_nothing(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):

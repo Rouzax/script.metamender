@@ -54,20 +54,29 @@ class TestIsRatingStale:
 
 
 class TestComputeNextRetry:
-    def test_first_attempt(self):
+    def test_first_attempt_within_jitter_range(self):
         result = compute_next_retry(1)
-        expected = (date.today() + timedelta(days=7)).isoformat()
-        assert result == expected
+        assert result is not None
+        result_date = date.fromisoformat(result)
+        min_date = date.today() + timedelta(days=7)
+        max_date = date.today() + timedelta(days=7 + 7 // 4)
+        assert min_date <= result_date <= max_date
 
-    def test_second_attempt(self):
+    def test_second_attempt_within_jitter_range(self):
         result = compute_next_retry(2)
-        expected = (date.today() + timedelta(days=30)).isoformat()
-        assert result == expected
+        assert result is not None
+        result_date = date.fromisoformat(result)
+        min_date = date.today() + timedelta(days=30)
+        max_date = date.today() + timedelta(days=30 + 30 // 4)
+        assert min_date <= result_date <= max_date
 
-    def test_third_attempt(self):
+    def test_third_attempt_within_jitter_range(self):
         result = compute_next_retry(3)
-        expected = (date.today() + timedelta(days=90)).isoformat()
-        assert result == expected
+        assert result is not None
+        result_date = date.fromisoformat(result)
+        min_date = date.today() + timedelta(days=90)
+        max_date = date.today() + timedelta(days=90 + 90 // 4)
+        assert min_date <= result_date <= max_date
 
     def test_fourth_attempt_exhausted(self):
         assert compute_next_retry(4) is None
@@ -79,3 +88,9 @@ class TestComputeNextRetry:
     def test_custom_max_retries(self):
         assert compute_next_retry(2, max_retries=2) is None
         assert compute_next_retry(1, max_retries=2) is not None
+
+    def test_jitter_varies(self):
+        results = set()
+        for _ in range(20):
+            results.add(compute_next_retry(2))
+        assert len(results) >= 2, "jitter should produce varied dates"

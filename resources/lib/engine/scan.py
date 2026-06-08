@@ -21,16 +21,25 @@ import time
 from datetime import date
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
+import xbmc
+
 from resources.lib.data.kodi import get_all_items, update_item
 from resources.lib.data.media_types import MediaType
 from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
+from resources.lib.constants import PROVIDER_CIRCUIT_BREAKER_THRESHOLD
 from resources.lib.engine.gaps import detect_gaps, is_placeholder_title
+from resources.lib.engine.resolve import TMDB_ONLY, resolve_metadata
 from resources.lib.engine.staleness import compute_next_retry, is_rating_stale
+from resources.lib.providers.imdbapi import (
+    fetch_episode as imdb_fetch_episode,
+    fetch_movie as imdb_fetch_movie,
+)
 from resources.lib.providers.tmdb import (
-    fetch_movie,
-    fetch_season,
-    fetch_tvshow,
+    fetch_episode_external_ids as tmdb_fetch_episode_ids,
+    fetch_movie as tmdb_fetch_movie,
+    fetch_season as tmdb_fetch_season,
+    fetch_tvshow as tmdb_fetch_tvshow,
     resolve_id,
 )
 from resources.lib.utils import ApiKeyError, get_logger
@@ -54,6 +63,8 @@ _TMDB_TO_KODI = {
     "firstaired": "firstaired",
     "title": "title",
 }
+
+_KODI_TO_TMDB = {v: k for k, v in _TMDB_TO_KODI.items()}
 
 
 def _make_stats() -> Dict[str, Any]:
@@ -135,33 +146,33 @@ def _get_season_data(
     """
     key = "{}:{}:{}".format(show_tmdb_id, season_number, language)
     if key not in cache:
-        cache[key] = fetch_season(show_tmdb_id, season_number, api_key, language)
+        cache[key] = tmdb_fetch_season(show_tmdb_id, season_number, api_key, language)
     return cache[key]
 
 
-def _find_episode_in_season(
+def _find_episode_by_tmdb_id(
     season_data: List[Dict[str, Any]],
-    episode_number: int,
+    tmdb_episode_id: str,
 ) -> Optional[Dict[str, Any]]:
-    """Find an episode by episode_number in a season's episode list."""
+    """Find an episode by TMDB episode ID in a season's episode list."""
     for ep in season_data:
-        if ep.get("episode_number") == episode_number:
+        if ep.get("tmdb_id") == tmdb_episode_id:
             return ep
     return None
 
 
 def _extract_fields(
-    tmdb_data: Dict[str, Any],
+    provider_data: Dict[str, Any],
     gap_fields: List[str],
     media_type: MediaType,
     item: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Extract writable Kodi fields from TMDB data based on detected gaps.
+    """Extract writable Kodi fields from provider data based on detected gaps.
 
     Only returns fields that are in gap_fields and have non-empty values
-    from TMDB. Skips "mpaa" (handled by Phase 8).
+    from the provider. Skips "mpaa" (handled by Phase 8).
 
-    For episode titles: only overwrites if TMDB returns a different,
+    For episode titles: only overwrites if provider returns a different,
     non-empty title and the current title is a placeholder.
     """
     fields = {}  # type: Dict[str, Any]
@@ -170,7 +181,7 @@ def _extract_fields(
         if kodi_key not in gap_fields:
             continue
 
-        value = tmdb_data.get(tmdb_key)
+        value = provider_data.get(tmdb_key)
 
         # Skip empty values
         if value is None:
@@ -182,13 +193,21 @@ def _extract_fields(
         if isinstance(value, (int, float)) and value == 0:
             continue
 
-        # Episode title: only overwrite placeholder titles with different TMDB titles
+        # Episode title: only overwrite placeholder titles with different titles
         if kodi_key == "title" and media_type.name == "episode":
             current_title = item.get("title", "")
             if not is_placeholder_title(current_title):
                 continue
             if value == current_title:
                 continue
+
+        # Skip writing if the item already has the same value (first-encounter:
+        # provider confirmed existing data, no need to rewrite)
+        current = item.get(kodi_key)
+        if current is not None and current == value:
+            continue
+        if isinstance(current, list) and isinstance(value, list) and current == value:
+            continue
 
         # Kodi expects votes as a string
         if kodi_key == "votes" and isinstance(value, int):
@@ -209,6 +228,7 @@ def run_scan(
     monitor: Any = None,
     show_id_map: Optional[Dict[str, str]] = None,
     items: Optional[List[Dict[str, Any]]] = None,
+    kodi_filter: Optional[Dict[str, str]] = None,
 ) -> Dict[str, int]:
     """Run a single scan cycle for one media type.
 
@@ -252,12 +272,18 @@ def run_scan(
     )
 
     if items is None:
-        items = get_all_items(media_type)
+        items = get_all_items(media_type, kodi_filter=kodi_filter)
 
     # Season cache for episode batching
     season_cache = {}  # type: Dict[str, Optional[List[Dict[str, Any]]]]
     # Track whether we need a rate-limit sleep before the next API call
     needs_sleep = False
+    # Circuit breaker: disable a provider after consecutive failures
+    tmdb_failures = 0
+    imdb_failures = 0
+    tmdb_disabled = False
+    imdb_disabled = False
+    cb_threshold = PROVIDER_CIRCUIT_BREAKER_THRESHOLD
 
     for item in items:
         # Check for Kodi shutdown
@@ -270,8 +296,33 @@ def run_scan(
             )
             break
 
+        # Yield: pause while video is playing
+        if monitor is not None and xbmc.getCondVisibility("Player.HasVideo"):
+            log.info(
+                "Scan paused, video playing",
+                event="scan.pause",
+                media_type=media_type.name,
+                processed=stats["processed"],
+            )
+            while (xbmc.getCondVisibility("Player.HasVideo")
+                   and not monitor.abortRequested()):
+                if monitor.waitForAbort(10):
+                    break
+            if not monitor.abortRequested():
+                log.info(
+                    "Scan resumed, playback stopped",
+                    event="scan.resume",
+                    media_type=media_type.name,
+                )
+
         title = _item_title(item, media_type)
         kodi_id = item.get(media_type.kodi_id_field, 0)
+
+        # Resume: skip items already processed in this cycle
+        pre_tracker = tracker.get_item(media_type.name, title)
+        if pre_tracker and pre_tracker.get("cycle_processed"):
+            stats["skipped"] += 1
+            continue
 
         # Match source
         source = match_source(item.get("file", ""), sources)
@@ -399,6 +450,24 @@ def run_scan(
                             premiered=item.get(media_type.date_field, ""),
                         )
 
+        # First-encounter check: if any enabled field has no field_status
+        # entry, add it to gaps so the provider call establishes a baseline.
+        kodi_fields = {
+            _TMDB_TO_KODI.get(k, k)
+            for k in _TMDB_TO_KODI
+        } & enabled_fields & media_type.backfill_fields
+        checked = tracker.get_checked_fields(media_type.name, title)
+        unchecked = kodi_fields - checked - set(gaps)
+        if unchecked:
+            gaps.extend(sorted(unchecked))
+            log.debug(
+                "First encounter, unchecked fields need provider call",
+                event="scan.first_check",
+                title=title,
+                media_type=media_type.name,
+                unchecked=sorted(unchecked),
+            )
+
         if not gaps:
             tracker.update_item_status(media_type.name, title, "complete")
             tracker.mark_cycle_processed(media_type.name, title)
@@ -414,26 +483,134 @@ def run_scan(
             gaps=gaps,
         )
 
-        # Resolve TMDB ID if missing
-        if not tmdb_id:
-            try:
-                if needs_sleep and rate_limit > 0:
-                    time.sleep(rate_limit)
-                tmdb_id = resolve_id(tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id)
-                needs_sleep = True
-            except ApiKeyError:
-                log.exception(
-                    "Invalid TMDB API key",
-                    event="scan.error",
+        # --- Provider fetch: movies and TV shows ---
+        rating_source = settings.get("rating_source", 0)
+        plot_source = settings.get("plot_source", 0)
+        tmdb_data = None  # type: Optional[Dict[str, Any]]
+        imdb_data = None  # type: Optional[Dict[str, Any]]
+        source_map = {}  # type: Dict[str, str]
+
+        if media_type.name in ("movie", "tvshow"):
+            # Check circuit breaker: both providers down
+            if tmdb_disabled and imdb_disabled:
+                log.warning(
+                    "Both providers disabled, stopping scan",
+                    event="scan.circuit_breaker",
+                    media_type=media_type.name,
+                    processed=stats["processed"],
                 )
-                stats["errors"] += 1
                 break
-            except Exception:
-                log.exception(
-                    "Failed to resolve TMDB ID",
-                    event="scan.error",
+
+            # Resolve TMDB ID if missing (show-level only)
+            if not tmdb_id and not tmdb_disabled:
+                try:
+                    if needs_sleep and rate_limit > 0:
+                        time.sleep(rate_limit)
+                    tmdb_id = resolve_id(tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id)
+                    needs_sleep = True
+                    tmdb_failures = 0
+                except ApiKeyError:
+                    log.exception(
+                        "Invalid TMDB API key",
+                        event="scan.error",
+                    )
+                    stats["errors"] += 1
+                    break
+                except Exception:
+                    log.exception(
+                        "Failed to resolve TMDB ID",
+                        event="scan.error",
+                        title=title,
+                    )
+                    tmdb_failures += 1
+                    if tmdb_failures >= cb_threshold:
+                        tmdb_disabled = True
+                        log.warning(
+                            "TMDB disabled after %d consecutive failures",
+                            tmdb_failures,
+                            event="scan.circuit_breaker",
+                            provider="tmdb",
+                        )
+
+                if tmdb_id:
+                    tracker.upsert_item(media_type.name, title, tmdb_id=tmdb_id)
+
+            # Fetch TMDB data
+            if tmdb_id and not tmdb_disabled:
+                try:
+                    if needs_sleep and rate_limit > 0:
+                        time.sleep(rate_limit)
+                    if media_type.name == "movie":
+                        tmdb_data = tmdb_fetch_movie(tmdb_id, tmdb_api_key, language)
+                    else:
+                        tmdb_data = tmdb_fetch_tvshow(tmdb_id, tmdb_api_key, language)
+                    needs_sleep = True
+                    tmdb_failures = 0
+                except ApiKeyError:
+                    log.exception(
+                        "Invalid TMDB API key",
+                        event="scan.error",
+                    )
+                    stats["errors"] += 1
+                    break
+                except Exception:
+                    log.exception(
+                        "TMDB fetch failed",
+                        event="scan.error",
+                        title=title,
+                        tmdb_id=tmdb_id,
+                    )
+                    tmdb_failures += 1
+                    if tmdb_failures >= cb_threshold:
+                        tmdb_disabled = True
+                        log.warning(
+                            "TMDB disabled after %d consecutive failures",
+                            tmdb_failures,
+                            event="scan.circuit_breaker",
+                            provider="tmdb",
+                        )
+
+            # Enrich: if TMDB returned an IMDB ID and the item lacks one, write it
+            if not imdb_id and tmdb_data and tmdb_data.get("imdb_id"):
+                enriched_imdb = tmdb_data["imdb_id"]
+                uid = item.get("uniqueid", {})
+                uid["imdb"] = enriched_imdb
+                update_item(kodi_id, media_type, title, uniqueid=uid)
+                tracker.upsert_item(media_type.name, title, imdb_id=enriched_imdb)
+                imdb_id = enriched_imdb
+                log.info(
+                    "Enriched IMDB ID from TMDB",
+                    event="scan.enrich_id",
                     title=title,
+                    imdb_id=enriched_imdb,
                 )
+
+            # Fetch IMDb data if available and not TMDB-only
+            if imdb_id and not imdb_disabled and not (rating_source == TMDB_ONLY and plot_source == TMDB_ONLY):
+                try:
+                    if needs_sleep and rate_limit > 0:
+                        time.sleep(rate_limit)
+                    imdb_data = imdb_fetch_movie(imdb_id)
+                    needs_sleep = True
+                    imdb_failures = 0
+                except Exception:
+                    log.exception(
+                        "IMDb fetch failed",
+                        event="scan.error",
+                        title=title,
+                        imdb_id=imdb_id,
+                    )
+                    imdb_failures += 1
+                    if imdb_failures >= cb_threshold:
+                        imdb_disabled = True
+                        log.warning(
+                            "IMDb disabled after %d consecutive failures",
+                            imdb_failures,
+                            event="scan.circuit_breaker",
+                            provider="imdb",
+                        )
+
+            if tmdb_data is None and imdb_data is None:
                 stats["errors"] += 1
                 _record_attempt_with_retry(
                     tracker, media_type.name, title, max_retries,
@@ -442,9 +619,27 @@ def run_scan(
                 stats["processed"] += 1
                 continue
 
-            if not tmdb_id:
+            # Resolve best values per field
+            merged_data, source_map = resolve_metadata(
+                tmdb_data, imdb_data,
+                list(_TMDB_TO_KODI.keys()),
+                rating_source, plot_source,
+            )
+
+        # --- Provider fetch: episodes (ID-based matching) ---
+        elif media_type.name == "episode":
+            if tmdb_disabled and imdb_disabled:
+                log.warning(
+                    "Both providers disabled, stopping scan",
+                    event="scan.circuit_breaker",
+                    media_type=media_type.name,
+                    processed=stats["processed"],
+                )
+                break
+
+            if not imdb_id and not tmdb_id:
                 log.debug(
-                    "Could not resolve TMDB ID, skipping",
+                    "Episode has no IMDB or TMDB ID, skipping",
                     event="scan.skip",
                     title=title,
                 )
@@ -455,82 +650,130 @@ def run_scan(
                 stats["processed"] += 1
                 continue
 
-            # Update tracker with resolved ID
-            tracker.upsert_item(media_type.name, title, tmdb_id=tmdb_id)
-
-        # Fetch metadata from TMDB
-        tmdb_data = None  # type: Optional[Dict[str, Any]]
-        try:
-            if needs_sleep and rate_limit > 0:
-                time.sleep(rate_limit)
-
-            if media_type.name == "movie":
-                tmdb_data = fetch_movie(tmdb_id, tmdb_api_key, language)
-                needs_sleep = True
-            elif media_type.name == "tvshow":
-                tmdb_data = fetch_tvshow(tmdb_id, tmdb_api_key, language)
-                needs_sleep = True
-            elif media_type.name == "episode":
-                season_number = item.get("season", 0)
-                episode_number = item.get("episode", 0)
+            # TMDB path first: match by TMDB episode ID in season data
+            # (runs before IMDb so enrichment can provide imdb_id)
+            if tmdb_id and not tmdb_disabled:
                 showtitle = item.get("showtitle", "")
-
                 ep_show_tmdb_id = (show_id_map or {}).get(showtitle)
                 if not ep_show_tmdb_id:
                     log.debug(
-                        "No show TMDB ID for episode",
+                        "No show TMDB ID for episode, skipping TMDB path",
                         event="scan.skip",
                         title=title,
                         showtitle=showtitle,
                     )
-                    stats["skipped"] += 1
-                    _record_attempt_with_retry(
-                        tracker, media_type.name, title, max_retries,
-                    )
-                    tracker.mark_cycle_processed(media_type.name, title)
-                    continue
+                if ep_show_tmdb_id:
+                    season_number = item.get("season", 0)
+                    try:
+                        cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
+                        is_cache_miss = cache_key not in season_cache
+                        season_data = _get_season_data(
+                            ep_show_tmdb_id, season_number, tmdb_api_key, language, season_cache
+                        )
+                        if season_data is not None:
+                            tmdb_data = _find_episode_by_tmdb_id(season_data, tmdb_id)
+                            # Enrich: if episode has no IMDB ID, fetch it from TMDB
+                            if not imdb_id and tmdb_data is not None:
+                                ep_num = tmdb_data.get("episode_number", 0)
+                                try:
+                                    if needs_sleep and rate_limit > 0:
+                                        time.sleep(rate_limit)
+                                    enriched_imdb = tmdb_fetch_episode_ids(
+                                        ep_show_tmdb_id, season_number, ep_num, tmdb_api_key,
+                                    )
+                                    needs_sleep = True
+                                    if enriched_imdb:
+                                        uid = item.get("uniqueid", {})
+                                        uid["imdb"] = enriched_imdb
+                                        update_item(kodi_id, media_type, title, uniqueid=uid)
+                                        tracker.upsert_item(media_type.name, title, imdb_id=enriched_imdb)
+                                        imdb_id = enriched_imdb
+                                        log.info(
+                                            "Enriched IMDB ID from TMDB",
+                                            event="scan.enrich_id",
+                                            title=title,
+                                            imdb_id=enriched_imdb,
+                                        )
+                                except Exception:
+                                    log.exception(
+                                        "Episode external IDs fetch failed",
+                                        event="scan.error",
+                                        title=title,
+                                    )
+                        if is_cache_miss:
+                            needs_sleep = True
+                        tmdb_failures = 0
+                    except ApiKeyError:
+                        log.exception(
+                            "Invalid TMDB API key",
+                            event="scan.error",
+                        )
+                        stats["errors"] += 1
+                        break
+                    except Exception:
+                        log.exception(
+                            "TMDB season fetch failed",
+                            event="scan.error",
+                            title=title,
+                            tmdb_id=tmdb_id,
+                        )
+                        tmdb_failures += 1
+                        if tmdb_failures >= cb_threshold:
+                            tmdb_disabled = True
+                            log.warning(
+                                "TMDB disabled after %d consecutive failures",
+                                tmdb_failures,
+                                event="scan.circuit_breaker",
+                                provider="tmdb",
+                            )
 
-                cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
-                is_cache_miss = cache_key not in season_cache
-                season_data = _get_season_data(
-                    ep_show_tmdb_id, season_number, tmdb_api_key, language, season_cache
-                )
-                if season_data is not None:
-                    tmdb_data = _find_episode_in_season(season_data, episode_number)
-                if is_cache_miss:
+            # IMDb path: direct episode fetch by IMDB ID
+            # (runs after TMDB so enrichment can provide imdb_id)
+            if imdb_id and not imdb_disabled:
+                try:
+                    if needs_sleep and rate_limit > 0:
+                        time.sleep(rate_limit)
+                    imdb_data = imdb_fetch_episode(imdb_id)
                     needs_sleep = True
-        except ApiKeyError:
-            log.exception(
-                "Invalid TMDB API key",
-                event="scan.error",
+                    imdb_failures = 0
+                except Exception:
+                    log.exception(
+                        "IMDb episode fetch failed",
+                        event="scan.error",
+                        title=title,
+                        imdb_id=imdb_id,
+                    )
+                    imdb_failures += 1
+                    if imdb_failures >= cb_threshold:
+                        imdb_disabled = True
+                        log.warning(
+                            "IMDb disabled after %d consecutive failures",
+                            imdb_failures,
+                            event="scan.circuit_breaker",
+                            provider="imdb",
+                        )
+
+            if tmdb_data is None and imdb_data is None:
+                stats["errors"] += 1
+                _record_attempt_with_retry(
+                    tracker, media_type.name, title, max_retries,
+                )
+                tracker.mark_cycle_processed(media_type.name, title)
+                stats["processed"] += 1
+                continue
+
+            # Resolve best values per field
+            merged_data, source_map = resolve_metadata(
+                tmdb_data, imdb_data,
+                list(_TMDB_TO_KODI.keys()),
+                rating_source, plot_source,
             )
-            stats["errors"] += 1
-            break
-        except Exception:
-            log.exception(
-                "TMDB fetch failed",
-                event="scan.error",
-                title=title,
-                tmdb_id=tmdb_id,
-            )
-            stats["errors"] += 1
-            _record_attempt_with_retry(
-                tracker, media_type.name, title, max_retries,
-            )
-            tracker.mark_cycle_processed(media_type.name, title)
-            stats["processed"] += 1
+
+        else:
             continue
 
-        if tmdb_data is None:
-            _record_attempt_with_retry(
-                tracker, media_type.name, title, max_retries,
-            )
-            tracker.mark_cycle_processed(media_type.name, title)
-            stats["processed"] += 1
-            continue
-
-        # Extract writable fields from TMDB response
-        fields_to_write = _extract_fields(tmdb_data, gaps, media_type, item)
+        # Extract writable fields from resolved provider data
+        fields_to_write = _extract_fields(merged_data, gaps, media_type, item)
 
         if fields_to_write:
             success = update_item(kodi_id, media_type, title, **fields_to_write)
@@ -547,36 +790,53 @@ def run_scan(
                     fields_written=list(fields_to_write.keys()),
                 )
 
-                # Update field status in tracker
+                # Update field status in tracker with per-field source
                 for field_name in fields_to_write:
                     vote_count = None  # type: Optional[int]
                     if field_name == "rating":
-                        vote_count = tmdb_data.get("votes")
+                        vote_count = merged_data.get("votes")
                         if isinstance(vote_count, str):
                             try:
                                 vote_count = int(vote_count)
                             except ValueError:
                                 vote_count = None
+                    tmdb_key = _KODI_TO_TMDB.get(field_name, field_name)
+                    field_source = source_map.get(tmdb_key, "tmdb")
                     tracker.set_field_status(
                         media_type.name,
                         title,
                         field_name,
                         "filled",
-                        source="tmdb",
+                        source=field_source,
                         vote_count=vote_count,
                     )
             else:
                 stats["errors"] += 1
 
-        # Record fields that TMDB did not have data for
+        # Record status for fields not written by providers
         for gap_field in gaps:
             if gap_field not in fields_to_write:
-                tracker.set_field_status(
-                    media_type.name, title, gap_field, "empty"
-                )
+                tmdb_key = _KODI_TO_TMDB.get(gap_field, gap_field)
+                kodi_val = item.get(gap_field) or item.get(tmdb_key)
+                if kodi_val and kodi_val != "" and kodi_val != 0:
+                    tracker.set_field_status(
+                        media_type.name, title, gap_field, "checked"
+                    )
+                else:
+                    tracker.set_field_status(
+                        media_type.name, title, gap_field, "empty"
+                    )
 
-        # Determine overall item status
-        remaining_gaps = [g for g in gaps if g not in fields_to_write]
+        # Determine overall item status: fields that were written ("filled")
+        # or confirmed unchanged ("checked") are resolved. Only truly empty
+        # fields (provider had no data) count as remaining gaps.
+        resolved = set(fields_to_write.keys())
+        for gap_field in gaps:
+            if gap_field not in resolved:
+                fs = tracker.get_field_status(media_type.name, title, gap_field)
+                if fs and fs.get("status") == "checked":
+                    resolved.add(gap_field)
+        remaining_gaps = [g for g in gaps if g not in resolved]
         if not remaining_gaps:
             tracker.update_item_status(media_type.name, title, "complete")
         else:
@@ -596,6 +856,8 @@ def run_scan(
         skipped=stats["skipped"],
         updated=stats["updated"],
         errors=stats["errors"],
+        tmdb_disabled=tmdb_disabled,
+        imdb_disabled=imdb_disabled,
         total_elapsed_sec=elapsed,
     )
 

@@ -31,18 +31,6 @@ msgctxt "#32012"
 msgid "API key for The Movie Database (themoviedb.org). Required for metadata lookups."
 msgstr ""
 
-msgctxt "#32020"
-msgid "OMDB"
-msgstr ""
-
-msgctxt "#32021"
-msgid "OMDB API key"
-msgstr ""
-
-msgctxt "#32022"
-msgid "API key for the Open Movie Database. Optional but recommended. Free tier allows 1,000 requests per day."
-msgstr ""
-
 msgctxt "#32025"
 msgid "Source priority"
 msgstr ""
@@ -68,7 +56,7 @@ msgid "Prefer TMDB"
 msgstr ""
 
 msgctxt "#32031"
-msgid "Prefer OMDB"
+msgid "Prefer IMDb"
 msgstr ""
 
 msgctxt "#32032"
@@ -76,7 +64,7 @@ msgid "TMDB only"
 msgstr ""
 
 msgctxt "#32033"
-msgid "OMDB only"
+msgid "IMDb only"
 msgstr ""
 
 # --- Backfill (32100-32149) ---
@@ -102,7 +90,7 @@ msgid "Enable plots backfill"
 msgstr ""
 
 msgctxt "#32105"
-msgid "Backfill missing plot summaries and outlines from TMDB or OMDB."
+msgid "Backfill missing plot summaries and outlines from TMDB or IMDb."
 msgstr ""
 
 msgctxt "#32106"
@@ -118,7 +106,7 @@ msgid "Enable certifications"
 msgstr ""
 
 msgctxt "#32109"
-msgid "Backfill missing age certifications using TMDB, OMDB, and country-specific scrapers. Configure the target country and scraper options in the Certifications tab."
+msgid "Backfill missing age certifications using TMDB, IMDb, and country-specific scrapers. Configure the target country and scraper options in the Certifications tab."
 msgstr ""
 
 msgctxt "#32110"

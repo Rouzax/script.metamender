@@ -365,6 +365,17 @@ class TrackerDB:
         )
         return [dict(r) for r in cursor.fetchall()]
 
+    def get_checked_fields(self, media_type: str, title: str) -> set:
+        """Return the set of field names that have any field_status entry."""
+        item_id = self._get_item_id(media_type, title)
+        if item_id is None:
+            return set()
+        cursor = self._conn.execute(
+            "SELECT DISTINCT field FROM field_status WHERE item_id = ?",
+            (item_id,),
+        )
+        return {row["field"] for row in cursor.fetchall()}
+
     # ------------------------------------------------------------------
     # Cycle tracking and scan state (Task 2.4)
     # ------------------------------------------------------------------

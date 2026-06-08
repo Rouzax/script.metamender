@@ -11,14 +11,6 @@
                     </constraints>
                 </setting>
             </group>
-            <group id="omdb" label="32020">
-                <setting id="omdb_api_key" type="string" label="32021" help="32022">
-                    <default></default>
-                    <constraints>
-                        <allowempty>true</allowempty>
-                    </constraints>
-                </setting>
-            </group>
             <group id="source_priority" label="32025">
                 <setting id="rating_source" type="integer" label="32026" help="32027">
                     <default>0</default>

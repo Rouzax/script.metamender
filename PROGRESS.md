@@ -29,9 +29,31 @@
 ## Phase 6: Staleness and Retry Integration
 - [x] 6.1 Integrate staleness into scan loop (re-check stale, backoff, exhaustion)
 
-## Phase 7: IMDb API Provider (imdbapi.dev, replaces OMDB)
-- [ ] 7.1 IMDb API movie and episode lookup (no auth, no daily limit)
-- [ ] 7.2 Source priority and fallback (prefer TMDB/IMDB, resolve per field)
+## Phase 7: IMDb API Provider and ID-based Episode Matching
+- [x] 7.1 Create IMDb API provider (fetch_movie, fetch_episode, fetch_season, fetch_certificates)
+- [x] 7.2 Create IMDb API tests (35 tests)
+- [x] 7.3 Create source priority module (resolve_field, resolve_metadata)
+- [x] 7.4 Create source priority tests (26 tests)
+- [x] 7.5 Update constants, settings, strings, daemon (OMDB -> IMDb transition)
+- [x] 7.6 Update TMDB fetch_season with tmdb_id per episode
+- [x] 7.7 Restructure scan.py (ID-based episode matching, IMDb provider wiring, resolve integration)
+- [x] 7.8 Update scan tests for ID-based matching (43 tests, +2 new)
+- [x] 7.9 Run full validation (242 passed, ruff clean, pyflakes clean)
+- [x] 7.10 Code review audit: 7 findings fixed (source_map key mismatch, live test broken refs, TVDB episode exhaust, episode error counting, diagnostic log, inlined parsing, dual timing)
+- [x] 7.11 Live integration test suite extended (tests 11-33, 6 groups, 178 checks)
+- [x] 7.12 IMDB ID enrichment: movies/shows from TMDB response, episodes from external_ids endpoint
+- [x] 7.13 Retry jitter (random 0 to interval/4 days) and resume integration test
+- [x] 7.14 Provider circuit breaker (disable after 5 consecutive failures, stop scan if both down)
+
+## Phase 7b: Scan Engine v2
+- [x] 7b.1 Check everything on first encounter (no field_status = needs provider call)
+- [x] 7b.2 Playback yield (pause scan when video starts, resume when stops)
+- [x] 7b.3 cycle_processed resume (skip already-checked items on resume)
+- [x] 7b.4 Targeted library-event scans (dateadded filter for new items only)
+- [x] 7b.5 Increase debounce to 5 minutes (300s)
+- [x] 7b.6 Tests and validation
+- [x] 7b.7 Live Kodi validation: first-encounter, resume, playback yield, targeted scan
+- [x] 7b.8 Bug fix: first-encounter runs for all items (not just zero-gap), skip same-value writes, "checked" fields count as resolved
 
 ## Phase 8: Port Certification Module
 - [ ] 8.1 Port presets and config (country JSON presets, load/inference/seed)
@@ -67,4 +89,4 @@
 - [x] Docker infrastructure: media mount (/mnt/media/Data), path substitution, MetaMender volume
 - [x] Live integration test suite (10 scenarios, 53 checks, runs against Docker Kodi)
 
-## Test Count: 178 unit + 53 integration = 231 total
+## Test Count: 246 unit + 185 integration = 431 total

@@ -10,6 +10,7 @@ Logging:
 """
 from __future__ import annotations
 
+import random
 from datetime import date, timedelta
 from typing import Optional
 
@@ -96,5 +97,6 @@ def compute_next_retry(
         return None
 
     index = min(attempt_count - 1, len(RETRY_INTERVALS) - 1)
-    days = RETRY_INTERVALS[index]
-    return (date.today() + timedelta(days=days)).isoformat()
+    base_days = RETRY_INTERVALS[index]
+    jitter = random.randint(0, max(1, base_days // 4))
+    return (date.today() + timedelta(days=base_days + jitter)).isoformat()

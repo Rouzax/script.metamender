@@ -104,6 +104,7 @@ MOVIE_RESPONSE = {
 SEASON_RESPONSE = {
     "episodes": [
         {
+            "id": 4014249,
             "episode_number": 1,
             "season_number": 2,
             "name": "Call Tracking",
@@ -126,6 +127,7 @@ SEASON_RESPONSE = {
             ],
         },
         {
+            "id": 4053246,
             "episode_number": 2,
             "season_number": 2,
             "name": "Disconnected",
@@ -479,6 +481,7 @@ class TestFetchSeason:
         assert len(result) == 2
 
         ep1 = result[0]
+        assert ep1["tmdb_id"] == "4014249"
         assert ep1["episode_number"] == 1
         assert ep1["season_number"] == 2
         assert ep1["title"] == "Call Tracking"
@@ -487,6 +490,16 @@ class TestFetchSeason:
         assert ep1["plot"] == "Peter goes AWOL."
         assert ep1["firstaired"] == "2025-01-23"
         assert ep1["runtime"] == 51
+
+    @patch("resources.lib.providers.tmdb.requests.get")
+    def test_tmdb_id_per_episode(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
+
+        result = fetch_season("129552", 2, "fake_key")
+
+        assert result is not None
+        assert result[0]["tmdb_id"] == "4014249"
+        assert result[1]["tmdb_id"] == "4053246"
 
     @patch("resources.lib.providers.tmdb.requests.get")
     def test_episode_directors_and_writers(self, mock_get: MagicMock) -> None:

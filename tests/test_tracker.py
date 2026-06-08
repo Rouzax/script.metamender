@@ -170,6 +170,32 @@ def test_get_fields_by_status_empty_result(tmp_path):
     db.close()
 
 
+def test_get_checked_fields(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
+    db.set_field_status("movie", "Test Movie", "rating", "filled",
+                        source="tmdb", vote_count=500)
+    db.set_field_status("movie", "Test Movie", "plot", "empty")
+    checked = db.get_checked_fields("movie", "Test Movie")
+    assert checked == {"rating", "plot"}
+    db.close()
+
+
+def test_get_checked_fields_empty(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
+    checked = db.get_checked_fields("movie", "Test Movie")
+    assert checked == set()
+    db.close()
+
+
+def test_get_checked_fields_unknown_item(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    checked = db.get_checked_fields("movie", "Unknown")
+    assert checked == set()
+    db.close()
+
+
 # --- Task 2.4: Cycle tracking ---
 
 def test_start_new_cycle_resets_processed(tmp_path):
