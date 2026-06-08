@@ -450,3 +450,17 @@ def test_prune_orphans_multiple_items(tmp_path):
     assert db.get_item("movie", "tmdb:2") is None
     assert db.get_item("movie", "tmdb:3") is not None
     db.close()
+
+
+def test_reset_exhausted_fields(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="A")
+    db.set_field_status("movie", "tmdb:1", "plot", "exhausted")
+    db.set_field_next_retry("movie", "tmdb:1", "plot", None)
+    db.set_field_status("movie", "tmdb:1", "tagline", "filled", source="tmdb")
+    n = db.reset_exhausted_fields()
+    assert n == 1
+    assert db.get_field_status("movie", "tmdb:1", "plot")["status"] == "empty"
+    assert db.get_field_status("movie", "tmdb:1", "plot")["attempt_count"] == 0
+    assert db.get_field_status("movie", "tmdb:1", "tagline")["status"] == "filled"  # untouched
+    db.close()

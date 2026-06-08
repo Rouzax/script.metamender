@@ -539,6 +539,21 @@ class TrackerDB:
                 title=identity,
             )
 
+    def reset_exhausted_fields(self) -> int:
+        """Reset all exhausted field_status rows back to empty/retriable.
+        Returns the number of fields reset."""
+        try:
+            cur = self._conn.execute(
+                "UPDATE field_status SET status = 'empty', attempt_count = 0, "
+                "next_retry = NULL WHERE status = 'exhausted'"
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception("Failed to reset exhausted fields", event="tracker.error")
+            return 0
+        log.info("Reset exhausted fields", event="tracker.reset_exhausted", count=cur.rowcount)
+        return cur.rowcount
+
     def set_scan_state(self, key: str, value: str) -> None:
         """Insert or replace a key-value pair in the scan_state table."""
         try:

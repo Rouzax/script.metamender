@@ -410,3 +410,11 @@ msgstr ""
 msgctxt "#32332"
 msgid "After a full scan, remove tracker entries for items not seen in the library for this many days (for example, deleted movies or episodes). Set to 0 to never remove them."
 msgstr ""
+
+msgctxt "#32333"
+msgid "Reset exhausted fields"
+msgstr ""
+
+msgctxt "#32334"
+msgid "Clear the exhausted state on fields that ran out of retry attempts so they are tried again on the next scan. Use this after fixing a misconfiguration or when a source has new data available."
+msgstr ""

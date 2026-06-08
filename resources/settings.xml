@@ -264,6 +264,10 @@
                     </constraints>
                     <control type="slider" format="integer" />
                 </setting>
+                <setting id="reset_exhausted" type="action" label="32333" help="32334">
+                    <data>RunScript(script.metamender,reset_exhausted)</data>
+                    <control type="button" format="action" />
+                </setting>
             </group>
             <group id="debugging" label="32320">
                 <setting id="logging" type="boolean" label="32321" help="32322">
