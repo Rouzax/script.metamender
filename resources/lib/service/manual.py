@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
+from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
 from resources.lib.service.daemon import (
     _build_show_id_map,
@@ -66,6 +67,9 @@ def run() -> None:
         scan_start = time.perf_counter()
         all_stats = {}  # type: Dict[str, Dict[str, Any]]
 
+        # One breaker for the whole manual cycle (shared across passes).
+        breaker = CircuitBreaker()
+
         for media_type in (MOVIE, TVSHOW):
             stats = run_scan(
                 media_type=media_type,
@@ -74,6 +78,7 @@ def run() -> None:
                 enabled_fields=enabled_fields,
                 tmdb_api_key=tmdb_api_key,
                 settings=settings,
+                breaker=breaker,
             )
             all_stats[media_type.name] = stats
 
@@ -86,6 +91,7 @@ def run() -> None:
             tmdb_api_key=tmdb_api_key,
             settings=settings,
             show_id_map=show_id_map,
+            breaker=breaker,
         )
         all_stats[EPISODE.name] = episode_stats
 

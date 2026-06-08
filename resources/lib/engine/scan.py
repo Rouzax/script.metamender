@@ -29,6 +29,7 @@ from resources.lib.data.media_types import MediaType
 from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.constants import PROVIDER_CIRCUIT_BREAKER_THRESHOLD
+from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.gaps import detect_gaps, is_placeholder_title
 from resources.lib.engine.resolve import TMDB_ONLY, build_ratings, resolve_metadata
 from resources.lib.engine.staleness import compute_next_retry, is_rating_stale
@@ -43,7 +44,12 @@ from resources.lib.providers.tmdb import (
     fetch_tvshow as tmdb_fetch_tvshow,
     resolve_id,
 )
-from resources.lib.utils import ApiKeyError, get_logger, is_empty
+from resources.lib.utils import (
+    ApiKeyError,
+    TransientProviderError,
+    get_logger,
+    is_empty,
+)
 
 log = get_logger('scan')
 
@@ -245,6 +251,7 @@ def run_scan(
     show_id_map: Optional[Dict[str, str]] = None,
     items: Optional[List[Dict[str, Any]]] = None,
     kodi_filter: Optional[Dict[str, str]] = None,
+    breaker: Optional[CircuitBreaker] = None,
 ) -> Dict[str, int]:
     """Run a single scan cycle for one media type.
 
@@ -269,6 +276,11 @@ def run_scan(
         items: Pre-built list of Kodi items to process. When provided,
             skips the Kodi library query. Useful for targeted scans
             (single item, folder, season) and testing.
+        breaker: Shared CircuitBreaker for this scan cycle. The daemon
+            creates one per cycle and passes the same instance into each
+            media-type pass so a provider that fails repeatedly stays
+            disabled across passes. When None, a fresh per-call breaker
+            is created (single-pass / test convenience).
 
     Returns:
         Stats dict with processed, skipped, updated, errors, and
@@ -276,6 +288,8 @@ def run_scan(
     """
     scan_start = time.perf_counter()
     stats = _make_stats()
+    if breaker is None:
+        breaker = CircuitBreaker()
     rate_limit = settings.get("rate_limit", 0.25)
     max_retries = settings.get("max_retries", 4)
     sources = source_config.get("sources", [])
@@ -294,12 +308,6 @@ def run_scan(
     season_cache = {}  # type: Dict[str, Optional[List[Dict[str, Any]]]]
     # Track whether we need a rate-limit sleep before the next API call
     needs_sleep = False
-    # Circuit breaker: disable a provider after consecutive failures
-    tmdb_failures = 0
-    imdb_failures = 0
-    tmdb_disabled = False
-    imdb_disabled = False
-    cb_threshold = PROVIDER_CIRCUIT_BREAKER_THRESHOLD
 
     for item in items:
         # Check for Kodi shutdown
@@ -511,7 +519,7 @@ def run_scan(
 
         if media_type.name in ("movie", "tvshow"):
             # Check circuit breaker: both providers down
-            if tmdb_disabled and imdb_disabled:
+            if breaker.both_disabled():
                 log.warning(
                     "Both providers disabled, stopping scan",
                     event="scan.circuit_breaker",
@@ -521,41 +529,34 @@ def run_scan(
                 break
 
             # Resolve TMDB ID if missing (show-level only)
-            if not tmdb_id and not tmdb_disabled:
+            if not tmdb_id and not breaker.is_disabled("tmdb"):
                 try:
                     if needs_sleep and rate_limit > 0:
                         time.sleep(rate_limit)
                     tmdb_id = resolve_id(tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id)
                     needs_sleep = True
-                    tmdb_failures = 0
+                    breaker.record_success("tmdb")
                 except ApiKeyError:
-                    log.exception(
-                        "Invalid TMDB API key",
-                        event="scan.error",
+                    log.error(
+                        "TMDB API key invalid",
+                        event="scan.apikey",
+                        provider="tmdb",
                     )
-                    stats["errors"] += 1
                     break
-                except Exception:
-                    log.exception(
-                        "Failed to resolve TMDB ID",
-                        event="scan.error",
-                        title=title,
-                    )
-                    tmdb_failures += 1
-                    if tmdb_failures >= cb_threshold:
-                        tmdb_disabled = True
+                except TransientProviderError:
+                    if breaker.record_failure("tmdb"):
                         log.warning(
-                            "TMDB disabled after %d consecutive failures",
-                            tmdb_failures,
-                            event="scan.circuit_breaker",
+                            "TMDB disabled for this cycle after repeated failures",
+                            event="scan.breaker",
                             provider="tmdb",
+                            threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
                         )
 
                 if tmdb_id:
                     tracker.upsert_item(media_type.name, identity, tmdb_id=tmdb_id)
 
             # Fetch TMDB data
-            if tmdb_id and not tmdb_disabled:
+            if tmdb_id and not breaker.is_disabled("tmdb"):
                 try:
                     if needs_sleep and rate_limit > 0:
                         time.sleep(rate_limit)
@@ -564,29 +565,21 @@ def run_scan(
                     else:
                         tmdb_data = tmdb_fetch_tvshow(tmdb_id, tmdb_api_key, language)
                     needs_sleep = True
-                    tmdb_failures = 0
+                    breaker.record_success("tmdb")
                 except ApiKeyError:
-                    log.exception(
-                        "Invalid TMDB API key",
-                        event="scan.error",
+                    log.error(
+                        "TMDB API key invalid",
+                        event="scan.apikey",
+                        provider="tmdb",
                     )
-                    stats["errors"] += 1
                     break
-                except Exception:
-                    log.exception(
-                        "TMDB fetch failed",
-                        event="scan.error",
-                        title=title,
-                        tmdb_id=tmdb_id,
-                    )
-                    tmdb_failures += 1
-                    if tmdb_failures >= cb_threshold:
-                        tmdb_disabled = True
+                except TransientProviderError:
+                    if breaker.record_failure("tmdb"):
                         log.warning(
-                            "TMDB disabled after %d consecutive failures",
-                            tmdb_failures,
-                            event="scan.circuit_breaker",
+                            "TMDB disabled for this cycle after repeated failures",
+                            event="scan.breaker",
                             provider="tmdb",
+                            threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
                         )
 
             # Enrich: if TMDB returned an IMDB ID and the item lacks one, write it
@@ -605,32 +598,32 @@ def run_scan(
                 )
 
             # Fetch IMDb data if available and not TMDB-only
-            if imdb_id and not imdb_disabled and not (rating_source == TMDB_ONLY and plot_source == TMDB_ONLY):
+            if imdb_id and not breaker.is_disabled("imdb") and not (rating_source == TMDB_ONLY and plot_source == TMDB_ONLY):
                 try:
                     if needs_sleep and rate_limit > 0:
                         time.sleep(rate_limit)
                     imdb_data = imdb_fetch_movie(imdb_id)
                     needs_sleep = True
-                    imdb_failures = 0
-                except Exception:
-                    log.exception(
-                        "IMDb fetch failed",
-                        event="scan.error",
-                        title=title,
-                        imdb_id=imdb_id,
+                    breaker.record_success("imdb")
+                except ApiKeyError:
+                    log.error(
+                        "IMDb API key invalid",
+                        event="scan.apikey",
+                        provider="imdb",
                     )
-                    imdb_failures += 1
-                    if imdb_failures >= cb_threshold:
-                        imdb_disabled = True
+                    break
+                except TransientProviderError:
+                    if breaker.record_failure("imdb"):
                         log.warning(
-                            "IMDb disabled after %d consecutive failures",
-                            imdb_failures,
-                            event="scan.circuit_breaker",
+                            "IMDb disabled for this cycle after repeated failures",
+                            event="scan.breaker",
                             provider="imdb",
+                            threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
                         )
 
             if tmdb_data is None and imdb_data is None:
-                stats["errors"] += 1
+                # No data found (not a provider failure): record the attempt so
+                # the item is retried, but do not count it as an error.
                 _record_attempt_with_retry(
                     tracker, media_type.name, identity, max_retries,
                 )
@@ -647,7 +640,7 @@ def run_scan(
 
         # --- Provider fetch: episodes (ID-based matching) ---
         elif media_type.name == "episode":
-            if tmdb_disabled and imdb_disabled:
+            if breaker.both_disabled():
                 log.warning(
                     "Both providers disabled, stopping scan",
                     event="scan.circuit_breaker",
@@ -671,7 +664,7 @@ def run_scan(
 
             # TMDB path first: match by TMDB episode ID in season data
             # (runs before IMDb so enrichment can provide imdb_id)
-            if tmdb_id and not tmdb_disabled:
+            if tmdb_id and not breaker.is_disabled("tmdb"):
                 showtitle = item.get("showtitle", "")
                 ep_show_tmdb_id = (show_id_map or {}).get(showtitle)
                 if not ep_show_tmdb_id:
@@ -713,7 +706,9 @@ def run_scan(
                                             title=title,
                                             imdb_id=enriched_imdb,
                                         )
-                                except Exception:
+                                except (ApiKeyError, TransientProviderError):
+                                    # Enrichment is best-effort; a failure here
+                                    # does not abort the episode scan.
                                     log.exception(
                                         "Episode external IDs fetch failed",
                                         event="scan.error",
@@ -721,59 +716,51 @@ def run_scan(
                                     )
                         if is_cache_miss:
                             needs_sleep = True
-                        tmdb_failures = 0
+                        breaker.record_success("tmdb")
                     except ApiKeyError:
-                        log.exception(
-                            "Invalid TMDB API key",
-                            event="scan.error",
+                        log.error(
+                            "TMDB API key invalid",
+                            event="scan.apikey",
+                            provider="tmdb",
                         )
-                        stats["errors"] += 1
                         break
-                    except Exception:
-                        log.exception(
-                            "TMDB season fetch failed",
-                            event="scan.error",
-                            title=title,
-                            tmdb_id=tmdb_id,
-                        )
-                        tmdb_failures += 1
-                        if tmdb_failures >= cb_threshold:
-                            tmdb_disabled = True
+                    except TransientProviderError:
+                        if breaker.record_failure("tmdb"):
                             log.warning(
-                                "TMDB disabled after %d consecutive failures",
-                                tmdb_failures,
-                                event="scan.circuit_breaker",
+                                "TMDB disabled for this cycle after repeated failures",
+                                event="scan.breaker",
                                 provider="tmdb",
+                                threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
                             )
 
             # IMDb path: direct episode fetch by IMDB ID
             # (runs after TMDB so enrichment can provide imdb_id)
-            if imdb_id and not imdb_disabled:
+            if imdb_id and not breaker.is_disabled("imdb"):
                 try:
                     if needs_sleep and rate_limit > 0:
                         time.sleep(rate_limit)
                     imdb_data = imdb_fetch_episode(imdb_id)
                     needs_sleep = True
-                    imdb_failures = 0
-                except Exception:
-                    log.exception(
-                        "IMDb episode fetch failed",
-                        event="scan.error",
-                        title=title,
-                        imdb_id=imdb_id,
+                    breaker.record_success("imdb")
+                except ApiKeyError:
+                    log.error(
+                        "IMDb API key invalid",
+                        event="scan.apikey",
+                        provider="imdb",
                     )
-                    imdb_failures += 1
-                    if imdb_failures >= cb_threshold:
-                        imdb_disabled = True
+                    break
+                except TransientProviderError:
+                    if breaker.record_failure("imdb"):
                         log.warning(
-                            "IMDb disabled after %d consecutive failures",
-                            imdb_failures,
-                            event="scan.circuit_breaker",
+                            "IMDb disabled for this cycle after repeated failures",
+                            event="scan.breaker",
                             provider="imdb",
+                            threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
                         )
 
             if tmdb_data is None and imdb_data is None:
-                stats["errors"] += 1
+                # No data found (not a provider failure): record the attempt so
+                # the item is retried, but do not count it as an error.
                 _record_attempt_with_retry(
                     tracker, media_type.name, identity, max_retries,
                 )
@@ -892,8 +879,8 @@ def run_scan(
         skipped=stats["skipped"],
         updated=stats["updated"],
         errors=stats["errors"],
-        tmdb_disabled=tmdb_disabled,
-        imdb_disabled=imdb_disabled,
+        tmdb_disabled=breaker.is_disabled("tmdb"),
+        imdb_disabled=breaker.is_disabled("imdb"),
         total_elapsed_sec=elapsed,
     )
 

@@ -36,6 +36,7 @@ from resources.lib.constants import (
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
+from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
 from resources.lib.utils import (
     StructuredLogger,
@@ -190,6 +191,10 @@ def _run_scan(
 
     all_stats = {}  # type: Dict[str, Dict[str, int]]
 
+    # One breaker for the whole cycle: a provider that fails repeatedly
+    # stays disabled across the movie/tvshow/episode passes.
+    breaker = CircuitBreaker()
+
     for media_type in (MOVIE, TVSHOW):
         stats = run_scan(
             media_type=media_type,
@@ -200,6 +205,7 @@ def _run_scan(
             settings=settings,
             monitor=monitor,
             kodi_filter=kodi_filter,
+            breaker=breaker,
         )
         all_stats[media_type.name] = stats
 
@@ -220,6 +226,7 @@ def _run_scan(
         monitor=monitor,
         show_id_map=show_id_map,
         kodi_filter=kodi_filter,
+        breaker=breaker,
     )
     all_stats[EPISODE.name] = episode_stats
 

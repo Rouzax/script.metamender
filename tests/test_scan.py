@@ -946,7 +946,10 @@ class TestRunScanApiKeyError:
         )
         tracker.close()
 
-        assert stats["errors"] >= 1
+        # An invalid API key is a fatal config error, not a per-item
+        # processing error, so it does not bump stats["errors"]; it stops
+        # the pass immediately.
+        assert stats["errors"] == 0
         # Second movie should not be attempted
         assert mock_fetch.call_count == 1
 
@@ -1162,6 +1165,157 @@ class TestRunScanWithItems:
         assert not mock_get_all.called
         assert not mock_fetch.called
         assert stats["processed"] == 0
+
+
+class TestRunScanCircuitBreaker:
+    """Provider-failure taxonomy + cycle-level breaker wiring."""
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_transient_error_does_not_count_as_error(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.breaker import CircuitBreaker
+        from resources.lib.utils import TransientProviderError
+
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.side_effect = TransientProviderError("boom")
+
+        tracker = _make_tracker(tmp_path)
+        breaker = CircuitBreaker(threshold=5)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            breaker=breaker,
+        )
+        tracker.close()
+
+        # A transient failure leaves both providers None -> no-data path:
+        # the attempt is recorded but it is not an "error".
+        assert stats["errors"] == 0
+        assert stats["processed"] == 1
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_transient_error_trips_breaker_after_threshold(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.breaker import CircuitBreaker
+        from resources.lib.utils import TransientProviderError
+
+        # Three distinct movies all fail transiently.
+        mock_get_all.return_value = [
+            _make_movie_item(title="M1", tmdb_id="1", movie_id=1),
+            _make_movie_item(title="M2", tmdb_id="2", movie_id=2),
+            _make_movie_item(title="M3", tmdb_id="3", movie_id=3),
+        ]
+        mock_fetch.side_effect = TransientProviderError("boom")
+
+        tracker = _make_tracker(tmp_path)
+        breaker = CircuitBreaker(threshold=3)
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            breaker=breaker,
+        )
+        tracker.close()
+
+        assert breaker.is_disabled("tmdb") is True
+        # Breaker tripped on the 3rd failure, so all 3 fetches were attempted.
+        assert mock_fetch.call_count == 3
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_none_return_does_not_trip_breaker(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.breaker import CircuitBreaker
+
+        mock_get_all.return_value = [
+            _make_movie_item(title="M1", tmdb_id="1", movie_id=1),
+            _make_movie_item(title="M2", tmdb_id="2", movie_id=2),
+            _make_movie_item(title="M3", tmdb_id="3", movie_id=3),
+        ]
+        mock_fetch.return_value = None  # no-data, not a failure
+
+        tracker = _make_tracker(tmp_path)
+        breaker = CircuitBreaker(threshold=1)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            breaker=breaker,
+        )
+        tracker.close()
+
+        assert breaker.is_disabled("tmdb") is False
+        assert stats["errors"] == 0
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_both_disabled_stops_pass(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.breaker import CircuitBreaker
+
+        mock_get_all.return_value = [
+            _make_movie_item(title="M1", tmdb_id="1", movie_id=1),
+            _make_movie_item(title="M2", tmdb_id="2", movie_id=2),
+        ]
+        mock_fetch.return_value = _tmdb_movie_response()
+
+        tracker = _make_tracker(tmp_path)
+        breaker = CircuitBreaker(threshold=1)
+        # Pre-disable both providers: the pass must stop before any fetch.
+        breaker.record_failure("tmdb")
+        breaker.record_failure("imdb")
+
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            breaker=breaker,
+        )
+        tracker.close()
+
+        assert mock_fetch.call_count == 0
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_breaker_persists_across_two_run_scan_calls(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.breaker import CircuitBreaker
+        from resources.lib.utils import TransientProviderError
+
+        mock_fetch.side_effect = TransientProviderError("boom")
+
+        tracker = _make_tracker(tmp_path)
+        breaker = CircuitBreaker(threshold=2)
+
+        # First pass: one failing movie -> 1 failure, not yet disabled.
+        mock_get_all.return_value = [_make_movie_item(title="M1", tmdb_id="1", movie_id=1)]
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            breaker=breaker,
+        )
+        assert breaker.is_disabled("tmdb") is False
+
+        # Second pass sharing the SAME breaker: second failure trips it.
+        mock_get_all.return_value = [_make_movie_item(title="M2", tmdb_id="2", movie_id=2)]
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating"}),
+            "fake_key", _make_settings(),
+            breaker=breaker,
+        )
+        tracker.close()
+
+        assert breaker.is_disabled("tmdb") is True
 
 
 def test_same_title_movies_get_separate_tracker_rows(tmp_path):
