@@ -55,10 +55,19 @@ def run() -> None:
 
     try:
         settings = _load_settings()
+
+        if not settings["tmdb_api_key"]:
+            log.warning(
+                "No TMDB API key configured, skipping scan",
+                event="manual.skip_no_key",
+            )
+            return
+
         tracker = TrackerDB(_get_db_path())
         source_config = load_source_config(_get_sources_config_path())
 
-        tracker.start_new_cycle()
+        if not settings["resume_interrupted"]:
+            tracker.start_new_cycle()
 
         tmdb_api_key = settings["tmdb_api_key"]
         enabled_fields = settings["enabled_fields"]
