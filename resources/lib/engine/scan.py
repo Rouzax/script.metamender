@@ -106,9 +106,13 @@ def _make_stats() -> Dict[str, Any]:
 
 
 # Fields the active source setting cannot supply -> immediate final-empty.
-# IMDb /titles has no tagline/studio/country/trailer, so an IMDb-only run can
-# never fill them and should not keep sampling.
-_TMDB_ONLY_FIELDS = frozenset({"tagline", "studio", "country", "trailer"})
+# IMDb /titles has no tagline/studio/trailer, so an IMDb-only run can never
+# fill them and should not keep sampling. IMDb does supply countries
+# (originCountries), so "country" is intentionally absent from this set.
+# Episode firstaired is TMDB-only (the direct IMDb episode fetch has no air
+# date), so it is included here; it has no effect for movies/shows because
+# "firstaired" is not in their candidate field sets.
+_TMDB_ONLY_FIELDS = frozenset({"tagline", "studio", "trailer", "firstaired"})
 
 
 def _content_age_days(
@@ -909,7 +913,10 @@ def run_scan(
             premiered = item.get(media_type.date_field, "")
             for f in nonfinal:
                 if reset:
-                    tracker.reset_field_clock(media_type.name, identity, f)
+                    nd = compute_next_due(
+                        1, ctx.schedule, premiered, threshold, today,
+                    )
+                    tracker.reset_field_clock(media_type.name, identity, f, next_retry=nd)
                     continue
                 new_count = int(fs_map.get(f, {}).get("fetch_count") or 0) + 1
                 next_due = compute_next_due(

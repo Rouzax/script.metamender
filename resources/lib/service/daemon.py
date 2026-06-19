@@ -292,9 +292,10 @@ def _select_trigger(
     """Decide whether to scan this tick and why.
 
     A due scheduled scan takes precedence over a library event in the same
-    tick: the scheduled scan is full (staleness + retries) and also covers the
-    newly added items, so the pending event is satisfied by it. Only fall back
-    to a targeted library-event scan when no scheduled scan is due.
+    tick: the scheduled scan re-evaluates maturity for every item and also
+    covers the newly added items, so the pending event is satisfied by it.
+    Only fall back to a targeted library-event scan when no scheduled scan
+    is due.
 
     Returns (should_scan, reason) where reason is "scheduled" or "library_event".
     """

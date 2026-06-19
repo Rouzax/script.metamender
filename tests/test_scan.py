@@ -1729,7 +1729,8 @@ class TestRunScanReset:
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
         """A reset run re-baselines the field clock (fetch_count 1, next_retry
-        cleared) regardless of prior samples."""
+        set to a future schedule date) regardless of prior samples."""
+        from datetime import date as _date
         item = _make_movie_item(plot="")
         item["premiered"] = "2000-01-01"
         mock_fetch.return_value = _tmdb_movie_response(plot="Fresh plot")
@@ -1754,7 +1755,10 @@ class TestRunScanReset:
         field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
         assert field is not None
         assert field["fetch_count"] == 1  # re-baselined
-        assert field["next_retry"] is None
+        # next_retry must be a future date (not None) so young content is
+        # re-sampled on the normal schedule after a manual update.
+        assert field["next_retry"] is not None
+        assert field["next_retry"] > _date.today().isoformat()
         tracker.close()
 
     @patch("resources.lib.engine.scan.update_item")

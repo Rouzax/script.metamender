@@ -373,8 +373,15 @@ class TrackerDB:
                 field=field,
             )
 
-    def reset_field_clock(self, media_type: str, identity: str, field: str) -> None:
-        """Re-baseline a field to its first sample (manual 'Update now')."""
+    def reset_field_clock(
+        self, media_type: str, identity: str, field: str, next_retry: Optional[str]
+    ) -> None:
+        """Re-baseline a field to its first sample (manual 'Update now').
+
+        Stores the supplied next_retry date so young content is re-sampled on
+        the normal schedule after a manual update, rather than being skipped
+        forever because NULL next_retry is treated as "not due" by decide_field.
+        """
         item_id = self._get_item_id(media_type, identity)
         if item_id is None:
             return
@@ -382,10 +389,10 @@ class TrackerDB:
         try:
             self._conn.execute(
                 "INSERT INTO field_status (item_id, field, fetch_count, fetched_at, next_retry) "
-                "VALUES (?, ?, 1, ?, NULL) "
+                "VALUES (?, ?, 1, ?, ?) "
                 "ON CONFLICT(item_id, field) DO UPDATE SET "
-                "fetch_count = 1, fetched_at = excluded.fetched_at, next_retry = NULL",
-                (item_id, field, today),
+                "fetch_count = 1, fetched_at = excluded.fetched_at, next_retry = excluded.next_retry",
+                (item_id, field, today, next_retry),
             )
         except sqlite3.Error:
             log.exception(

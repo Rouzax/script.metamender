@@ -396,8 +396,8 @@ def test_reset_field_clock(tmp_path, kodi_stubs):
     t.upsert_item("movie", "Air", kodi_id=1, tmdb_id="1")
     t.record_field_fetch("movie", "Air", "plot", next_retry="2026-07-01")
     t.record_field_fetch("movie", "Air", "plot", next_retry="2026-08-01")
-    t.reset_field_clock("movie", "Air", "plot")
+    t.reset_field_clock("movie", "Air", "plot", next_retry="2026-09-15")
     row = t.get_field_status_map("movie", "Air")["plot"]
     t.close()
     assert row["fetch_count"] == 1
-    assert row["next_retry"] is None
+    assert row["next_retry"] == "2026-09-15"

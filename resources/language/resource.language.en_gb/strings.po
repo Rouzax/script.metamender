@@ -145,40 +145,12 @@ msgctxt "#32120"
 msgid "Freshness"
 msgstr ""
 
-msgctxt "#32121"
-msgid "Minimum votes (movies)"
-msgstr ""
-
-msgctxt "#32122"
-msgid "Minimum number of votes before a movie rating is considered trustworthy. Ratings with fewer votes are marked as stale and re-checked later."
-msgstr ""
-
-msgctxt "#32123"
-msgid "Minimum votes (episodes)"
-msgstr ""
-
-msgctxt "#32124"
-msgid "Only accept a rating if the episode has at least this many votes on the source. Episodes typically have fewer votes than movies, so a lower threshold is normal."
-msgstr ""
-
 msgctxt "#32125"
 msgid "Staleness threshold (days)"
 msgstr ""
 
 msgctxt "#32126"
 msgid "Content older than this many days is considered to have stable ratings. Only items with empty ratings are backfilled for older content."
-msgstr ""
-
-msgctxt "#32130"
-msgid "Retries"
-msgstr ""
-
-msgctxt "#32131"
-msgid "Maximum retries"
-msgstr ""
-
-msgctxt "#32132"
-msgid "How many times to retry an item that could not be resolved before giving up. Each retry uses exponential backoff across scan cycles."
 msgstr ""
 
 msgctxt "#32140"
@@ -411,19 +383,11 @@ msgctxt "#32332"
 msgid "After a full scan, remove tracker entries for items not seen in the library for this many days (for example, deleted movies or episodes). Set to 0 to never remove them."
 msgstr ""
 
-msgctxt "#32333"
-msgid "Reset exhausted fields"
-msgstr ""
-
-msgctxt "#32334"
-msgid "Clear the exhausted state on fields that ran out of retry attempts so they are tried again on the next scan. Use this after fixing a misconfiguration or when a source has new data available."
-msgstr ""
-
 msgctxt "#32340"
 msgid "MetaMender: Update now"
 msgstr ""
 
-# Notifications (32341-32352)
+# Notifications (32341-32351)
 msgctxt "#32341"
 msgid "Invalid TMDB API key"
 msgstr ""
@@ -466,10 +430,6 @@ msgstr ""
 
 msgctxt "#32351"
 msgid "No changes: {}"
-msgstr ""
-
-msgctxt "#32352"
-msgid "Reset {} exhausted fields"
 msgstr ""
 
 # --- Reset tracker dialog (32360-32362) ---
