@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import time
 
+import xbmc
+
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
 from resources.lib.service.daemon import (
-    _build_show_id_map,
     _get_db_path,
     _get_sources_config_path,
     _load_settings,
@@ -28,10 +29,12 @@ from resources.lib.service.daemon import (
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.utils import (
+    ApiKeyError,
     StructuredLogger,
     get_addon,
     get_bool_setting,
     get_logger,
+    lang,
     notify,
 )
 
@@ -40,14 +43,13 @@ log = get_logger('manual')
 
 def run() -> None:
     """Run a single manual scan cycle."""
-    StructuredLogger._initialized = False
     try:
         debug_on = get_bool_setting('logging')
         addon_id = get_addon().getAddonInfo('id')
     except RuntimeError:
         debug_on = False
         addon_id = DEFAULT_ADDON_ID
-    StructuredLogger.initialize(debug_enabled=debug_on, addon_id=addon_id)
+    StructuredLogger.reconfigure(debug_enabled=debug_on, addon_id=addon_id)
     StructuredLogger.start_scan_log()
 
     log.info("Manual scan started", event="manual.start")
@@ -87,6 +89,9 @@ def run() -> None:
 
         # One breaker for the whole manual cycle (shared across passes).
         breaker = CircuitBreaker()
+        # A monitor so the manual scan yields to playback and honors abort,
+        # exactly like the service scan.
+        monitor = xbmc.Monitor()
 
         for media_type in (MOVIE, TVSHOW):
             stats = run_scan(
@@ -96,11 +101,12 @@ def run() -> None:
                 enabled_fields=enabled_fields,
                 tmdb_api_key=tmdb_api_key,
                 settings=settings,
+                monitor=monitor,
                 breaker=breaker,
             )
             all_stats[media_type.name] = stats
 
-        show_id_map = _build_show_id_map(tracker)
+        show_id_map = tracker.get_show_id_map()
         episode_stats = run_scan(
             media_type=EPISODE,
             tracker=tracker,
@@ -108,6 +114,7 @@ def run() -> None:
             enabled_fields=enabled_fields,
             tmdb_api_key=tmdb_api_key,
             settings=settings,
+            monitor=monitor,
             show_id_map=show_id_map,
             breaker=breaker,
         )
@@ -136,11 +143,14 @@ def run() -> None:
         )
         parts = []
         if total_updated:
-            parts.append("{} updated".format(total_updated))
+            parts.append(lang(32349).format(total_updated))  # {} updated
         if not parts:
-            parts.append("No changes")
+            parts.append(lang(32348))  # No changes
         notify(", ".join(parts))
 
+    except ApiKeyError:
+        log.exception("Manual scan stopped: invalid API key", event="manual.apikey")
+        notify(lang(32341))  # Invalid TMDB API key
     except Exception:
         log.exception("Manual scan failed", event="manual.error")
 

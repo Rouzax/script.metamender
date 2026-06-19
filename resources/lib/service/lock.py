@@ -14,49 +14,77 @@ Logging:
 from __future__ import annotations
 
 import time
+import uuid
+from typing import Optional
 
 import xbmcgui
 
+from resources.lib.constants import KODI_HOME_WINDOW_ID
 from resources.lib.utils import get_logger
 
 log = get_logger('lock')
 
 _PROP = "metamender_scan_lock"
 # Reclaim a lock older than this, so a crashed scan never wedges scanning
-# forever. Tradeoff: this is a simple time-based mutex with no fencing token,
-# so a (pathological) scan that runs longer than this window can have its lock
-# reclaimed and run concurrently with the next one. 6h is far beyond any real
-# scan; it only guards against a crash that left the property set.
+# forever. 6h is far beyond any real scan; it only guards against a crash that
+# left the property set.
 _STALE_SECONDS = 6 * 3600
+
+# This process's current lock token (timestamp:nonce), set on a successful
+# acquire and checked on release so we never clear a lock another process now
+# holds (for example after ours was reclaimed as stale). None when unheld.
+_my_token: Optional[str] = None
 
 
 def _home_window():  # type: ignore[no-untyped-def]
-    return xbmcgui.Window(10000)
+    return xbmcgui.Window(KODI_HOME_WINDOW_ID)
 
 
 def _now() -> float:
     return time.time()
 
 
+def _is_stale(value: str) -> bool:
+    """True if a stored lock value is old enough to reclaim (or unparseable)."""
+    try:
+        ts = float(value.split(":", 1)[0])
+    except (ValueError, IndexError):
+        return True
+    return (_now() - ts) >= _STALE_SECONDS
+
+
 def acquire_scan_lock() -> bool:
-    """Acquire the scan lock. Returns False if another scan holds it."""
+    """Acquire the scan lock. Returns False if another scan holds it.
+
+    Window properties have no compare-and-set, so this cannot be perfectly
+    atomic. The race is narrowed with write-then-verify: claim the lock with a
+    unique token, re-read, and proceed only if our token is the one stored. A
+    concurrent acquirer whose write lost is detected here and backs off. A lock
+    older than _STALE_SECONDS (for example from a crashed scan) is reclaimed.
+    """
+    global _my_token
     win = _home_window()
     held = win.getProperty(_PROP)
+    if held and not _is_stale(held):
+        return False
     if held:
-        try:
-            age = _now() - float(held)
-        except ValueError:
-            age = _STALE_SECONDS + 1
-        if age < _STALE_SECONDS:
-            return False
         log.warning(
             "Reclaimed stale scan lock (previous scan likely crashed)",
             event="service.lock_reclaimed",
-            age_sec=int(age),
         )
-    win.setProperty(_PROP, str(_now()))
+    token = "{}:{}".format(_now(), uuid.uuid4().hex)
+    win.setProperty(_PROP, token)
+    if win.getProperty(_PROP) != token:
+        # A concurrent acquirer overwrote our claim; they win, we back off.
+        return False
+    _my_token = token
     return True
 
 
 def release_scan_lock() -> None:
-    _home_window().clearProperty(_PROP)
+    """Release the lock, but only if this process still holds it."""
+    global _my_token
+    win = _home_window()
+    if _my_token is not None and win.getProperty(_PROP) == _my_token:
+        win.clearProperty(_PROP)
+    _my_token = None

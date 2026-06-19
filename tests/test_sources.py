@@ -70,3 +70,16 @@ def test_match_source_disabled():
     ]
     result = match_source("smb://server/sports/game.mkv", sources)
     assert result["enabled"] is False
+
+
+def test_match_source_respects_path_boundary():
+    # A source "/media/movies" (no trailing slash) must NOT match a sibling
+    # directory "/media/movies_extra"; it must match "/media/movies/...".
+    sources = [
+        {"path": "/media/movies", "enabled": True, "language": "fr-FR"},
+    ]
+    sibling = match_source("/media/movies_extra/film.mkv", sources)
+    assert sibling["language"] == "en-US"  # fell through to default
+
+    inside = match_source("/media/movies/film.mkv", sources)
+    assert inside["language"] == "fr-FR"

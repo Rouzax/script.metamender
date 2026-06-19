@@ -149,6 +149,23 @@ def discover_sources() -> List[Dict[str, str]]:
     return discovered
 
 
+def _path_matches(file_path: str, source_path: str) -> bool:
+    """Whether file_path lies under source_path, on a path boundary.
+
+    A plain ``startswith`` would let source ``/media/movies`` match
+    ``/media/movies_extra/...``. Require either an exact match or that the
+    character after the prefix is a separator (either "/" or "\\", since Kodi
+    paths may be POSIX, Windows, smb://, or nfs://).
+    """
+    if not source_path:
+        return False
+    if file_path == source_path:
+        return True
+    if not file_path.startswith(source_path):
+        return False
+    return source_path[-1] in "/\\" or file_path[len(source_path)] in "/\\"
+
+
 def match_source(
     file_path: str,
     sources: List[Dict[str, Any]],
@@ -171,7 +188,7 @@ def match_source(
 
     for source in sources:
         source_path = source.get("path", "")
-        if file_path.startswith(source_path) and len(source_path) > best_length:
+        if _path_matches(file_path, source_path) and len(source_path) > best_length:
             best_match = source
             best_length = len(source_path)
 

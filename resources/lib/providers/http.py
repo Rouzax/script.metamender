@@ -4,12 +4,17 @@ Centralizes the outbound request, the User-Agent, and HTTP error
 classification so every provider fetch handles failures the same way.
 
 Classification:
-    200            -> parsed JSON (dict)
+    200             -> parsed JSON (dict)
     404            -> None (legitimate "no data found")
     401            -> ApiKeyError (fatal for that provider)
-    429/5xx        -> TransientProviderError (counts toward circuit breaker)
+    403/408/425/429/5xx -> TransientProviderError (counts toward circuit breaker)
+    other 4xx      -> None (no data; not a provider failure)
     timeout/conn   -> TransientProviderError
     malformed JSON -> TransientProviderError
+
+403 is treated as transient because it is how bot-protection layers (e.g. Akamai)
+reject automated requests; if that becomes persistent it should trip the breaker
+and stop the cycle rather than silently spin through the whole library.
 
 Logging:
     Uses the caller's logger; events use the caller's domain via `label`.
@@ -74,7 +79,9 @@ def provider_get(
         return None
     if status == 401:
         raise ApiKeyError(provider or label)
-    if status == 429 or status >= 500:
+    # 403 (bot block), 408 (request timeout), 425 (too early), 429 (rate limit)
+    # and all 5xx are transient: they should count toward the breaker.
+    if status in (403, 408, 425, 429) or status >= 500:
         logger.warning(
             "Transient HTTP status",
             event="{}.transient".format(label),

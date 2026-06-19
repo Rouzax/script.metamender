@@ -31,9 +31,6 @@ DEFAULT_SCAN_INTERVAL_HOURS = 24
 # Sleep granularity: how often the service loop checks for abort (seconds)
 SERVICE_SLEEP_INTERVAL_SEC = 1
 
-# Rate limit between external API calls (seconds)
-DEFAULT_RATE_LIMIT_SEC = 0.25
-
 # Days to retry unresolved items before applying fallback
 DEFAULT_RETRY_DAYS = 30
 
@@ -81,13 +78,6 @@ EXHAUSTED_AUTORETRY_DAYS = 180
 
 # Disable a provider after this many consecutive failures in a single scan
 PROVIDER_CIRCUIT_BREAKER_THRESHOLD = 5
-
-# =============================================================================
-# Inference Config
-# =============================================================================
-
-CONFIG_DIR = "config"
-CONFIG_FILENAME = "inference.json"
 
 # =============================================================================
 # External APIs

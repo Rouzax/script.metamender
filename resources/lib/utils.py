@@ -245,6 +245,18 @@ class StructuredLogger:
                 cls._ensure_log_dir()
 
     @classmethod
+    def reconfigure(cls, debug_enabled: bool, addon_id: str = DEFAULT_ADDON_ID) -> None:
+        """Re-run initialization, discarding any prior configuration.
+
+        Use this from one-shot entry points (service, manual scan, action
+        handlers) instead of poking the private ``_initialized`` flag. Resetting
+        and re-initializing both happen under the class lock.
+        """
+        with cls._lock:
+            cls._initialized = False
+        cls.initialize(debug_enabled=debug_enabled, addon_id=addon_id)
+
+    @classmethod
     def _ensure_log_dir(cls) -> None:
         """Create the log directory if needed. Must hold lock."""
         try:

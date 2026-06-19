@@ -238,18 +238,6 @@ class TestFetchMovie:
         assert result["countries"] == ["United States", "Australia"]
         assert result["runtime"] == 136
         assert result["premiered"] == "1999"
-        assert result["metacritic"] == 73
-
-    @patch("resources.lib.providers.http.requests.get")
-    def test_handles_missing_metacritic(self, mock_get: MagicMock) -> None:
-        response = dict(MOVIE_RESPONSE)
-        response["metacritic"] = None
-        mock_get.return_value = _mock_response(200, response)
-
-        result = fetch_movie("tt0133093")
-
-        assert result is not None
-        assert result["metacritic"] is None
 
     @patch("resources.lib.providers.http.requests.get")
     def test_handles_missing_rating(self, mock_get: MagicMock) -> None:

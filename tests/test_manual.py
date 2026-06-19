@@ -38,13 +38,15 @@ def patched(monkeypatch: pytest.MonkeyPatch) -> Dict[str, MagicMock]:
 
     monkeypatch.setattr(manual, "TrackerDB", tracker_cls)
     monkeypatch.setattr(manual, "run_scan", run_scan)
-    monkeypatch.setattr(manual, "_build_show_id_map", MagicMock(return_value={}))
+    tracker.get_show_id_map = MagicMock(return_value={})
     monkeypatch.setattr(manual, "load_source_config", MagicMock(return_value={}))
     monkeypatch.setattr(manual, "_get_db_path", MagicMock(return_value=":memory:"))
     monkeypatch.setattr(
         manual, "_get_sources_config_path", MagicMock(return_value="sources.json")
     )
     monkeypatch.setattr(manual, "notify", MagicMock())
+    monkeypatch.setattr(manual, "acquire_scan_lock", MagicMock(return_value=True))
+    monkeypatch.setattr(manual, "release_scan_lock", MagicMock())
     # Logger init reads Kodi settings; neutralize it.
     monkeypatch.setattr(manual.StructuredLogger, "initialize", MagicMock())
     monkeypatch.setattr(manual.StructuredLogger, "start_scan_log", MagicMock())

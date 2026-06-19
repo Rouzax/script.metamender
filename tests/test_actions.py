@@ -8,6 +8,27 @@ import pytest
 from resources.lib.service import actions
 
 
+# English msgid templates for the notification string IDs actions.py uses.
+# Mirrors resources/language/.../strings.po so tests assert on real text
+# (the Kodi stub's getLocalizedString returns "" by default).
+_LANG = {
+    32341: "Invalid TMDB API key",
+    32342: "Cannot update this item type",
+    32343: "Invalid item",
+    32344: "A scan is already running",
+    32345: "Item not found",
+    32346: "No TMDB API key configured",
+    32347: "Update failed",
+    32350: "Updated: {}",
+    32351: "No changes: {}",
+    32352: "Reset {} exhausted fields",
+}
+
+
+def _fake_lang(string_id):
+    return _LANG.get(string_id, "")
+
+
 @pytest.fixture
 def patched(monkeypatch: pytest.MonkeyPatch):
     """Patch everything actions.reset_exhausted() touches."""
@@ -15,14 +36,22 @@ def patched(monkeypatch: pytest.MonkeyPatch):
     tracker.reset_exhausted_fields = MagicMock(return_value=3)
     tracker_cls = MagicMock(return_value=tracker)
     notify = MagicMock()
+    acquire = MagicMock(return_value=True)
+    release = MagicMock()
 
     monkeypatch.setattr(actions, "TrackerDB", tracker_cls)
     monkeypatch.setattr(actions, "_get_db_path", MagicMock(return_value=":memory:"))
     monkeypatch.setattr(actions, "notify", notify)
+    monkeypatch.setattr(actions, "lang", _fake_lang)
+    monkeypatch.setattr(actions, "acquire_scan_lock", acquire)
+    monkeypatch.setattr(actions, "release_scan_lock", release)
     monkeypatch.setattr(actions.StructuredLogger, "initialize", MagicMock())
     monkeypatch.setattr(actions, "get_bool_setting", MagicMock(return_value=False))
 
-    return {"tracker": tracker, "tracker_cls": tracker_cls, "notify": notify}
+    return {
+        "tracker": tracker, "tracker_cls": tracker_cls, "notify": notify,
+        "acquire": acquire, "release": release,
+    }
 
 
 def test_reset_exhausted_calls_tracker_and_notifies(patched):
@@ -39,6 +68,15 @@ def test_reset_exhausted_closes_tracker_on_error(patched):
     actions.reset_exhausted()  # should not raise
     patched["tracker"].close.assert_called_once_with()
     patched["notify"].assert_not_called()
+
+
+def test_reset_exhausted_skips_when_scan_running(patched):
+    """If the scan lock is held, reset must not touch the tracker."""
+    patched["acquire"].return_value = False
+    actions.reset_exhausted()
+    patched["tracker_cls"].assert_not_called()
+    patched["tracker"].reset_exhausted_fields.assert_not_called()
+    patched["notify"].assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +96,7 @@ def update_patched(monkeypatch: pytest.MonkeyPatch):
     release = MagicMock()
     load_source_config = MagicMock(return_value={"sources": [], "default_language": "en-US"})
     build_show_id_map = MagicMock(return_value={"Some Show": "555"})
+    tracker.get_show_id_map = build_show_id_map
     load_settings = MagicMock(return_value={
         "tmdb_api_key": "key",
         "enabled_fields": frozenset({"plot"}),
@@ -68,13 +107,13 @@ def update_patched(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(actions, "_get_db_path", MagicMock(return_value=":memory:"))
     monkeypatch.setattr(actions, "_get_sources_config_path", MagicMock(return_value="src.json"))
     monkeypatch.setattr(actions, "_load_settings", load_settings)
-    monkeypatch.setattr(actions, "_build_show_id_map", build_show_id_map)
     monkeypatch.setattr(actions, "load_source_config", load_source_config)
     monkeypatch.setattr(actions, "get_item_by_id", get_item_by_id)
     monkeypatch.setattr(actions, "run_scan", run_scan)
     monkeypatch.setattr(actions, "acquire_scan_lock", acquire)
     monkeypatch.setattr(actions, "release_scan_lock", release)
     monkeypatch.setattr(actions, "notify", notify)
+    monkeypatch.setattr(actions, "lang", _fake_lang)
     monkeypatch.setattr(actions.StructuredLogger, "initialize", MagicMock())
     monkeypatch.setattr(actions, "get_bool_setting", MagicMock(return_value=False))
 

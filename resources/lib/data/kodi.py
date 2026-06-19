@@ -262,6 +262,20 @@ def update_item(
         )
         return False
 
+    # Kodi's Set*Details returns {"result": "OK"} on success. Treat anything
+    # else (a missing or non-"OK" result) as a failed write rather than
+    # assuming success from the mere absence of an error key.
+    if data.get("result") != "OK":
+        log.warning(
+            "Update returned a non-OK result",
+            event="kodi.update_fail",
+            media_type=media_type.name,
+            title=log_title,
+            item_id=item_id,
+            result=str(data.get("result")),
+        )
+        return False
+
     log.debug(
         "Item updated",
         event="kodi.update",

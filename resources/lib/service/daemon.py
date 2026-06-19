@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import date, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import xbmc
 import xbmcvfs
@@ -44,6 +44,7 @@ from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.utils import (
+    ApiKeyError,
     KodiQueryError,
     StructuredLogger,
     get_addon,
@@ -52,6 +53,7 @@ from resources.lib.utils import (
     get_int_setting,
     get_logger,
     get_setting,
+    lang,
     notify,
 )
 
@@ -162,20 +164,6 @@ def _get_sources_config_path() -> str:
     return os.path.join(addon_data, SOURCES_CONFIG_FILENAME)
 
 
-def _build_show_id_map(tracker: TrackerDB) -> Dict[str, str]:
-    """Build a map of show title to show-level TMDB ID.
-
-    Queries all tvshow items in the tracker (populated during the
-    tvshow scan) so the episode scan can look up the correct show
-    TMDB ID.
-    """
-    show_map = {}  # type: Dict[str, str]
-    cursor = tracker._conn.execute(
-        "SELECT title, tmdb_id FROM items WHERE media_type = 'tvshow' AND tmdb_id IS NOT NULL"
-    )
-    for row in cursor.fetchall():
-        show_map[row["title"]] = row["tmdb_id"]
-    return show_map
 
 
 def _run_scan(
@@ -216,7 +204,7 @@ def _run_scan(
         )
         all_stats[media_type.name] = stats
 
-    show_id_map = _build_show_id_map(tracker)
+    show_id_map = tracker.get_show_id_map()
     log.info(
         "Show ID map built for episode scan",
         event="service.show_id_map",
@@ -298,19 +286,41 @@ def _maybe_prune_orphans(
 # ---------------------------------------------------------------------------
 
 
+def _select_trigger(
+    now: float,
+    last_scan: float,
+    interval_sec: float,
+    has_pending_event: bool,
+) -> Tuple[bool, str]:
+    """Decide whether to scan this tick and why.
+
+    A due scheduled scan takes precedence over a library event in the same
+    tick: the scheduled scan is full (staleness + retries) and also covers the
+    newly added items, so the pending event is satisfied by it. Only fall back
+    to a targeted library-event scan when no scheduled scan is due.
+
+    Returns (should_scan, reason) where reason is "scheduled" or "library_event".
+    """
+    if now - last_scan >= interval_sec:
+        return (True, "scheduled")
+    if has_pending_event:
+        return (True, "library_event")
+    return (False, "scheduled")
+
+
 def run() -> None:
     """Main service entry point. Blocks until Kodi requests abort."""
     # Re-initialize the logger now that Kodi settings are readable.
     # get_logger() at module import time may have initialized with
-    # debug_enabled=False because settings weren't available yet.
-    StructuredLogger._initialized = False
+    # debug_enabled=False because settings weren't available yet, so
+    # reconfigure now that settings are readable.
     try:
         debug_on = get_bool_setting('logging')
         addon_id = get_addon().getAddonInfo('id')
     except RuntimeError:
         debug_on = False
         addon_id = DEFAULT_ADDON_ID
-    StructuredLogger.initialize(debug_enabled=debug_on, addon_id=addon_id)
+    StructuredLogger.reconfigure(debug_enabled=debug_on, addon_id=addon_id)
 
     log.info("Service started", event="service.start")
 
@@ -324,21 +334,17 @@ def run() -> None:
 
         while not monitor.abortRequested():
             try:
-                should_scan = False
-                reason = "scheduled"
                 now = time.time()
 
-                # Periodic / startup trigger
-                settings = _load_settings()
-                interval_sec = settings["scan_interval"] * 3600
-                if now - last_scan >= interval_sec:
-                    should_scan = True
-                    reason = "scheduled"
-
-                # Library event trigger (with debounce)
-                if monitor.has_pending_scan(LIBRARY_SCAN_DEBOUNCE_SEC):
-                    should_scan = True
-                    reason = "library_event"
+                # Trigger selection (scheduled takes precedence over a
+                # same-tick library event; see _select_trigger). Only the scan
+                # interval is needed to decide this, so read it cheaply each
+                # tick; the full settings dict is loaded only when about to scan.
+                interval_sec = get_int_setting("scan_interval", 24) * 3600
+                should_scan, reason = _select_trigger(
+                    now, last_scan, interval_sec,
+                    monitor.has_pending_scan(LIBRARY_SCAN_DEBOUNCE_SEC),
+                )
 
                 # Honor a post-failure backoff for BOTH trigger types so a
                 # persistently-failing Kodi query is not re-attempted every loop
@@ -354,7 +360,9 @@ def run() -> None:
                         event="service.skip_playback",
                     )
 
+                settings = None  # type: Optional[Dict[str, Any]]
                 if should_scan:
+                    settings = _load_settings()
                     if not settings.get("tmdb_api_key"):
                         log.warning(
                             "No TMDB API key configured, skipping scan",
@@ -371,6 +379,8 @@ def run() -> None:
                     should_scan = False
 
                 if should_scan:
+                    # settings is always loaded above when should_scan stays True.
+                    assert settings is not None
                     # Lock acquired above; release on EVERY exit path
                     # (success, KodiQueryError continue, unexpected error).
                     try:
@@ -425,6 +435,22 @@ def run() -> None:
                                 time.time() + SCAN_FAILURE_BACKOFF_SEC
                             )
                             continue
+                        except ApiKeyError:
+                            # A provider rejected the API key. This is terminal
+                            # for the cycle: notify the user, do NOT advance the
+                            # watermark or clear a library-event request, and back
+                            # off so we do not re-attempt every loop while the key
+                            # stays invalid.
+                            log.warning(
+                                "Scan stopped: invalid API key",
+                                event="service.scan_apikey",
+                                reason=reason,
+                            )
+                            notify(lang(32341))  # Invalid TMDB API key
+                            next_retry_after = (
+                                time.time() + SCAN_FAILURE_BACKOFF_SEC
+                            )
+                            continue
                         finally:
                             StructuredLogger.stop_scan_log()
 
@@ -465,9 +491,9 @@ def run() -> None:
                             )
                             parts = []
                             if total_updated:
-                                parts.append("{} updated".format(total_updated))
+                                parts.append(lang(32349).format(total_updated))  # {} updated
                             if not parts:
-                                parts.append("No changes")
+                                parts.append(lang(32348))  # No changes
                             notify(", ".join(parts))
                     finally:
                         release_scan_lock()

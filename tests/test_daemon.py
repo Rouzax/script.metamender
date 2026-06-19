@@ -5,6 +5,35 @@ from unittest.mock import MagicMock
 from resources.lib.service import daemon
 
 
+def test_select_trigger_scheduled_when_due():
+    should, reason = daemon._select_trigger(
+        now=1000.0, last_scan=0.0, interval_sec=100.0, has_pending_event=False
+    )
+    assert (should, reason) == (True, "scheduled")
+
+
+def test_select_trigger_scheduled_wins_over_event_when_both_due():
+    # A due scheduled (full) scan must not be masked by a same-tick event.
+    should, reason = daemon._select_trigger(
+        now=1000.0, last_scan=0.0, interval_sec=100.0, has_pending_event=True
+    )
+    assert (should, reason) == (True, "scheduled")
+
+
+def test_select_trigger_library_event_when_not_due():
+    should, reason = daemon._select_trigger(
+        now=50.0, last_scan=0.0, interval_sec=100.0, has_pending_event=True
+    )
+    assert (should, reason) == (True, "library_event")
+
+
+def test_select_trigger_idle_when_nothing_due():
+    should, reason = daemon._select_trigger(
+        now=50.0, last_scan=0.0, interval_sec=100.0, has_pending_event=False
+    )
+    assert should is False
+
+
 def test_maybe_prune_orphans_full_scan_prunes_all_types():
     """A full scan (kodi_filter=None) with retention > 0 prunes every type."""
     tracker = MagicMock()

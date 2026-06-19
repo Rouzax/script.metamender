@@ -17,7 +17,6 @@ Logging:
 """
 from __future__ import annotations
 
-import time
 from typing import Any, Dict, List, Optional
 
 from resources.lib.constants import IMDBAPI_BASE_URL
@@ -89,18 +88,12 @@ def fetch_movie(imdb_id: str) -> Optional[Dict[str, Any]]:
     """
     url = "{}/titles/{}".format(IMDBAPI_BASE_URL, imdb_id)
 
-    rpc_start = time.perf_counter()
     with log_timing(log, "imdb.movie", imdb_id=imdb_id):
         data = provider_get(
             url, logger=log, label="imdb.movie", provider="imdb",
         )
     if data is None:
         return None
-
-    elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
-
-    metacritic_obj = data.get("metacritic")
-    metacritic = metacritic_obj.get("score") if isinstance(metacritic_obj, dict) else None
 
     result = {
         "rating": _parse_rating(data),
@@ -116,7 +109,6 @@ def fetch_movie(imdb_id: str) -> Optional[Dict[str, Any]]:
         ],
         "runtime": _runtime_minutes(data.get("runtimeSeconds")),
         "premiered": str(data.get("startYear", "")) if data.get("startYear") else "",
-        "metacritic": metacritic,
     }
 
     log.info(
@@ -125,7 +117,6 @@ def fetch_movie(imdb_id: str) -> Optional[Dict[str, Any]]:
         imdb_id=imdb_id,
         title=data.get("primaryTitle", ""),
         field_count=len(result),
-        duration_ms=elapsed_ms,
     )
 
     return result
@@ -141,7 +132,6 @@ def fetch_episode(imdb_id: str) -> Optional[Dict[str, Any]]:
     """
     url = "{}/titles/{}".format(IMDBAPI_BASE_URL, imdb_id)
 
-    rpc_start = time.perf_counter()
     with log_timing(log, "imdb.episode", imdb_id=imdb_id):
         data = provider_get(
             url, logger=log, label="imdb.episode", provider="imdb",
@@ -149,7 +139,6 @@ def fetch_episode(imdb_id: str) -> Optional[Dict[str, Any]]:
     if data is None:
         return None
 
-    elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
 
     result = {
         "rating": _parse_rating(data),
@@ -166,7 +155,6 @@ def fetch_episode(imdb_id: str) -> Optional[Dict[str, Any]]:
         event="imdb.episode",
         imdb_id=imdb_id,
         title=data.get("primaryTitle", ""),
-        duration_ms=elapsed_ms,
     )
 
     return result
@@ -184,7 +172,6 @@ def fetch_season(
     episodes = []  # type: List[Dict[str, Any]]
     page_token = None  # type: Optional[str]
 
-    rpc_start = time.perf_counter()
 
     with log_timing(
         log, "imdb.season",
@@ -205,7 +192,18 @@ def fetch_season(
                 params=params, provider="imdb",
             )
             if data is None:
-                return None
+                if not episodes:
+                    return None
+                # A later page returned no data; keep the episodes already
+                # collected rather than discarding the whole season.
+                log.warning(
+                    "Season pagination truncated; returning partial result",
+                    event="imdb.season_truncated",
+                    imdb_id=show_imdb_id,
+                    season=season,
+                    episodes=len(episodes),
+                )
+                break
 
             for ep in data.get("episodes", []):
                 episodes.append({
@@ -225,7 +223,6 @@ def fetch_season(
                 break
             page_token = next_token
 
-    elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
 
     log.info(
         "Season metadata fetched",
@@ -233,7 +230,6 @@ def fetch_season(
         imdb_id=show_imdb_id,
         season=season,
         episodes=len(episodes),
-        duration_ms=elapsed_ms,
     )
 
     return episodes
@@ -252,7 +248,6 @@ def fetch_certificates(
     """
     url = "{}/titles/{}/certificates".format(IMDBAPI_BASE_URL, imdb_id)
 
-    rpc_start = time.perf_counter()
     with log_timing(log, "imdb.certificates", imdb_id=imdb_id):
         data = provider_get(
             url, logger=log, label="imdb.certificates", provider="imdb",
@@ -260,7 +255,6 @@ def fetch_certificates(
     if data is None:
         return None
 
-    elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
 
     grouped = {}  # type: Dict[str, List[Dict[str, Any]]]
     for cert in data.get("certificates", []):
@@ -283,7 +277,6 @@ def fetch_certificates(
         event="imdb.certificates",
         imdb_id=imdb_id,
         countries=len(grouped),
-        duration_ms=elapsed_ms,
     )
 
     return grouped

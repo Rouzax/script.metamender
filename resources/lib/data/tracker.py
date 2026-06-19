@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from resources.lib.constants import SCHEMA_VERSION
 from resources.lib.utils import get_logger
@@ -88,8 +88,42 @@ class TrackerDB:
         self._ensure_schema()
 
     def _ensure_schema(self) -> None:
-        """Create tables and indexes if they do not exist, record version."""
+        """Create tables/indexes if missing and reconcile the schema version.
+
+        Fresh database: create everything and stamp SCHEMA_VERSION. Existing
+        database: read the stored version and, if older, run ordered migrations
+        (none defined yet for v2) before re-stamping. A database from a NEWER
+        addon (stored > SCHEMA_VERSION) is left as-is with a warning rather than
+        silently re-stamped, so a forward-incompatible open is at least visible.
+        """
+        # CREATE TABLE IF NOT EXISTS is safe on fresh and existing DBs, and
+        # guarantees scan_state exists so the version marker can be read.
         self._conn.executescript(_SCHEMA_SQL)
+
+        row = self._conn.execute(
+            "SELECT value FROM scan_state WHERE key='schema_version'"
+        ).fetchone()
+        stored = int(row["value"]) if row and str(row["value"]).isdigit() else None
+
+        if stored is not None and stored > SCHEMA_VERSION:
+            log.warning(
+                "Tracker database is from a newer addon version; "
+                "operating without migrating",
+                event="tracker.schema_newer",
+                stored=stored,
+                supported=SCHEMA_VERSION,
+            )
+            return
+
+        if stored is not None and stored < SCHEMA_VERSION:
+            # Ordered migrations would run here as the schema evolves.
+            log.info(
+                "Migrating tracker schema",
+                event="tracker.schema_migrate",
+                from_version=stored,
+                to_version=SCHEMA_VERSION,
+            )
+
         self._conn.execute(
             "INSERT OR REPLACE INTO scan_state (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -168,16 +202,6 @@ class TrackerDB:
             return None
         return dict(row)
 
-    def get_items_by_status(
-        self, media_type: str, status: str
-    ) -> List[Dict[str, Any]]:
-        """Get all items matching (media_type, status)."""
-        cursor = self._conn.execute(
-            "SELECT * FROM items WHERE media_type = ? AND status = ?",
-            (media_type, status),
-        )
-        return [dict(r) for r in cursor.fetchall()]
-
     def update_item_status(
         self, media_type: str, identity: str, status: str
     ) -> None:
@@ -213,51 +237,6 @@ class TrackerDB:
                 identity=identity,
                 status=status,
             )
-
-    def record_attempt(
-        self,
-        media_type: str,
-        identity: str,
-        next_retry: Optional[str] = None,
-    ) -> None:
-        """Increment attempt_count, set last_scanned to today, set next_retry."""
-        today = date.today().isoformat()
-        try:
-            self._conn.execute(
-                "UPDATE items "
-                "SET attempt_count = attempt_count + 1, "
-                "    last_scanned = ?, "
-                "    next_retry = ? "
-                "WHERE media_type = ? AND identity = ?",
-                (today, next_retry, media_type, identity),
-            )
-            self._conn.commit()
-        except sqlite3.Error:
-            log.exception(
-                "Failed to record attempt",
-                event="tracker.error",
-                media_type=media_type,
-                identity=identity,
-            )
-            return
-
-        # Query the new attempt_count for the log message
-        cursor = self._conn.execute(
-            "SELECT attempt_count FROM items "
-            "WHERE media_type = ? AND identity = ?",
-            (media_type, identity),
-        )
-        row = cursor.fetchone()
-        attempt_count = row["attempt_count"] if row else None
-
-        log.debug(
-            "Attempt recorded",
-            event="tracker.attempt",
-            media_type=media_type,
-            identity=identity,
-            next_retry=next_retry,
-            attempt_count=attempt_count,
-        )
 
     def update_last_seen(self, media_type: str, identity: str, today: str) -> None:
         """Record that this item was present in the Kodi library on `today`."""
@@ -480,25 +459,20 @@ class TrackerDB:
         )
         return {row["field"]: dict(row) for row in cursor.fetchall()}
 
-    def get_fields_by_status(
-        self, media_type: str, identity: str, status: str
-    ) -> List[Dict[str, Any]]:
-        """Get all field_status rows matching a given status for an item."""
-        item_id = self._get_item_id(media_type, identity)
-        if item_id is None:
-            log.debug(
-                "Item not found for fields by status query",
-                media_type=media_type,
-                identity=identity,
-                status=status,
-            )
-            return []
+    def get_show_id_map(self) -> Dict[str, str]:
+        """Map TV show title to its show-level TMDB ID.
 
+        Built from the tvshow items recorded during the show scan so the
+        episode scan can resolve the correct show TMDB ID for season lookups.
+        """
+        show_map = {}  # type: Dict[str, str]
         cursor = self._conn.execute(
-            "SELECT * FROM field_status WHERE item_id = ? AND status = ?",
-            (item_id, status),
+            "SELECT title, tmdb_id FROM items "
+            "WHERE media_type = 'tvshow' AND tmdb_id IS NOT NULL"
         )
-        return [dict(r) for r in cursor.fetchall()]
+        for row in cursor.fetchall():
+            show_map[row["title"]] = row["tmdb_id"]
+        return show_map
 
     # ------------------------------------------------------------------
     # Cycle tracking and scan state (Task 2.4)

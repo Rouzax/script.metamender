@@ -68,3 +68,16 @@ def test_provider_get_malformed_json_raises_transient(monkeypatch):
     _patch_get(monkeypatch, resp=_resp(200, raise_json=True))
     with pytest.raises(TransientProviderError):
         provider_get("http://x", logger=MagicMock(), label="t")
+
+
+def test_provider_get_403_raises_transient(monkeypatch):
+    # 403 is bot-protection (e.g. Akamai); a persistent block must trip the breaker.
+    _patch_get(monkeypatch, resp=_resp(403))
+    with pytest.raises(TransientProviderError):
+        provider_get("http://x", logger=MagicMock(), label="t")
+
+
+def test_provider_get_other_4xx_returns_none(monkeypatch):
+    # A non-transient 4xx (e.g. 400) is "no data", not a provider failure.
+    _patch_get(monkeypatch, resp=_resp(400))
+    assert provider_get("http://x", logger=MagicMock(), label="t") is None

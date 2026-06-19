@@ -422,3 +422,52 @@ msgstr ""
 msgctxt "#32340"
 msgid "MetaMender: Update now"
 msgstr ""
+
+# Notifications (32341-32352)
+msgctxt "#32341"
+msgid "Invalid TMDB API key"
+msgstr ""
+
+msgctxt "#32342"
+msgid "Cannot update this item type"
+msgstr ""
+
+msgctxt "#32343"
+msgid "Invalid item"
+msgstr ""
+
+msgctxt "#32344"
+msgid "A scan is already running"
+msgstr ""
+
+msgctxt "#32345"
+msgid "Item not found"
+msgstr ""
+
+msgctxt "#32346"
+msgid "No TMDB API key configured"
+msgstr ""
+
+msgctxt "#32347"
+msgid "Update failed"
+msgstr ""
+
+msgctxt "#32348"
+msgid "No changes"
+msgstr ""
+
+msgctxt "#32349"
+msgid "{} updated"
+msgstr ""
+
+msgctxt "#32350"
+msgid "Updated: {}"
+msgstr ""
+
+msgctxt "#32351"
+msgid "No changes: {}"
+msgstr ""
+
+msgctxt "#32352"
+msgid "Reset {} exhausted fields"
+msgstr ""

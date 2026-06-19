@@ -748,7 +748,7 @@ class TestRunScanMovies:
         mock_update.return_value = True
 
         tracker = _make_tracker(tmp_path)
-        stats = run_scan(
+        run_scan(
             MOVIE, tracker, _make_source_config(),
             frozenset({"rating"}),
             "fake_key", _make_settings(),
@@ -1082,7 +1082,7 @@ class TestRunScanSourceLanguage:
 class TestRunScanApiKeyError:
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_api_key_error_stops_scan(
+    def test_api_key_error_propagates(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
         from resources.lib.utils import ApiKeyError
@@ -1094,18 +1094,18 @@ class TestRunScanApiKeyError:
         mock_fetch.side_effect = ApiKeyError("tmdb")
 
         tracker = _make_tracker(tmp_path)
-        stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
-            "bad_key", _make_settings(),
-        )
+        # An invalid key is terminal: run_scan re-raises so the caller
+        # (daemon/manual/actions) can surface it and hold the watermark,
+        # instead of silently finishing the pass as a no-op.
+        with pytest.raises(ApiKeyError):
+            run_scan(
+                MOVIE, tracker, _make_source_config(),
+                frozenset({"rating"}),
+                "bad_key", _make_settings(),
+            )
         tracker.close()
 
-        # An invalid API key is a fatal config error, not a per-item
-        # processing error, so it does not bump stats["errors"]; it stops
-        # the pass immediately.
-        assert stats["errors"] == 0
-        # Second movie should not be attempted
+        # The pass stops at the first item (second movie not attempted).
         assert mock_fetch.call_count == 1
 
 

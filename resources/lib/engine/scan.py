@@ -79,6 +79,11 @@ _TMDB_TO_KODI = {
 
 _KODI_TO_TMDB = {v: k for k, v in _TMDB_TO_KODI.items()}
 
+# Fields resolved by resolve_metadata for a plain SetXDetails write. "rating"
+# and "votes" are excluded: they are written via the named-slot ratings map
+# (build_ratings), not as flat fields, so resolving them here would be discarded.
+_RESOLVE_FIELDS = [k for k in _TMDB_TO_KODI if k not in ("rating", "votes")]
+
 
 def _make_stats() -> Dict[str, Any]:
     """Return a fresh stats dict."""
@@ -539,22 +544,18 @@ def run_scan(
                     needs_sleep = True
                     breaker.record_success("tmdb")
                 except ApiKeyError:
+                    # Terminal: an invalid key affects every item. Surface it to
+                    # the caller (daemon/manual/actions) instead of silently
+                    # ending the scan as a no-op. resolve_id returns None on a
+                    # transient failure (never raises TransientProviderError),
+                    # so there is no transient arm to handle here.
                     log.exception(
                         "TMDB API key invalid",
                         event="scan.apikey",
                         provider="tmdb",
                         identity=identity,
                     )
-                    break
-                except TransientProviderError:
-                    if breaker.record_failure("tmdb"):
-                        log.warning(
-                            "TMDB disabled for this cycle after repeated failures",
-                            event="scan.breaker",
-                            provider="tmdb",
-                            threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
-                            identity=identity,
-                        )
+                    raise
 
                 if tmdb_id:
                     tracker.upsert_item(media_type.name, identity, tmdb_id=tmdb_id)
@@ -571,13 +572,16 @@ def run_scan(
                     needs_sleep = True
                     breaker.record_success("tmdb")
                 except ApiKeyError:
+                    # Terminal: an invalid key affects every item. Surface it to
+                    # the caller (daemon/manual/actions) instead of silently
+                    # ending the scan as a no-op.
                     log.exception(
                         "TMDB API key invalid",
                         event="scan.apikey",
                         provider="tmdb",
                         identity=identity,
                     )
-                    break
+                    raise
                 except TransientProviderError:
                     if breaker.record_failure("tmdb"):
                         log.warning(
@@ -612,13 +616,14 @@ def run_scan(
                     needs_sleep = True
                     breaker.record_success("imdb")
                 except ApiKeyError:
+                    # Terminal: surface to the caller (see TMDB arm above).
                     log.exception(
                         "IMDb API key invalid",
                         event="scan.apikey",
                         provider="imdb",
                         identity=identity,
                     )
-                    break
+                    raise
                 except TransientProviderError:
                     if breaker.record_failure("imdb"):
                         log.warning(
@@ -638,7 +643,7 @@ def run_scan(
                 # Resolve best values per field
                 merged_data, source_map = resolve_metadata(
                     tmdb_data, imdb_data,
-                    list(_TMDB_TO_KODI.keys()),
+                    _RESOLVE_FIELDS,
                     rating_source, plot_source,
                 )
 
@@ -721,13 +726,14 @@ def run_scan(
                             needs_sleep = True
                         breaker.record_success("tmdb")
                     except ApiKeyError:
+                        # Terminal: surface to the caller (see TMDB arm above).
                         log.exception(
                             "TMDB API key invalid",
                             event="scan.apikey",
                             provider="tmdb",
                             identity=identity,
                         )
-                        break
+                        raise
                     except TransientProviderError:
                         if breaker.record_failure("tmdb"):
                             log.warning(
@@ -748,13 +754,14 @@ def run_scan(
                     needs_sleep = True
                     breaker.record_success("imdb")
                 except ApiKeyError:
+                    # Terminal: surface to the caller (see TMDB arm above).
                     log.exception(
                         "IMDb API key invalid",
                         event="scan.apikey",
                         provider="imdb",
                         identity=identity,
                     )
-                    break
+                    raise
                 except TransientProviderError:
                     if breaker.record_failure("imdb"):
                         log.warning(
@@ -774,7 +781,7 @@ def run_scan(
                 # Resolve best values per field
                 merged_data, source_map = resolve_metadata(
                     tmdb_data, imdb_data,
-                    list(_TMDB_TO_KODI.keys()),
+                    _RESOLVE_FIELDS,
                     rating_source, plot_source,
                 )
 

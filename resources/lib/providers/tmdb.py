@@ -17,7 +17,6 @@ Logging:
 """
 from __future__ import annotations
 
-import time
 from typing import Dict, List, Optional
 
 import requests
@@ -50,7 +49,7 @@ def _parse_directors(credits: Dict) -> List[str]:
     return [
         member["name"]
         for member in credits.get("crew", [])
-        if member.get("job") == "Director"
+        if member.get("job") == "Director" and member.get("name")
     ]
 
 
@@ -181,6 +180,10 @@ def resolve_id(
         )
         return None
 
+    # Intentionally show-level only: "tv_episode_results" is omitted. Episodes
+    # are matched by their own TMDB/IMDB id (no /find), so resolve_id never
+    # needs episode-level resolution. (The spec mentions tv_episode_results;
+    # that predates the ID-only episode decision and does not apply here.)
     for key in ("movie_results", "tv_results"):
         results = data.get(key, [])
         if results:
@@ -221,7 +224,6 @@ def fetch_movie(
         "append_to_response": "credits,videos,release_dates",
     }
 
-    rpc_start = time.perf_counter()
     with log_timing(log, "tmdb.movie", tmdb_id=tmdb_id):
         data = provider_get(
             url, logger=log, label="tmdb.movie", params=params, provider="tmdb",
@@ -229,7 +231,6 @@ def fetch_movie(
     if data is None:
         return None
 
-    elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
 
     credits = data.get("credits", {})
     videos = data.get("videos", {})
@@ -266,7 +267,6 @@ def fetch_movie(
         tmdb_id=tmdb_id,
         title=data.get("title", ""),
         field_count=len(result),
-        duration_ms=elapsed_ms,
     )
 
     return result
@@ -290,7 +290,6 @@ def fetch_season(
         "language": language,
     }
 
-    rpc_start = time.perf_counter()
     with log_timing(
         log, "tmdb.season",
         tmdb_id=show_tmdb_id, season=season_number,
@@ -301,7 +300,6 @@ def fetch_season(
     if data is None:
         return None
 
-    elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
 
     episodes = []  # type: List[Dict]
     for ep in data.get("episodes", []):
@@ -327,7 +325,6 @@ def fetch_season(
         tmdb_id=show_tmdb_id,
         season=season_number,
         episodes=len(episodes),
-        duration_ms=elapsed_ms,
     )
 
     return episodes
@@ -351,7 +348,6 @@ def fetch_tvshow(
         "append_to_response": "content_ratings,external_ids",
     }
 
-    rpc_start = time.perf_counter()
     with log_timing(log, "tmdb.tvshow", tmdb_id=tmdb_id):
         data = provider_get(
             url, logger=log, label="tmdb.tvshow", params=params, provider="tmdb",
@@ -359,7 +355,6 @@ def fetch_tvshow(
     if data is None:
         return None
 
-    elapsed_ms = int((time.perf_counter() - rpc_start) * 1000)
 
     content_ratings = data.get("content_ratings", {})
     raw_certs = _parse_tv_certifications(content_ratings)
@@ -380,7 +375,6 @@ def fetch_tvshow(
         tmdb_id=tmdb_id,
         title=data.get("name", ""),
         field_count=len(result),
-        duration_ms=elapsed_ms,
     )
 
     return result

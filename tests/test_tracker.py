@@ -76,45 +76,6 @@ def test_get_item_not_found(tmp_path):
     db.close()
 
 
-def test_get_pending_items(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
-    db.upsert_item("movie", "Movie B", kodi_id=2, tmdb_id="2")
-    db.update_item_status("movie", "Movie A", "complete")
-    pending = db.get_items_by_status("movie", "pending")
-    assert len(pending) == 1
-    assert pending[0]["title"] == "Movie B"
-    db.close()
-
-
-def test_get_items_by_status_empty(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    assert db.get_items_by_status("movie", "pending") == []
-    db.close()
-
-
-def test_record_attempt_increments_count(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
-    db.record_attempt("movie", "Test Movie", next_retry="2026-06-14")
-    item = db.get_item("movie", "Test Movie")
-    assert item["attempt_count"] == 1
-    assert item["next_retry"] == "2026-06-14"
-    assert item["last_scanned"] is not None
-    db.close()
-
-
-def test_record_attempt_increments_multiple(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
-    db.record_attempt("movie", "Test Movie", next_retry="2026-06-14")
-    db.record_attempt("movie", "Test Movie", next_retry="2026-07-14")
-    item = db.get_item("movie", "Test Movie")
-    assert item["attempt_count"] == 2
-    assert item["next_retry"] == "2026-07-14"
-    db.close()
-
-
 # --- Task 2.3: Field status ---
 
 def test_set_field_status(tmp_path):
@@ -166,25 +127,6 @@ def test_get_field_status_not_found(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
     assert db.get_field_status("movie", "Test Movie", "rating") is None
-    db.close()
-
-
-def test_get_fields_by_status(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
-    db.set_field_status("movie", "Test Movie", "rating", "filled", source="tmdb")
-    db.set_field_status("movie", "Test Movie", "plot", "empty")
-    db.set_field_status("movie", "Test Movie", "tagline", "empty")
-    empty = db.get_fields_by_status("movie", "Test Movie", "empty")
-    assert len(empty) == 2
-    assert {f["field"] for f in empty} == {"plot", "tagline"}
-    db.close()
-
-
-def test_get_fields_by_status_empty_result(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
-    assert db.get_fields_by_status("movie", "Test Movie", "filled") == []
     db.close()
 
 
@@ -464,3 +406,31 @@ def test_reset_exhausted_fields(tmp_path):
     assert db.get_field_status("movie", "tmdb:1", "plot")["attempt_count"] == 0
     assert db.get_field_status("movie", "tmdb:1", "tagline")["status"] == "filled"  # untouched
     db.close()
+
+
+def test_fresh_db_stamps_current_schema_version(tmp_path):
+    db = TrackerDB(str(tmp_path / "fresh.db"))
+    row = db._conn.execute(
+        "SELECT value FROM scan_state WHERE key='schema_version'"
+    ).fetchone()
+    db.close()
+    assert int(row["value"]) == SCHEMA_VERSION
+
+
+def test_newer_schema_db_is_not_downgraded(tmp_path):
+    """Opening a DB from a newer addon must not re-stamp it to an older version."""
+    path = str(tmp_path / "newer.db")
+    db = TrackerDB(path)
+    db._conn.execute(
+        "INSERT OR REPLACE INTO scan_state (key, value) VALUES ('schema_version', ?)",
+        (str(SCHEMA_VERSION + 1),),
+    )
+    db._conn.commit()
+    db.close()
+
+    db2 = TrackerDB(path)  # must leave the newer version intact
+    row = db2._conn.execute(
+        "SELECT value FROM scan_state WHERE key='schema_version'"
+    ).fetchone()
+    db2.close()
+    assert int(row["value"]) == SCHEMA_VERSION + 1

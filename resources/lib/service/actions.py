@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+import xbmc
+
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.kodi import get_item_by_id
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW, MediaType
@@ -30,17 +32,18 @@ from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
 from resources.lib.service.daemon import (
-    _build_show_id_map,
     _get_db_path,
     _get_sources_config_path,
     _load_settings,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.utils import (
+    ApiKeyError,
     StructuredLogger,
     get_addon,
     get_bool_setting,
     get_logger,
+    lang,
     notify,
 )
 
@@ -56,14 +59,13 @@ _DBTYPE_TO_MEDIA_TYPE: Dict[str, MediaType] = {
 
 def _init_logging() -> None:
     """Initialize StructuredLogger for a one-shot action invocation."""
-    StructuredLogger._initialized = False
     try:
         debug_on = get_bool_setting('logging')
         addon_id = get_addon().getAddonInfo('id')
     except RuntimeError:
         debug_on = False
         addon_id = DEFAULT_ADDON_ID
-    StructuredLogger.initialize(debug_enabled=debug_on, addon_id=addon_id)
+    StructuredLogger.reconfigure(debug_enabled=debug_on, addon_id=addon_id)
 
 
 def reset_exhausted() -> None:
@@ -75,6 +77,16 @@ def reset_exhausted() -> None:
         event="actions.reset_exhausted_start",
     )
 
+    # Take the scan lock: this mutates the same field_status rows a running
+    # scan writes, so the two must not overlap.
+    if not acquire_scan_lock():
+        log.info(
+            "A scan is already running, skipping reset",
+            event="actions.locked",
+        )
+        notify(lang(32344))  # A scan is already running
+        return
+
     tracker = None
     try:
         tracker = TrackerDB(_get_db_path())
@@ -84,10 +96,11 @@ def reset_exhausted() -> None:
             event="actions.reset_exhausted",
             count=count,
         )
-        notify("Reset {} exhausted fields".format(count))
+        notify(lang(32352).format(count))  # Reset {} exhausted fields
     except Exception:
         log.exception("Reset exhausted fields action failed", event="actions.error")
     finally:
+        release_scan_lock()
         if tracker is not None:
             tracker.close()
 
@@ -120,7 +133,7 @@ def update_now(dbtype: str, dbid: str) -> None:
             event="actions.update_now_invalid",
             dbtype=dbtype,
         )
-        notify("Cannot update this item type")
+        notify(lang(32342))  # Cannot update this item type
         return
 
     try:
@@ -131,7 +144,7 @@ def update_now(dbtype: str, dbid: str) -> None:
             event="actions.update_now_invalid",
             dbid=str(dbid),
         )
-        notify("Cannot update this item type")
+        notify(lang(32343))  # Invalid item
         return
 
     if not acquire_scan_lock():
@@ -139,7 +152,7 @@ def update_now(dbtype: str, dbid: str) -> None:
             "A scan is already running, skipping update now",
             event="actions.locked",
         )
-        notify("A scan is already running")
+        notify(lang(32344))  # A scan is already running
         return
 
     tracker = None
@@ -152,7 +165,7 @@ def update_now(dbtype: str, dbid: str) -> None:
                 media_type=media_type.name,
                 item_id=item_id,
             )
-            notify("Item not found")
+            notify(lang(32345))  # Item not found
             return
 
         settings = _load_settings()
@@ -162,7 +175,7 @@ def update_now(dbtype: str, dbid: str) -> None:
                 "No TMDB API key configured, cannot update",
                 event="actions.skip_no_key",
             )
-            notify("No TMDB API key configured")
+            notify(lang(32346))  # No TMDB API key configured
             return
 
         tracker = TrackerDB(_get_db_path())
@@ -170,7 +183,7 @@ def update_now(dbtype: str, dbid: str) -> None:
 
         show_id_map: Optional[Dict[str, str]] = None
         if media_type.name == "episode":
-            show_id_map = _build_show_id_map(tracker)
+            show_id_map = tracker.get_show_id_map()
 
         stats = run_scan(
             media_type=media_type,
@@ -179,6 +192,7 @@ def update_now(dbtype: str, dbid: str) -> None:
             enabled_fields=settings["enabled_fields"],
             tmdb_api_key=tmdb_api_key,
             settings=settings,
+            monitor=xbmc.Monitor(),
             items=[item],
             force=True,
             breaker=CircuitBreaker(),
@@ -195,12 +209,15 @@ def update_now(dbtype: str, dbid: str) -> None:
             updated=updated,
         )
         if updated:
-            notify("Updated: {}".format(title))
+            notify(lang(32350).format(title))  # Updated: {}
         else:
-            notify("No changes: {}".format(title))
+            notify(lang(32351).format(title))  # No changes: {}
+    except ApiKeyError:
+        log.exception("Update now stopped: invalid API key", event="actions.apikey")
+        notify(lang(32341))  # Invalid TMDB API key
     except Exception:
         log.exception("Update now action failed", event="actions.error")
-        notify("Update failed")
+        notify(lang(32347))  # Update failed
     finally:
         release_scan_lock()
         if tracker is not None:
