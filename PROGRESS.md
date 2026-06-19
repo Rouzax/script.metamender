@@ -67,7 +67,7 @@ staleness.py, retry ladder) removed. 344 unit tests green; live suite refreshed.
 - [x] 7c.5 Manual scan reset: "Update now" ignores `final`, pulls latest, re-baselines the per-field clock; fixes bugs #1 (disabled-source silent skip) and #2 (playback block)
 - [x] 7c.6 Rescope + relabel settings: `default_source` spinner, `refetch_schedule` string, `reset_tracker` action; dropped max_retries / min_votes
 - [x] 7c.7 Tests + live Kodi validation (maturity ladder, age-based one-shot finalize, manual reset, refresh-on-diff, SKIP_NOT_DUE)
-- [ ] 7c.8 Doc sync follow-up: new design spec written (docs/superpowers/specs/2026-06-19-field-maturity-model-design.md); still TODO: update the eucert master specs (engine/storage/settings/overview) + add "superseded by maturity model" pointers to the write-correctness and retry-exhaustion plans
+- [x] 7c.8 Doc sync: new design spec written (docs/superpowers/specs/2026-06-19-field-maturity-model-design.md); "superseded by maturity model" banners added to the eucert master specs (engine/storage/settings/overview/scan-engine-v2) and to the write-correctness and retry-exhaustion plans (banners point to the current design; spec internals not rewritten)
 
 ## Phase 8: Port Certification Module
 - [ ] 8.1 Port presets and config (country JSON presets, load/inference/seed)
