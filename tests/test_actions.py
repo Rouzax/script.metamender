@@ -1,4 +1,4 @@
-"""Tests for entry-point action handlers (reset_exhausted, A20/D12)."""
+"""Tests for entry-point action handlers (reset_tracker, update_now)."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
@@ -21,7 +21,9 @@ _LANG = {
     32347: "Update failed",
     32350: "Updated: {}",
     32351: "No changes: {}",
-    32352: "Reset {} exhausted fields",
+    32360: "Reset tracker?",
+    32361: "This will clear all field status records so the next scan re-fetches everything.",
+    32362: "Reset complete: {} fields cleared",
 }
 
 
@@ -31,7 +33,7 @@ def _fake_lang(string_id):
 
 @pytest.fixture
 def patched(monkeypatch: pytest.MonkeyPatch):
-    """Patch everything actions.reset_exhausted() touches."""
+    """Patch everything actions.reset_tracker() touches."""
     tracker = MagicMock()
     tracker.clear_field_status = MagicMock(return_value=3)
     tracker_cls = MagicMock(return_value=tracker)
@@ -54,8 +56,16 @@ def patched(monkeypatch: pytest.MonkeyPatch):
     }
 
 
-def test_reset_exhausted_calls_tracker_and_notifies(patched):
-    actions.reset_exhausted()
+# ---------------------------------------------------------------------------
+# reset_tracker (settings action: clear all field_status rows)
+# ---------------------------------------------------------------------------
+
+
+def test_reset_tracker_clears_field_status(patched, kodi_stubs):
+    import xbmcgui
+    xbmcgui.Dialog.return_value.yesno.return_value = True
+    actions.reset_tracker()
+    assert xbmcgui.Dialog.return_value.yesno.called
     patched["tracker"].clear_field_status.assert_called_once_with()
     patched["notify"].assert_called_once()
     message = patched["notify"].call_args[0][0]
@@ -63,24 +73,36 @@ def test_reset_exhausted_calls_tracker_and_notifies(patched):
     patched["tracker"].close.assert_called_once_with()
 
 
-def test_reset_exhausted_closes_tracker_on_error(patched):
+def test_reset_tracker_cancelled_when_user_declines(patched, kodi_stubs):
+    import xbmcgui
+    xbmcgui.Dialog.return_value.yesno.return_value = False
+    actions.reset_tracker()
+    patched["tracker_cls"].assert_not_called()
+    patched["notify"].assert_not_called()
+
+
+def test_reset_tracker_closes_tracker_on_error(patched, kodi_stubs):
+    import xbmcgui
+    xbmcgui.Dialog.return_value.yesno.return_value = True
     patched["tracker"].clear_field_status.side_effect = RuntimeError("boom")
-    actions.reset_exhausted()  # should not raise
+    actions.reset_tracker()  # should not raise
     patched["tracker"].close.assert_called_once_with()
     patched["notify"].assert_not_called()
 
 
-def test_reset_exhausted_skips_when_scan_running(patched):
+def test_reset_tracker_skips_when_scan_running(patched, kodi_stubs):
     """If the scan lock is held, reset must not touch the tracker."""
+    import xbmcgui
+    xbmcgui.Dialog.return_value.yesno.return_value = True
     patched["acquire"].return_value = False
-    actions.reset_exhausted()
+    actions.reset_tracker()
     patched["tracker_cls"].assert_not_called()
     patched["tracker"].clear_field_status.assert_not_called()
     patched["notify"].assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# update_now (D3 "Update now" force scan)
+# update_now (D3 "Update now" reset scan)
 # ---------------------------------------------------------------------------
 
 
