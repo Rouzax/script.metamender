@@ -434,3 +434,36 @@ def test_newer_schema_db_is_not_downgraded(tmp_path):
     ).fetchone()
     db2.close()
     assert int(row["value"]) == SCHEMA_VERSION + 1
+
+
+# ----------------------------------------------------------------------
+# Task 3: maturity-fact recording (fetch_count, record_field_fetch, etc.)
+# ----------------------------------------------------------------------
+
+from datetime import date
+
+
+def test_record_field_fetch_increments_count(tmp_path, kodi_stubs):
+    from resources.lib.data.tracker import TrackerDB
+    t = TrackerDB(str(tmp_path / "t.db"))
+    t.upsert_item("movie", "Air", kodi_id=1, tmdb_id="1")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-07-01", source="tmdb")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-08-01", source="tmdb")
+    row = t.get_field_status_map("movie", "Air")["plot"]
+    t.close()
+    assert row["fetch_count"] == 2
+    assert row["fetched_at"] == date.today().isoformat()
+    assert row["next_retry"] == "2026-08-01"
+
+
+def test_reset_field_clock(tmp_path, kodi_stubs):
+    from resources.lib.data.tracker import TrackerDB
+    t = TrackerDB(str(tmp_path / "t.db"))
+    t.upsert_item("movie", "Air", kodi_id=1, tmdb_id="1")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-07-01")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-08-01")
+    t.reset_field_clock("movie", "Air", "plot")
+    row = t.get_field_status_map("movie", "Air")["plot"]
+    t.close()
+    assert row["fetch_count"] == 1
+    assert row["next_retry"] is None
