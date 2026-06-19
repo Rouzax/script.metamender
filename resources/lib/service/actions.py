@@ -2,16 +2,15 @@
 MetaMender entry-point action handlers.
 
 Handlers invoked from default.py when the script is launched with an action
-argument (for example RunScript(script.metamender,reset_exhausted) from a
+argument (for example RunScript(script.metamender,reset_tracker) from a
 settings action button).
 
 Logging:
     Logger: 'actions'
     Key events:
-        - actions.reset_exhausted_start (INFO): Reset-exhausted-fields action starting
-        - actions.reset_exhausted (INFO): Reset-exhausted-fields action finished
-        - actions.update_now_start (INFO): Update-now force scan starting
-        - actions.update_now (INFO): Update-now force scan finished
+        - actions.reset_tracker (INFO): Reset-tracker action finished
+        - actions.update_now_start (INFO): Update-now reset scan starting
+        - actions.update_now (INFO): Update-now reset scan finished
         - actions.update_now_invalid (WARNING): Update-now bad dbtype/dbid
         - actions.update_now_notfound (WARNING): Update-now item not in library
         - actions.skip_no_key (WARNING): Update-now skipped, no TMDB API key
@@ -23,6 +22,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 import xbmc
+import xbmcgui
 
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.kodi import get_item_by_id
@@ -68,14 +68,12 @@ def _init_logging() -> None:
     StructuredLogger.reconfigure(debug_enabled=debug_on, addon_id=addon_id)
 
 
-def reset_exhausted() -> None:
-    """Reset all exhausted field_status rows and notify the user."""
+def reset_tracker() -> None:
+    """Clear all maturity facts so the next scan re-pulls everything (settings action)."""
     _init_logging()
 
-    log.info(
-        "Reset exhausted fields action starting",
-        event="actions.reset_exhausted_start",
-    )
+    if not xbmcgui.Dialog().yesno(lang(32360), lang(32361)):  # "Reset tracker?" / body
+        return
 
     # Take the scan lock: this mutates the same field_status rows a running
     # scan writes, so the two must not overlap.
@@ -90,15 +88,15 @@ def reset_exhausted() -> None:
     tracker = None
     try:
         tracker = TrackerDB(_get_db_path())
-        count = tracker.reset_exhausted_fields()
+        count = tracker.clear_field_status()
         log.info(
-            "Reset exhausted fields action complete",
-            event="actions.reset_exhausted",
-            count=count,
+            "Tracker reset",
+            event="actions.reset_tracker",
+            cleared=count,
         )
-        notify(lang(32352).format(count))  # Reset {} exhausted fields
+        notify(lang(32362).format(count))  # "Reset complete: {} fields cleared"
     except Exception:
-        log.exception("Reset exhausted fields action failed", event="actions.error")
+        log.exception("Reset tracker failed", event="actions.error")
     finally:
         release_scan_lock()
         if tracker is not None:
@@ -108,10 +106,11 @@ def reset_exhausted() -> None:
 def update_now(dbtype: str, dbid: str) -> None:
     """Force a fresh single-item correction (D3 "Update now" context action).
 
-    Runs a force scan of one library item: it bypasses gating, exhaustion,
-    the cycle-processed skip, and the empty-only overwrite guard so provider
-    data overwrites existing non-empty fields. Acquires the shared scan lock
-    so it never runs concurrently with the service/manual scan.
+    Runs a reset scan of one library item: it bypasses the disabled-source
+    gate, the playback yield, and the cycle-processed skip, treats every
+    enabled field as due, and re-baselines each field's maturity clock.
+    Acquires the shared scan lock so it never runs concurrently with the
+    service/manual scan.
 
     Args:
         dbtype: Kodi ListItem.DBTYPE ("movie", "tvshow", or "episode").
@@ -194,7 +193,7 @@ def update_now(dbtype: str, dbid: str) -> None:
             settings=settings,
             monitor=xbmc.Monitor(),
             items=[item],
-            force=True,
+            reset=True,
             breaker=CircuitBreaker(),
             show_id_map=show_id_map,
         )

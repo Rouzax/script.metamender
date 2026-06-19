@@ -78,48 +78,38 @@ def test_get_item_not_found(tmp_path):
 
 # --- Task 2.3: Field status ---
 
-def test_set_field_status(tmp_path):
+def test_record_field_fetch_sets_facts(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
-    db.set_field_status("movie", "Test Movie", "rating", "filled",
-                        source="tmdb", vote_count=500)
+    db.record_field_fetch("movie", "Test Movie", "rating",
+                          next_retry="2026-12-01", source="tmdb", vote_count=500)
+    db.commit()
     field = db.get_field_status("movie", "Test Movie", "rating")
     assert field is not None
-    assert field["status"] == "filled"
+    assert field["fetch_count"] == 1
     assert field["source"] == "tmdb"
     assert field["vote_count"] == 500
+    assert field["next_retry"] == "2026-12-01"
     assert field["fetched_at"] is not None
     db.close()
 
 
-def test_set_field_status_updates_existing(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "Test Movie", kodi_id=1, tmdb_id="1")
-    db.set_field_status("movie", "Test Movie", "rating", "stale",
-                        source="tmdb", vote_count=5)
-    db.set_field_status("movie", "Test Movie", "rating", "filled",
-                        source="omdb", vote_count=2000)
-    field = db.get_field_status("movie", "Test Movie", "rating")
-    assert field["status"] == "filled"
-    assert field["source"] == "omdb"
-    assert field["vote_count"] == 2000
-    db.close()
-
-
-def test_set_field_status_checked_preserves_vote_metadata(tmp_path):
-    # A4: confirming a rating "checked" must NOT erase the staleness metadata
-    # (source/vote_count/fetched_at) recorded when it was last filled.
+def test_record_field_fetch_coalesces_metadata(tmp_path):
+    # A later fetch with None source/vote_count keeps the previously recorded
+    # values (COALESCE), preserving staleness provenance.
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.upsert_item("movie", "tmdb:1", title="A")
-    db.set_field_status("movie", "tmdb:1", "rating", "filled",
-                        source="themoviedb", vote_count=12)
+    db.record_field_fetch("movie", "tmdb:1", "rating",
+                          next_retry="2026-12-01", source="themoviedb", vote_count=12)
+    db.commit()
     first = db.get_field_status("movie", "tmdb:1", "rating")
-    db.set_field_status("movie", "tmdb:1", "rating", "checked")  # no source/votes
+    db.record_field_fetch("movie", "tmdb:1", "rating", next_retry="2027-01-01")
+    db.commit()
     fs = db.get_field_status("movie", "tmdb:1", "rating")
-    assert fs["status"] == "checked"
+    assert fs["fetch_count"] == 2
     assert fs["vote_count"] == 12
     assert fs["source"] == "themoviedb"
-    assert fs["fetched_at"] == first["fetched_at"]
+    assert fs["fetched_at"] >= first["fetched_at"]
     db.close()
 
 
@@ -133,31 +123,14 @@ def test_get_field_status_not_found(tmp_path):
 def test_get_field_status_map(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.upsert_item("movie", "tmdb:1", title="A")
-    db.set_field_status("movie", "tmdb:1", "plot", "filled", source="tmdb")
-    db.set_field_status("movie", "tmdb:1", "tagline", "empty")
+    db.record_field_fetch("movie", "tmdb:1", "plot", next_retry=None, source="tmdb")
+    db.record_field_fetch("movie", "tmdb:1", "tagline", next_retry="2026-12-01")
+    db.commit()
     m = db.get_field_status_map("movie", "tmdb:1")
     assert set(m.keys()) == {"plot", "tagline"}
-    assert m["plot"]["status"] == "filled"
-    assert m["tagline"]["status"] == "empty"
+    assert m["plot"]["source"] == "tmdb"
+    assert m["tagline"]["next_retry"] == "2026-12-01"
     assert db.get_field_status_map("movie", "unknown") == {}
-    db.close()
-
-
-def test_set_field_next_retry(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "tmdb:1", title="A")
-    db.set_field_status("movie", "tmdb:1", "plot", "empty")
-    db.set_field_next_retry("movie", "tmdb:1", "plot", "2026-12-01")
-    fs = db.get_field_status("movie", "tmdb:1", "plot")
-    assert fs is not None
-    assert fs["next_retry"] == "2026-12-01"
-    # Clearing it back to None goes permanent
-    db.set_field_next_retry("movie", "tmdb:1", "plot", None)
-    fs = db.get_field_status("movie", "tmdb:1", "plot")
-    assert fs is not None
-    assert fs["next_retry"] is None
-    # No-op on a missing item/field
-    db.set_field_next_retry("movie", "unknown", "plot", "2026-12-01")
     db.close()
 
 
@@ -209,11 +182,14 @@ def test_items_has_identity_column(tmp_path):
     db.close()
 
 
-def test_field_status_has_retry_columns(tmp_path):
+def test_field_status_has_maturity_columns(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     cols = {r["name"] for r in db._conn.execute("PRAGMA table_info(field_status)")}
-    assert "attempt_count" in cols
+    assert "fetch_count" in cols
     assert "next_retry" in cols
+    # The legacy status machine columns were removed (Phase 7c).
+    assert "status" not in cols
+    assert "attempt_count" not in cols
     db.close()
 
 
@@ -291,47 +267,6 @@ def test_update_last_seen(tmp_path):
 
 
 # ----------------------------------------------------------------------
-# Task 5: per-field retry storage
-# ----------------------------------------------------------------------
-
-
-def test_record_field_attempt_increments_and_sets_retry(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "tmdb:1", title="A")
-    db.set_field_status("movie", "tmdb:1", "plot", "empty")
-    db.record_field_attempt("movie", "tmdb:1", "plot", next_retry="2026-06-15")
-    fs = db.get_field_status("movie", "tmdb:1", "plot")
-    assert fs["attempt_count"] == 1
-    assert fs["next_retry"] == "2026-06-15"
-    db.record_field_attempt("movie", "tmdb:1", "plot", next_retry="2026-07-15")
-    fs = db.get_field_status("movie", "tmdb:1", "plot")
-    assert fs["attempt_count"] == 2
-    assert fs["next_retry"] == "2026-07-15"
-    db.close()
-
-
-def test_record_field_attempt_creates_row_if_missing(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "tmdb:1", title="A")
-    db.record_field_attempt("movie", "tmdb:1", "rating", next_retry="2026-06-15")
-    fs = db.get_field_status("movie", "tmdb:1", "rating")
-    assert fs is not None
-    assert fs["attempt_count"] == 1
-    db.close()
-
-
-def test_set_field_status_preserves_attempt_count(tmp_path):
-    db = TrackerDB(str(tmp_path / "backfill.db"))
-    db.upsert_item("movie", "tmdb:1", title="A")
-    db.record_field_attempt("movie", "tmdb:1", "plot", next_retry="2026-06-15")
-    db.set_field_status("movie", "tmdb:1", "plot", "filled", source="tmdb")
-    fs = db.get_field_status("movie", "tmdb:1", "plot")
-    assert fs["status"] == "filled"
-    assert fs["attempt_count"] == 1  # not reset by a status update
-    db.close()
-
-
-# ----------------------------------------------------------------------
 # Task 6: orphan pruning
 # ----------------------------------------------------------------------
 
@@ -367,7 +302,8 @@ def test_prune_orphans_keeps_null_last_seen(tmp_path):
 def test_prune_orphans_cascades_field_status(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.upsert_item("movie", "tmdb:1", title="A")
-    db.set_field_status("movie", "tmdb:1", "plot", "empty")
+    db.record_field_fetch("movie", "tmdb:1", "plot", next_retry=None)
+    db.commit()
     db.update_last_seen("movie", "tmdb:1", "2026-01-01")
     item_id = db._get_item_id("movie", "tmdb:1")
     db.prune_orphans("movie", cutoff="2026-06-01")
@@ -394,17 +330,15 @@ def test_prune_orphans_multiple_items(tmp_path):
     db.close()
 
 
-def test_reset_exhausted_fields(tmp_path):
+def test_clear_field_status_removes_all_rows(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.upsert_item("movie", "tmdb:1", title="A")
-    db.set_field_status("movie", "tmdb:1", "plot", "exhausted")
-    db.set_field_next_retry("movie", "tmdb:1", "plot", None)
-    db.set_field_status("movie", "tmdb:1", "tagline", "filled", source="tmdb")
-    n = db.reset_exhausted_fields()
-    assert n == 1
-    assert db.get_field_status("movie", "tmdb:1", "plot")["status"] == "empty"
-    assert db.get_field_status("movie", "tmdb:1", "plot")["attempt_count"] == 0
-    assert db.get_field_status("movie", "tmdb:1", "tagline")["status"] == "filled"  # untouched
+    db.record_field_fetch("movie", "tmdb:1", "plot", next_retry=None)
+    db.record_field_fetch("movie", "tmdb:1", "tagline", next_retry="2026-12-01")
+    db.commit()
+    n = db.clear_field_status()
+    assert n == 2
+    assert db.get_field_status_map("movie", "tmdb:1") == {}
     db.close()
 
 
@@ -434,3 +368,36 @@ def test_newer_schema_db_is_not_downgraded(tmp_path):
     ).fetchone()
     db2.close()
     assert int(row["value"]) == SCHEMA_VERSION + 1
+
+
+# ----------------------------------------------------------------------
+# Task 3: maturity-fact recording (fetch_count, record_field_fetch, etc.)
+# ----------------------------------------------------------------------
+
+from datetime import date
+
+
+def test_record_field_fetch_increments_count(tmp_path, kodi_stubs):
+    from resources.lib.data.tracker import TrackerDB
+    t = TrackerDB(str(tmp_path / "t.db"))
+    t.upsert_item("movie", "Air", kodi_id=1, tmdb_id="1")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-07-01", source="tmdb")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-08-01", source="tmdb")
+    row = t.get_field_status_map("movie", "Air")["plot"]
+    t.close()
+    assert row["fetch_count"] == 2
+    assert row["fetched_at"] == date.today().isoformat()
+    assert row["next_retry"] == "2026-08-01"
+
+
+def test_reset_field_clock(tmp_path, kodi_stubs):
+    from resources.lib.data.tracker import TrackerDB
+    t = TrackerDB(str(tmp_path / "t.db"))
+    t.upsert_item("movie", "Air", kodi_id=1, tmdb_id="1")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-07-01")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-08-01")
+    t.reset_field_clock("movie", "Air", "plot", next_retry="2026-09-15")
+    row = t.get_field_status_map("movie", "Air")["plot"]
+    t.close()
+    assert row["fetch_count"] == 1
+    assert row["next_retry"] == "2026-09-15"

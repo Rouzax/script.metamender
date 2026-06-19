@@ -12,6 +12,18 @@
                 </setting>
             </group>
             <group id="source_priority" label="32025">
+                <setting id="default_source" type="integer" label="32370" help="32371">
+                    <default>0</default>
+                    <constraints>
+                        <options>
+                            <option label="32372">0</option>
+                            <option label="32373">1</option>
+                            <option label="32374">2</option>
+                            <option label="32375">3</option>
+                        </options>
+                    </constraints>
+                    <control type="spinner" format="integer" />
+                </setting>
                 <setting id="rating_source" type="integer" label="32026" help="32027">
                     <default>0</default>
                     <constraints>
@@ -68,25 +80,7 @@
                 </setting>
             </group>
             <group id="freshness" label="32120">
-                <setting id="min_votes_movie" type="integer" label="32121" help="32122">
-                    <default>50</default>
-                    <constraints>
-                        <minimum>1</minimum>
-                        <maximum>1000</maximum>
-                        <step>10</step>
-                    </constraints>
-                    <control type="slider" format="integer" />
-                </setting>
-                <setting id="min_votes_episode" type="integer" label="32123" help="32124">
-                    <default>20</default>
-                    <constraints>
-                        <minimum>1</minimum>
-                        <maximum>500</maximum>
-                        <step>5</step>
-                    </constraints>
-                    <control type="slider" format="integer" />
-                </setting>
-                <setting id="stale_threshold_days" type="integer" label="32125" help="32126">
+                <setting id="stale_threshold_days" type="integer" label="32125" help="32380">
                     <default>365</default>
                     <constraints>
                         <minimum>30</minimum>
@@ -95,16 +89,15 @@
                     </constraints>
                     <control type="slider" format="integer" />
                 </setting>
-            </group>
-            <group id="retries" label="32130">
-                <setting id="max_retries" type="integer" label="32131" help="32132">
-                    <default>4</default>
+                <setting id="refetch_schedule" type="string" label="32376" help="32377">
+                    <level>2</level>
+                    <default>7,30,90</default>
                     <constraints>
-                        <minimum>1</minimum>
-                        <maximum>10</maximum>
-                        <step>1</step>
+                        <allowempty>true</allowempty>
                     </constraints>
-                    <control type="slider" format="integer" />
+                    <control type="edit" format="string">
+                        <heading>32376</heading>
+                    </control>
                 </setting>
             </group>
             <group id="sources" label="32140">
@@ -264,9 +257,12 @@
                     </constraints>
                     <control type="slider" format="integer" />
                 </setting>
-                <setting id="reset_exhausted" type="action" label="32333" help="32334">
-                    <data>RunScript(script.metamender,reset_exhausted)</data>
-                    <control type="button" format="action" />
+                <setting id="reset_tracker" type="action" label="32378" help="32379">
+                    <level>2</level>
+                    <data>RunScript(script.metamender,reset_tracker)</data>
+                    <control type="button" format="action">
+                        <heading>32378</heading>
+                    </control>
                 </setting>
             </group>
             <group id="debugging" label="32320">

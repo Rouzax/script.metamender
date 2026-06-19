@@ -24,9 +24,6 @@ PREFER_IMDB = 1
 TMDB_ONLY = 2
 IMDB_ONLY = 3
 
-# Fields where rating_source preference applies (always paired)
-_RATING_FIELDS = frozenset({"rating", "votes"})
-
 # Fields where plot_source preference applies
 _PLOT_FIELDS = frozenset({"plot"})
 
@@ -78,8 +75,8 @@ def resolve_metadata(
     tmdb_data: Optional[Dict[str, Any]],
     imdb_data: Optional[Dict[str, Any]],
     gap_fields: List[str],
-    rating_pref: int,
     plot_pref: int,
+    default_pref: int,
 ) -> Tuple[Dict[str, Any], Dict[str, str]]:
     """Resolve all gap fields between TMDB and IMDb data.
 
@@ -87,13 +84,12 @@ def resolve_metadata(
         tmdb_data: Dict from TMDB provider, or None.
         imdb_data: Dict from IMDb provider, or None.
         gap_fields: List of field names that need values.
-        rating_pref: Preference for rating and votes fields.
-        plot_pref: Preference for plot field.
+        plot_pref: Preference for the plot field.
+        default_pref: Preference for all other fields.
 
     Returns:
         Tuple of (merged_data, source_map).
-        merged_data: Dict with the same keys as TMDB provider output,
-            containing the best value per field.
+        merged_data: Dict containing the best value per field.
         source_map: Dict mapping field name to source name ("tmdb" or
             "imdb") for fields that got a value.
     """
@@ -104,23 +100,21 @@ def resolve_metadata(
     sources = {}  # type: Dict[str, str]
 
     for field in gap_fields:
-        if field in _RATING_FIELDS:
-            pref = rating_pref
-        elif field in _PLOT_FIELDS:
-            pref = plot_pref
-        else:
-            pref = PREFER_TMDB
-
-        tmdb_val = tmdb.get(field)
-        imdb_val = imdb.get(field)
-
-        value, source = resolve_field(field, tmdb_val, imdb_val, pref)
-
+        pref = plot_pref if field in _PLOT_FIELDS else default_pref
+        value, source = resolve_field(field, tmdb.get(field), imdb.get(field), pref)
         if not is_empty(value):
             merged[field] = value
             sources[field] = source
 
     return (merged, sources)
+
+
+def wants_imdb(default_pref: int, rating_pref: int, plot_pref: int) -> bool:
+    """Return True if any source setting would consult IMDb."""
+    return any(
+        p in (PREFER_TMDB, PREFER_IMDB, IMDB_ONLY)
+        for p in (default_pref, rating_pref, plot_pref)
+    )
 
 
 # Kodi rating slot names for our two managed providers

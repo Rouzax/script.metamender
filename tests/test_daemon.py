@@ -77,3 +77,19 @@ def test_maybe_prune_orphans_retention_zero_never_prunes():
     daemon._maybe_prune_orphans(tracker, settings, kodi_filter=None)
 
     tracker.prune_orphans.assert_not_called()
+
+
+def test_load_settings_has_default_source_and_schedule(kodi_stubs, settings_mock):
+    """_load_settings must include default_source and refetch_schedule (raw string),
+    and must NOT include min_votes_movie, min_votes_episode, or max_retries."""
+    s = daemon._load_settings()
+
+    assert "default_source" in s
+    assert isinstance(s["default_source"], int)
+
+    assert "refetch_schedule" in s
+    assert isinstance(s["refetch_schedule"], str)
+
+    assert "max_retries" not in s
+    assert "min_votes_movie" not in s
+    assert "min_votes_episode" not in s

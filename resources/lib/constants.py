@@ -1,6 +1,8 @@
 """Centralized constants for MetaMender addon."""
 from __future__ import annotations
 
+from typing import Tuple
+
 # =============================================================================
 # Addon Identity
 # =============================================================================
@@ -68,13 +70,20 @@ SOURCES_CONFIG_FILENAME = "sources.json"
 # migrations have a marker to branch on. Stored in scan_state on init.
 SCHEMA_VERSION = 2
 
-# Retry intervals in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
-RETRY_INTERVALS = (7, 30, 90)
-DEFAULT_MAX_RETRIES = 4
+# Default refetch schedule in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
+DEFAULT_REFETCH_SCHEDULE = (7, 30, 90)  # type: Tuple[int, ...]
 
-# Days after a field exhausts before it gets ONE automatic re-attempt; if that
-# also finds nothing, the field is permanently exhausted (next_retry cleared).
-EXHAUSTED_AUTORETRY_DAYS = 180
+
+def parse_refetch_schedule(value: str) -> Tuple[int, ...]:
+    """Parse a 'comma,separated,days' schedule string, dropping non-positive
+    entries. Falls back to DEFAULT_REFETCH_SCHEDULE on empty or malformed input."""
+    try:
+        parts = [int(p.strip()) for p in value.split(",") if p.strip()]
+    except (ValueError, AttributeError):
+        return DEFAULT_REFETCH_SCHEDULE
+    parts = [p for p in parts if p > 0]
+    return tuple(parts) if parts else DEFAULT_REFETCH_SCHEDULE
+
 
 # Disable a provider after this many consecutive failures in a single scan
 PROVIDER_CIRCUIT_BREAKER_THRESHOLD = 5

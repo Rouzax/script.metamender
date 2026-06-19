@@ -49,10 +49,9 @@ CREATE TABLE IF NOT EXISTS field_status (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id INTEGER NOT NULL REFERENCES items(id),
     field TEXT NOT NULL,
-    status TEXT DEFAULT 'empty',
     source TEXT,
     vote_count INTEGER,
-    attempt_count INTEGER DEFAULT 0,
+    fetch_count INTEGER DEFAULT 0,
     next_retry TEXT,
     fetched_at TEXT,
     UNIQUE(item_id, field)
@@ -84,6 +83,7 @@ class TrackerDB:
         self._conn = sqlite3.connect(db_path)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._ensure_schema()
 
@@ -178,7 +178,6 @@ class TrackerDB:
 
         try:
             cursor = self._conn.execute(sql, values)
-            self._conn.commit()
         except sqlite3.Error:
             log.exception(
                 "Failed to upsert item",
@@ -222,21 +221,12 @@ class TrackerDB:
             )
             return
 
-        if status == "exhausted":
-            log.info(
-                "Item marked as exhausted",
-                event="tracker.exhausted",
-                media_type=media_type,
-                identity=identity,
-                status=status,
-            )
-        else:
-            log.debug(
-                "Item status updated",
-                media_type=media_type,
-                identity=identity,
-                status=status,
-            )
+        log.debug(
+            "Item status updated",
+            media_type=media_type,
+            identity=identity,
+            status=status,
+        )
 
     def update_last_seen(self, media_type: str, identity: str, today: str) -> None:
         """Record that this item was present in the Kodi library on `today`."""
@@ -245,7 +235,6 @@ class TrackerDB:
                 "UPDATE items SET last_seen = ? WHERE media_type = ? AND identity = ?",
                 (today, media_type, identity),
             )
-            self._conn.commit()
         except sqlite3.Error:
             log.exception(
                 "Failed to update last_seen",
@@ -311,119 +300,6 @@ class TrackerDB:
     # Field status (Task 2.3)
     # ------------------------------------------------------------------
 
-    def set_field_status(
-        self,
-        media_type: str,
-        identity: str,
-        field: str,
-        status: str,
-        source: Optional[str] = None,
-        vote_count: Optional[int] = None,
-    ) -> None:
-        """Insert or update a field_status row for the given item and field.
-
-        Sets fetched_at to today's date when status is "filled". On update, a
-        None source/vote_count/fetched_at does NOT erase the existing value
-        (COALESCE): confirming a rating "checked" preserves the staleness
-        metadata (vote_count, fetched_at) recorded when it was last filled.
-        """
-        item_id = self._get_item_id(media_type, identity)
-        if item_id is None:
-            log.warning(
-                "Cannot update field status: item not found",
-                event="tracker.field_update",
-                media_type=media_type,
-                identity=identity,
-                field=field,
-            )
-            return
-
-        fetched_at = date.today().isoformat() if status == "filled" else None
-
-        try:
-            self._conn.execute(
-                "INSERT INTO field_status "
-                "(item_id, field, status, source, vote_count, fetched_at) "
-                "VALUES (?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(item_id, field) DO UPDATE SET "
-                "status = excluded.status, "
-                "source = COALESCE(excluded.source, field_status.source), "
-                "vote_count = COALESCE(excluded.vote_count, field_status.vote_count), "
-                "fetched_at = COALESCE(excluded.fetched_at, field_status.fetched_at)",
-                (item_id, field, status, source, vote_count, fetched_at),
-            )
-            self._conn.commit()
-        except sqlite3.Error:
-            log.exception(
-                "Failed to update field status",
-                event="tracker.error",
-                media_type=media_type,
-                identity=identity,
-                field=field,
-            )
-            return
-
-        log.debug(
-            "Field status updated",
-            event="tracker.field_update",
-            media_type=media_type,
-            identity=identity,
-            field=field,
-            status=status,
-        )
-
-    def record_field_attempt(
-        self, media_type: str, identity: str, field: str, next_retry: Optional[str] = None
-    ) -> None:
-        """Increment a field's attempt_count and set its next_retry.
-
-        Creates the field_status row (status 'empty') if it does not exist.
-        """
-        item_id = self._get_item_id(media_type, identity)
-        if item_id is None:
-            log.warning(
-                "Cannot record field attempt: item not found",
-                event="tracker.field_update",
-                media_type=media_type, identity=identity, field=field,
-            )
-            return
-        try:
-            self._conn.execute(
-                "INSERT INTO field_status (item_id, field, status, attempt_count, next_retry) "
-                "VALUES (?, ?, 'empty', 1, ?) "
-                "ON CONFLICT(item_id, field) DO UPDATE SET "
-                "attempt_count = field_status.attempt_count + 1, next_retry = excluded.next_retry",
-                (item_id, field, next_retry),
-            )
-            self._conn.commit()
-        except sqlite3.Error:
-            log.exception(
-                "Failed to record field attempt",
-                event="tracker.error",
-                media_type=media_type, identity=identity, field=field,
-            )
-
-    def set_field_next_retry(
-        self, media_type: str, identity: str, field: str, next_retry: Optional[str]
-    ) -> None:
-        """Set a field's next_retry value (no-op if the item/field is missing)."""
-        item_id = self._get_item_id(media_type, identity)
-        if item_id is None:
-            return
-        try:
-            self._conn.execute(
-                "UPDATE field_status SET next_retry = ? "
-                "WHERE item_id = ? AND field = ?",
-                (next_retry, item_id, field),
-            )
-            self._conn.commit()
-        except sqlite3.Error:
-            log.exception(
-                "Failed to set field next_retry",
-                event="tracker.error",
-                media_type=media_type, identity=identity, field=field,
-            )
-
     def get_field_status(
         self, media_type: str, identity: str, field: str
     ) -> Optional[Dict[str, Any]]:
@@ -458,6 +334,88 @@ class TrackerDB:
             "SELECT * FROM field_status WHERE item_id = ?", (item_id,)
         )
         return {row["field"]: dict(row) for row in cursor.fetchall()}
+
+    def record_field_fetch(
+        self,
+        media_type: str,
+        identity: str,
+        field: str,
+        next_retry: Optional[str],
+        source: Optional[str] = None,
+        vote_count: Optional[int] = None,
+    ) -> None:
+        """Record a successful sample: bump fetch_count, stamp fetched_at, set the
+        next due date and (optionally) source/vote_count. COALESCE keeps prior
+        source/vote_count when the new call passes None."""
+        item_id = self._get_item_id(media_type, identity)
+        if item_id is None:
+            return
+        today = date.today().isoformat()
+        try:
+            self._conn.execute(
+                "INSERT INTO field_status "
+                "(item_id, field, fetch_count, fetched_at, next_retry, source, vote_count) "
+                "VALUES (?, ?, 1, ?, ?, ?, ?) "
+                "ON CONFLICT(item_id, field) DO UPDATE SET "
+                "fetch_count = field_status.fetch_count + 1, "
+                "fetched_at = excluded.fetched_at, "
+                "next_retry = excluded.next_retry, "
+                "source = COALESCE(excluded.source, field_status.source), "
+                "vote_count = COALESCE(excluded.vote_count, field_status.vote_count)",
+                (item_id, field, today, next_retry, source, vote_count),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record field fetch",
+                event="tracker.error",
+                media_type=media_type,
+                identity=identity,
+                field=field,
+            )
+
+    def reset_field_clock(
+        self, media_type: str, identity: str, field: str, next_retry: Optional[str]
+    ) -> None:
+        """Re-baseline a field to its first sample (manual 'Update now').
+
+        Stores the supplied next_retry date so young content is re-sampled on
+        the normal schedule after a manual update, rather than being skipped
+        forever because NULL next_retry is treated as "not due" by decide_field.
+        """
+        item_id = self._get_item_id(media_type, identity)
+        if item_id is None:
+            return
+        today = date.today().isoformat()
+        try:
+            self._conn.execute(
+                "INSERT INTO field_status (item_id, field, fetch_count, fetched_at, next_retry) "
+                "VALUES (?, ?, 1, ?, ?) "
+                "ON CONFLICT(item_id, field) DO UPDATE SET "
+                "fetch_count = 1, fetched_at = excluded.fetched_at, next_retry = excluded.next_retry",
+                (item_id, field, today, next_retry),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to reset field clock",
+                event="tracker.error",
+                media_type=media_type,
+                identity=identity,
+                field=field,
+            )
+
+    def clear_field_status(self) -> int:
+        """Delete all field_status rows (the Reset-tracker action). Returns count."""
+        try:
+            cur = self._conn.execute("DELETE FROM field_status")
+            self._conn.commit()
+            return cur.rowcount
+        except sqlite3.Error:
+            log.exception("Failed to clear field status", event="tracker.error")
+            return 0
+
+    def commit(self) -> None:
+        """Commit the current transaction (callers batch one item's writes)."""
+        self._conn.commit()
 
     def get_show_id_map(self) -> Dict[str, str]:
         """Map TV show title to its show-level TMDB ID.
@@ -512,21 +470,6 @@ class TrackerDB:
                 media_type=media_type,
                 identity=identity,
             )
-
-    def reset_exhausted_fields(self) -> int:
-        """Reset all exhausted field_status rows back to empty/retriable.
-        Returns the number of fields reset."""
-        try:
-            cur = self._conn.execute(
-                "UPDATE field_status SET status = 'empty', attempt_count = 0, "
-                "next_retry = NULL WHERE status = 'exhausted'"
-            )
-            self._conn.commit()
-        except sqlite3.Error:
-            log.exception("Failed to reset exhausted fields", event="tracker.error")
-            return 0
-        log.info("Reset exhausted fields", event="tracker.reset_exhausted", count=cur.rowcount)
-        return cur.rowcount
 
     def set_scan_state(self, key: str, value: str) -> None:
         """Insert or replace a key-value pair in the scan_state table."""

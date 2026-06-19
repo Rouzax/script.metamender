@@ -9,6 +9,7 @@ from resources.lib.engine.resolve import (
     build_ratings,
     resolve_field,
     resolve_metadata,
+    wants_imdb,
 )
 
 
@@ -105,13 +106,13 @@ class TestResolveField:
 
 
 class TestResolveMetadata:
-    def test_rating_pref_applied_to_rating_and_votes(self) -> None:
+    def test_default_pref_applied_to_rating_and_votes(self) -> None:
         tmdb = {"rating": 7.0, "votes": 100, "plot": "TMDB plot"}
         imdb = {"rating": 8.0, "votes": 5000, "plot": "IMDb plot"}
 
         merged, sources = resolve_metadata(
             tmdb, imdb, ["rating", "votes", "plot"],
-            rating_pref=PREFER_IMDB, plot_pref=PREFER_TMDB,
+            plot_pref=PREFER_TMDB, default_pref=PREFER_IMDB,
         )
 
         assert merged["rating"] == 8.0
@@ -125,19 +126,19 @@ class TestResolveMetadata:
 
         merged, sources = resolve_metadata(
             tmdb, imdb, ["rating", "votes", "plot"],
-            rating_pref=PREFER_IMDB, plot_pref=PREFER_TMDB,
+            plot_pref=PREFER_TMDB, default_pref=PREFER_IMDB,
         )
 
         assert merged["plot"] == "TMDB plot"
         assert sources["plot"] == "tmdb"
 
-    def test_other_fields_prefer_tmdb(self) -> None:
+    def test_other_fields_use_default_pref(self) -> None:
         tmdb = {"directors": ["TMDB Dir"], "genres": ["TMDB Genre"]}
         imdb = {"directors": ["IMDb Dir"], "genres": ["IMDb Genre"]}
 
         merged, sources = resolve_metadata(
             tmdb, imdb, ["directors", "genres"],
-            rating_pref=PREFER_IMDB, plot_pref=PREFER_IMDB,
+            plot_pref=PREFER_IMDB, default_pref=PREFER_TMDB,
         )
 
         assert merged["directors"] == ["TMDB Dir"]
@@ -151,7 +152,7 @@ class TestResolveMetadata:
 
         merged, sources = resolve_metadata(
             tmdb, imdb, ["directors"],
-            rating_pref=PREFER_TMDB, plot_pref=PREFER_TMDB,
+            plot_pref=PREFER_TMDB, default_pref=PREFER_TMDB,
         )
 
         assert merged["directors"] == ["IMDb Dir"]
@@ -162,7 +163,7 @@ class TestResolveMetadata:
 
         merged, sources = resolve_metadata(
             None, imdb, ["rating", "votes", "plot"],
-            rating_pref=PREFER_TMDB, plot_pref=PREFER_TMDB,
+            plot_pref=PREFER_TMDB, default_pref=PREFER_TMDB,
         )
 
         assert merged["rating"] == 8.0
@@ -173,7 +174,7 @@ class TestResolveMetadata:
 
         merged, sources = resolve_metadata(
             tmdb, None, ["rating", "votes"],
-            rating_pref=PREFER_IMDB, plot_pref=PREFER_TMDB,
+            plot_pref=PREFER_TMDB, default_pref=PREFER_IMDB,
         )
 
         assert merged["rating"] == 7.0
@@ -182,7 +183,7 @@ class TestResolveMetadata:
     def test_handles_both_none(self) -> None:
         merged, sources = resolve_metadata(
             None, None, ["rating", "plot"],
-            rating_pref=PREFER_TMDB, plot_pref=PREFER_TMDB,
+            plot_pref=PREFER_TMDB, default_pref=PREFER_TMDB,
         )
 
         assert merged == {}
@@ -194,7 +195,7 @@ class TestResolveMetadata:
 
         merged, sources = resolve_metadata(
             tmdb, imdb, ["rating"],
-            rating_pref=PREFER_TMDB, plot_pref=PREFER_TMDB,
+            plot_pref=PREFER_TMDB, default_pref=PREFER_TMDB,
         )
 
         assert "rating" in merged
@@ -208,7 +209,7 @@ class TestResolveMetadata:
 
         merged, sources = resolve_metadata(
             tmdb, imdb, ["rating", "votes"],
-            rating_pref=TMDB_ONLY, plot_pref=TMDB_ONLY,
+            plot_pref=TMDB_ONLY, default_pref=TMDB_ONLY,
         )
 
         assert merged["rating"] == 7.0
@@ -220,7 +221,7 @@ class TestResolveMetadata:
 
         merged, sources = resolve_metadata(
             tmdb, imdb, ["rating", "votes"],
-            rating_pref=IMDB_ONLY, plot_pref=IMDB_ONLY,
+            plot_pref=IMDB_ONLY, default_pref=IMDB_ONLY,
         )
 
         assert merged["rating"] == 8.0
@@ -311,3 +312,30 @@ def test_build_ratings_skips_zero_and_out_of_range():
 def test_build_ratings_no_candidates_returns_none():
     m, src, votes = build_ratings({}, {}, {"trakt": {"rating": 6.0, "votes": 5}}, PREFER_TMDB)
     assert m is None
+
+
+# =============================================================================
+# Tests: wants_imdb
+# =============================================================================
+
+
+def test_default_pref_governs_nonplot_fields():
+    merged, src = resolve_metadata(
+        {"genres": ["A"]}, {"genres": ["B"]}, ["genres", "plot"],
+        plot_pref=PREFER_TMDB, default_pref=PREFER_IMDB,
+    )
+    assert merged["genres"] == ["B"] and src["genres"] == "imdb"
+
+
+def test_plot_pref_independent_of_default():
+    merged, src = resolve_metadata(
+        {"plot": "T"}, {"plot": "I"}, ["plot"],
+        plot_pref=PREFER_IMDB, default_pref=TMDB_ONLY,
+    )
+    assert merged["plot"] == "I"
+
+
+def test_wants_imdb_true_if_any_setting_wants_it():
+    assert wants_imdb(TMDB_ONLY, TMDB_ONLY, PREFER_IMDB) is True
+    assert wants_imdb(TMDB_ONLY, TMDB_ONLY, TMDB_ONLY) is False
+    assert wants_imdb(PREFER_TMDB, TMDB_ONLY, TMDB_ONLY) is True

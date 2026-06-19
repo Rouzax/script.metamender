@@ -56,19 +56,18 @@
 - [x] 7b.8 Bug fix: first-encounter runs for all items (not just zero-gap), skip same-value writes, "checked" fields count as resolved
 
 ## Phase 7c: Per-field maturity and refresh model
-Detailed design captured in TODO.md (DESIGN DECISION: per-field maturity model
-ending in `final`). Needs a brainstorm + its own plan before implementation.
-Slotted before Phase 8 so certifications are ported into the finished refresh
-model rather than retrofitted. Reverses the empty-only overwrite guard (A2) and
-generalizes rating-only staleness to every field.
-- [ ] 7c.1 Brainstorm + write plan (per-field maturity state machine, `final` with two outcomes)
-- [ ] 7c.2 Generalize staleness into a per-field "volatile / due to refetch" decision (content age + attempt count + last_fetched); nest the rating vote-count rule inside it
-- [ ] 7c.3 Refresh writes: drop the empty-only guard for the refresh path; overwrite-on-diff within the source's language; keep the same-value write-skip
-- [ ] 7c.4 field_status state model: add `final` (value / empty outcomes), retire/rename `exhausted`; item rollup = all fields `final`
-- [ ] 7c.5 Manual scan reset: "Update now" ignores `final`, pulls latest, resets per-field clock (attempt_count -> 1, recompute next_retry, fetched_at=today); folds in candidate bugs #1 (disabled-source silent skip) and #2 (playback block) on the manual path
-- [ ] 7c.6 Rescope + relabel settings (stale_threshold_days, max_retries, RETRY_INTERVALS) from rating-only to all fields
-- [ ] 7c.7 Tests + live Kodi validation (maturity ladder, age-based one-shot finalize, manual reset)
-- [ ] 7c.8 Update design specs (engine/storage/settings/overview) + add "superseded by maturity model" pointers to the write-correctness and retry-exhaustion plans
+Implemented on branch feat/7c-field-maturity (12 commits). Content-age-driven
+per-field maturity: facts (fetch_count/fetched_at/next_retry) stored, maturity
+computed; refresh-on-diff replaces the empty-only guard; old code (status machine,
+staleness.py, retry ladder) removed. 344 unit tests green; live suite refreshed.
+- [x] 7c.1 Brainstorm + write plan (per-field maturity state machine, `final` with two outcomes)
+- [x] 7c.2 Generalize staleness into a per-field "volatile / due to refetch" decision (content age + fetch count); content-age finish line, schedule + settle-capture
+- [x] 7c.3 Refresh writes: drop the empty-only guard; overwrite-on-diff; keep the same-value write-skip
+- [x] 7c.4 field_status state model: facts not verdicts; maturity computed (FINAL / FINAL_EMPTY); old status machine removed
+- [x] 7c.5 Manual scan reset: "Update now" ignores `final`, pulls latest, re-baselines the per-field clock; fixes bugs #1 (disabled-source silent skip) and #2 (playback block)
+- [x] 7c.6 Rescope + relabel settings: `default_source` spinner, `refetch_schedule` string, `reset_tracker` action; dropped max_retries / min_votes
+- [x] 7c.7 Tests + live Kodi validation (maturity ladder, age-based one-shot finalize, manual reset, refresh-on-diff, SKIP_NOT_DUE)
+- [ ] 7c.8 Doc sync follow-up: new design spec written (docs/superpowers/specs/2026-06-19-field-maturity-model-design.md); still TODO: update the eucert master specs (engine/storage/settings/overview) + add "superseded by maturity model" pointers to the write-correctness and retry-exhaustion plans
 
 ## Phase 8: Port Certification Module
 - [ ] 8.1 Port presets and config (country JSON presets, load/inference/seed)

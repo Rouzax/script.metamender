@@ -30,7 +30,6 @@ import xbmcvfs
 from resources.lib.constants import (
     BACKFILL_DB_FILENAME,
     DEFAULT_ADDON_ID,
-    DEFAULT_MAX_RETRIES,
     DEFAULT_SCAN_INTERVAL_HOURS,
     LIBRARY_SCAN_DEBOUNCE_SEC,
     SCAN_FAILURE_BACKOFF_SEC,
@@ -117,9 +116,8 @@ def _load_settings() -> Dict[str, Any]:
     """Read all settings needed by the scan engine.
 
     Returns:
-        Dict with tmdb_api_key, rating_source, plot_source,
-        enabled_fields (FrozenSet), min_votes_movie,
-        min_votes_episode, stale_threshold_days, max_retries,
+        Dict with tmdb_api_key, rating_source, plot_source, default_source,
+        enabled_fields (FrozenSet), stale_threshold_days, refetch_schedule,
         rate_limit, scan_interval, show_notifications, and
         resume_interrupted.
     """
@@ -133,11 +131,10 @@ def _load_settings() -> Dict[str, Any]:
         "tmdb_api_key": get_setting("tmdb_api_key"),
         "rating_source": get_int_setting("rating_source", 0),
         "plot_source": get_int_setting("plot_source", 0),
+        "default_source": get_int_setting("default_source", 0),
         "enabled_fields": frozenset(fields),
-        "min_votes_movie": get_int_setting("min_votes_movie", 50),
-        "min_votes_episode": get_int_setting("min_votes_episode", 20),
         "stale_threshold_days": get_int_setting("stale_threshold_days", 365),
-        "max_retries": get_int_setting("max_retries", DEFAULT_MAX_RETRIES),
+        "refetch_schedule": get_setting("refetch_schedule"),
         "rate_limit": get_float_setting("rate_limit", 0.25),
         "scan_interval": get_int_setting("scan_interval", DEFAULT_SCAN_INTERVAL_HOURS),
         "show_notifications": get_bool_setting("show_notifications"),
@@ -295,9 +292,10 @@ def _select_trigger(
     """Decide whether to scan this tick and why.
 
     A due scheduled scan takes precedence over a library event in the same
-    tick: the scheduled scan is full (staleness + retries) and also covers the
-    newly added items, so the pending event is satisfied by it. Only fall back
-    to a targeted library-event scan when no scheduled scan is due.
+    tick: the scheduled scan re-evaluates maturity for every item and also
+    covers the newly added items, so the pending event is satisfied by it.
+    Only fall back to a targeted library-event scan when no scheduled scan
+    is due.
 
     Returns (should_scan, reason) where reason is "scheduled" or "library_event".
     """

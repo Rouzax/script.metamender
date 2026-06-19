@@ -1,7 +1,7 @@
-"""Tests for entry-point action handlers (reset_exhausted, A20/D12)."""
+"""Tests for entry-point action handlers (reset_tracker, update_now)."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,7 +21,9 @@ _LANG = {
     32347: "Update failed",
     32350: "Updated: {}",
     32351: "No changes: {}",
-    32352: "Reset {} exhausted fields",
+    32360: "Reset tracker?",
+    32361: "This will clear all field status records so the next scan re-fetches everything.",
+    32362: "Reset complete: {} fields cleared",
 }
 
 
@@ -31,9 +33,9 @@ def _fake_lang(string_id):
 
 @pytest.fixture
 def patched(monkeypatch: pytest.MonkeyPatch):
-    """Patch everything actions.reset_exhausted() touches."""
+    """Patch everything actions.reset_tracker() touches."""
     tracker = MagicMock()
-    tracker.reset_exhausted_fields = MagicMock(return_value=3)
+    tracker.clear_field_status = MagicMock(return_value=3)
     tracker_cls = MagicMock(return_value=tracker)
     notify = MagicMock()
     acquire = MagicMock(return_value=True)
@@ -54,33 +56,53 @@ def patched(monkeypatch: pytest.MonkeyPatch):
     }
 
 
-def test_reset_exhausted_calls_tracker_and_notifies(patched):
-    actions.reset_exhausted()
-    patched["tracker"].reset_exhausted_fields.assert_called_once_with()
+# ---------------------------------------------------------------------------
+# reset_tracker (settings action: clear all field_status rows)
+# ---------------------------------------------------------------------------
+
+
+def test_reset_tracker_clears_field_status(patched, kodi_stubs):
+    import xbmcgui
+    xbmcgui.Dialog.return_value.yesno.return_value = True
+    actions.reset_tracker()
+    assert xbmcgui.Dialog.return_value.yesno.called
+    patched["tracker"].clear_field_status.assert_called_once_with()
     patched["notify"].assert_called_once()
     message = patched["notify"].call_args[0][0]
     assert "3" in message
     patched["tracker"].close.assert_called_once_with()
 
 
-def test_reset_exhausted_closes_tracker_on_error(patched):
-    patched["tracker"].reset_exhausted_fields.side_effect = RuntimeError("boom")
-    actions.reset_exhausted()  # should not raise
+def test_reset_tracker_cancelled_when_user_declines(patched, kodi_stubs):
+    import xbmcgui
+    xbmcgui.Dialog.return_value.yesno.return_value = False
+    actions.reset_tracker()
+    patched["tracker_cls"].assert_not_called()
+    patched["notify"].assert_not_called()
+
+
+def test_reset_tracker_closes_tracker_on_error(patched, kodi_stubs):
+    import xbmcgui
+    xbmcgui.Dialog.return_value.yesno.return_value = True
+    patched["tracker"].clear_field_status.side_effect = RuntimeError("boom")
+    actions.reset_tracker()  # should not raise
     patched["tracker"].close.assert_called_once_with()
     patched["notify"].assert_not_called()
 
 
-def test_reset_exhausted_skips_when_scan_running(patched):
+def test_reset_tracker_skips_when_scan_running(patched, kodi_stubs):
     """If the scan lock is held, reset must not touch the tracker."""
+    import xbmcgui
+    xbmcgui.Dialog.return_value.yesno.return_value = True
     patched["acquire"].return_value = False
-    actions.reset_exhausted()
+    actions.reset_tracker()
     patched["tracker_cls"].assert_not_called()
-    patched["tracker"].reset_exhausted_fields.assert_not_called()
+    patched["tracker"].clear_field_status.assert_not_called()
     patched["notify"].assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# update_now (D3 "Update now" force scan)
+# update_now (D3 "Update now" reset scan)
 # ---------------------------------------------------------------------------
 
 
@@ -124,12 +146,12 @@ def update_patched(monkeypatch: pytest.MonkeyPatch):
     }
 
 
-def test_update_now_movie_runs_force_scan(update_patched):
+def test_update_now_movie_runs_reset_scan(update_patched):
     actions.update_now("movie", "7")
     update_patched["get_item_by_id"].assert_called_once()
     update_patched["run_scan"].assert_called_once()
     _, kwargs = update_patched["run_scan"].call_args
-    assert kwargs["force"] is True
+    assert kwargs["reset"] is True
     assert kwargs["items"] == [{"title": "Air", "movieid": 7}]
     update_patched["notify"].assert_called_once()
     update_patched["release"].assert_called_once_with()
@@ -168,7 +190,7 @@ def test_update_now_episode_builds_show_id_map(update_patched):
     update_patched["build_show_id_map"].assert_called_once()
     _, kwargs = update_patched["run_scan"].call_args
     assert kwargs["show_id_map"] == {"Some Show": "555"}
-    assert kwargs["force"] is True
+    assert kwargs["reset"] is True
 
 
 def test_update_now_no_changes_notifies(update_patched):
@@ -176,3 +198,42 @@ def test_update_now_no_changes_notifies(update_patched):
     actions.update_now("movie", "7")
     msg = update_patched["notify"].call_args[0][0]
     assert "No changes" in msg or "no changes" in msg.lower()
+
+
+@patch("resources.lib.service.actions.run_scan")
+@patch("resources.lib.service.actions.get_item_by_id")
+def test_update_now_runs_on_disabled_source(mock_get, mock_scan, kodi_stubs, settings_mock):
+    """Source disabled in config: the reset path must still run a scan."""
+    from resources.lib.service import actions as _actions
+
+    # Wire up the minimal set of dependencies that update_now touches
+    # before calling run_scan (lock, db path, sources config, settings).
+    with patch.object(_actions, "acquire_scan_lock", return_value=True), \
+         patch.object(_actions, "release_scan_lock"), \
+         patch.object(_actions, "TrackerDB"), \
+         patch.object(_actions, "_get_db_path", return_value=":memory:"), \
+         patch.object(_actions, "_get_sources_config_path", return_value="s.json"), \
+         patch.object(_actions, "load_source_config",
+                      return_value={"sources": [], "default_language": "en-US"}), \
+         patch.object(_actions, "_load_settings", return_value={
+             "tmdb_api_key": "key",
+             "enabled_fields": frozenset({"plot"}),
+             "rate_limit": 0.0,
+         }), \
+         patch.object(_actions, "notify"), \
+         patch.object(_actions, "lang", _fake_lang), \
+         patch.object(_actions, "get_bool_setting", return_value=False), \
+         patch.object(_actions.StructuredLogger, "initialize", MagicMock()):
+
+        mock_get.return_value = {
+            "movieid": 1,
+            "title": "X",
+            "file": "smb://disabled/x.mkv",
+            "uniqueid": {"tmdb": "1"},
+        }
+        mock_scan.return_value = {"updated": 1}
+
+        _actions.update_now("movie", "1")
+
+    assert mock_scan.called, "run_scan was not called even though source is disabled"
+    assert mock_scan.call_args.kwargs.get("reset") is True
