@@ -4,5 +4,5 @@
     "typeCheckingMode": "standard",
     "reportMissingImports": "warning",
     "reportAttributeAccessIssue": "error",
-    "exclude": ["**/__pycache__", ".worktrees", "_temp", "build", "tests"]
+    "exclude": ["**/__pycache__", ".worktrees", "_temp", "build", "tests", "docker"]
 }
