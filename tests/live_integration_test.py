@@ -160,21 +160,25 @@ def _default_settings(**overrides: Any) -> Dict[str, Any]:
     return base
 
 
+_ALL_FIELDS = frozenset({
+    "rating", "plot", "tagline", "director", "writer",
+    "genre", "studio", "country", "trailer", "runtime", "title",
+})
+
+
 def run_targeted_scan(
     media_type: Any,
     items: List[Dict[str, Any]],
     tracker: Any,
     show_id_map: Optional[Dict[str, str]] = None,
+    enabled_fields: Optional[Any] = None,
 ) -> Dict[str, Any]:
     from resources.lib.engine.scan import run_scan
     return run_scan(
         media_type=media_type,
         tracker=tracker,
         source_config={"sources": [], "default_language": "en-US"},
-        enabled_fields=frozenset({
-            "rating", "plot", "tagline", "director", "writer",
-            "genre", "studio", "country", "trailer", "runtime", "title",
-        }),
+        enabled_fields=_ALL_FIELDS if enabled_fields is None else enabled_fields,
         tmdb_api_key=TMDB_KEY,
         settings=_default_settings(),
         items=items,
@@ -192,6 +196,7 @@ def run_scan_with_settings(
     refetch_schedule="7,30,90",
     stale_threshold_days=365,
     reset=False,
+    enabled_fields=None,
 ):
     # type: (...) -> Dict[str, Any]
     from resources.lib.engine.scan import run_scan
@@ -199,10 +204,7 @@ def run_scan_with_settings(
         media_type=media_type,
         tracker=tracker,
         source_config={"sources": [], "default_language": "en-US"},
-        enabled_fields=frozenset({
-            "rating", "plot", "tagline", "director", "writer",
-            "genre", "studio", "country", "trailer", "runtime", "title",
-        }),
+        enabled_fields=_ALL_FIELDS if enabled_fields is None else enabled_fields,
         tmdb_api_key=TMDB_KEY,
         settings=_default_settings(
             rating_source=rating_source,
@@ -1292,6 +1294,9 @@ def test_23_idempotent_rescan(t):
         scan_mod.tmdb_fetch_movie = counting_tmdb
         try:
             item2 = get_movie(6)
+            # Young content so the field stays volatile and a due refetch happens
+            # (the real "Air" premiered is years ago, which would finalize it).
+            item2["premiered"] = (date.today() - timedelta(days=1)).isoformat()
             stats2 = run_scan_with_settings(MOVIE, [item2], tracker)
         finally:
             scan_mod.tmdb_fetch_movie = orig_tmdb
@@ -1346,6 +1351,8 @@ def test_24_selective_field_update(t):
         tracker._conn.commit()
 
         item2 = get_movie(6)
+        # Young content so the past-due field refetches (real "Air" is old -> FINAL).
+        item2["premiered"] = (date.today() - timedelta(days=1)).isoformat()
         run_scan_with_settings(MOVIE, [item2], tracker)
 
         after2 = get_movie(6)
@@ -1838,7 +1845,10 @@ def test_33_skip_not_due(t):
 
     scan_mod.tmdb_fetch_movie = counting_tmdb
     try:
-        stats = run_targeted_scan(MOVIE, [item], tracker)
+        # Scope to only the pre-seeded field, so the item-level decision reflects
+        # plot's SKIP_NOT_DUE (other fields would be first-encounter and fetch).
+        stats = run_targeted_scan(MOVIE, [item], tracker,
+                                  enabled_fields=frozenset({"plot"}))
     finally:
         scan_mod.tmdb_fetch_movie = orig_tmdb
 
