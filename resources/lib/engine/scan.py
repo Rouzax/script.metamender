@@ -38,7 +38,7 @@ from resources.lib.constants import (
 )
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.gaps import is_field_empty, is_placeholder_title
-from resources.lib.engine.resolve import TMDB_ONLY, build_ratings, resolve_metadata
+from resources.lib.engine.resolve import PREFER_TMDB, TMDB_ONLY, build_ratings, resolve_metadata
 from resources.lib.engine.staleness import compute_next_retry, is_rating_stale
 from resources.lib.providers.imdbapi import (
     fetch_episode as imdb_fetch_episode,
@@ -988,7 +988,7 @@ def run_scan(
         else:
             merged_data, source_map = resolve_metadata(
                 tmdb_data, imdb_data, _RESOLVE_FIELDS,
-                ctx.rating_source, ctx.plot_source,
+                ctx.plot_source, PREFER_TMDB,
             )
 
         # Extract writable non-rating fields, then build the named-slot ratings map.
