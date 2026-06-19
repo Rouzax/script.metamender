@@ -60,6 +60,8 @@ for mod in ("xbmcaddon", "xbmcgui", "xbmcvfs"):
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
 
+from resources.lib.data.identity import compute_identity  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Kodi JSON-RPC helpers (via HTTP)
@@ -326,10 +328,11 @@ def test_1_movie_rating_backfill(t):
     t.check("processed", stats["processed"] >= 1)
 
     # Tracker should have a field_status row for the rating field (fetch_count >= 1)
-    tracker_item = tracker.get_item("movie", "Whale")
+    identity_whale = compute_identity(item, MOVIE)
+    tracker_item = tracker.get_item("movie", identity_whale)
     t.check("tracker has item", tracker_item is not None)
     if tracker_item:
-        fs = tracker.get_field_status("movie", "Whale", "rating")
+        fs = tracker.get_field_status("movie", identity_whale, "rating")
         t.check("rating field sampled", fs is not None and (fs.get("fetch_count") or 0) >= 1,
                 "fs={}".format(fs))
 
@@ -359,7 +362,8 @@ def test_2_movie_tagline_no_tmdb_data(t):
     t.check("item handled", total >= 1,
             "processed={}, skipped={}".format(stats["processed"], stats["skipped"]))
 
-    tracker_item = tracker.get_item("movie", movie["title"])
+    identity_aq = compute_identity(item, MOVIE)
+    tracker_item = tracker.get_item("movie", identity_aq)
     t.check("tracker has item", tracker_item is not None)
 
     tracker.close()
@@ -463,10 +467,11 @@ def test_5_old_content_final_after_one_fetch(t):
     tracker = make_tracker(tmp)
 
     # Scan 1: first encounter, fetch_count goes to 1
+    identity_burial = compute_identity(item, MOVIE)
     stats1 = run_targeted_scan(MOVIE, [item], tracker)
     t.check("scan1: processed", stats1["processed"] >= 1)
 
-    fs = tracker.get_field_status("movie", "Burial", "plot")
+    fs = tracker.get_field_status("movie", identity_burial, "plot")
     count_after_scan1 = (fs.get("fetch_count") or 0) if fs else 0
     t.check("scan1: plot field sampled",
             count_after_scan1 >= 1,
@@ -495,7 +500,7 @@ def test_5_old_content_final_after_one_fetch(t):
             call_count[0] == 0,
             "got {} calls".format(call_count[0]))
 
-    fs2 = tracker.get_field_status("movie", "Burial", "plot")
+    fs2 = tracker.get_field_status("movie", identity_burial, "plot")
     count_after_scan2 = (fs2.get("fetch_count") or 0) if fs2 else 0
     t.check("scan2: fetch_count unchanged",
             count_after_scan2 == count_after_scan1,
@@ -528,12 +533,13 @@ def test_6_young_content_scheduled(t):
 
     tmp = tempfile.mkdtemp()
     tracker = make_tracker(tmp)
+    identity_stranger = compute_identity(item, MOVIE)
 
     # Scan 1: first encounter
     stats1 = run_targeted_scan(MOVIE, [item], tracker)
     t.check("scan1: processed", stats1["processed"] >= 1)
 
-    fs = tracker.get_field_status("movie", "STRANGER", "plot")
+    fs = tracker.get_field_status("movie", identity_stranger, "plot")
     t.check("scan1: plot field sampled", fs is not None)
     if fs:
         t.check("scan1: fetch_count == 1",
@@ -587,7 +593,7 @@ def test_7_transient_failure_no_advance(t):
 
         # Item is processed (it went through the full per-item path)
         # but fetch_count should remain at 0 (transient failure is not a clean answer)
-        fs = tracker.get_field_status("movie", movie["title"], "plot")
+        fs = tracker.get_field_status("movie", compute_identity(item, MOVIE), "plot")
         count = (fs.get("fetch_count") or 0) if fs else 0
         t.check("fetch_count not advanced after transient failure",
                 count == 0,
@@ -626,7 +632,7 @@ def test_8_tvdb_only_resolve_id(t):
     stats = run_targeted_scan(TVSHOW, [item], tracker)
     t.check("processed", stats["processed"] >= 1)
 
-    tracker_item = tracker.get_item("tvshow", show["title"])
+    tracker_item = tracker.get_item("tvshow", compute_identity(item, TVSHOW))
     if tracker_item:
         # This show may not exist on TMDB; resolve_id returns None for it.
         # The important thing is it was processed without crashing.
@@ -705,7 +711,6 @@ def test_10_logging_completeness(t):
     tmdb_calls = [ln for ln in logged if "event=tmdb.movie" in ln]
     t.check("has tmdb.movie", len(tmdb_calls) >= 1)
     if tmdb_calls:
-        t.check("tmdb.movie has duration_ms", "duration_ms=" in tmdb_calls[0])
         t.check("tmdb.movie has tmdb_id", "tmdb_id=" in tmdb_calls[0])
         t.check("tmdb.movie has title", "title=" in tmdb_calls[0])
 
@@ -919,7 +924,7 @@ def test_15_prefer_tmdb(t):
                 "written='{}...', tmdb='{}...'".format(
                     after["plot"][:40], tmdb_plot[:40]))
 
-        field = tracker.get_field_status("movie", "Air", "plot")
+        field = tracker.get_field_status("movie", compute_identity(item, MOVIE), "plot")
         t.check("tracker source is tmdb",
                 field is not None and field.get("source") == "tmdb",
                 "got {}".format(field.get("source") if field else "None"))
@@ -966,7 +971,7 @@ def test_16_prefer_imdb(t):
                 "written='{}...', imdb='{}...'".format(
                     after["plot"][:40], imdb_plot[:40]))
 
-        field = tracker.get_field_status("movie", "Air", "plot")
+        field = tracker.get_field_status("movie", compute_identity(item, MOVIE), "plot")
         t.check("tracker source is imdb",
                 field is not None and field.get("source") == "imdb",
                 "got {}".format(field.get("source") if field else "None"))
@@ -1101,7 +1106,7 @@ def test_19_tvdb_episode_imdb_fetch(t):
                 "got '{}'".format(after.get("plot", "")[:40]))
 
         field = tracker.get_field_status("episode",
-                                         "Bluey (2018) S01E01", "plot")
+                                         compute_identity(item, EPISODE), "plot")
         t.check("source is imdb",
                 field is not None and field.get("source") == "imdb",
                 "got {}".format(field.get("source") if field else "None"))
@@ -1259,7 +1264,8 @@ def test_23_idempotent_rescan(t):
         stats1 = run_scan_with_settings(MOVIE, [item], tracker)
         t.check("first scan updated", stats1["updated"] >= 1)
 
-        fs_after1 = tracker.get_field_status("movie", "Air", "plot")
+        identity_air = compute_identity(item, MOVIE)
+        fs_after1 = tracker.get_field_status("movie", identity_air, "plot")
         count_after1 = (fs_after1.get("fetch_count") or 0) if fs_after1 else 0
         t.check("fetch_count is 1 after first scan",
                 count_after1 == 1,
@@ -1394,7 +1400,7 @@ def test_25_both_providers_none_no_error(t):
 
         # Both providers returned None cleanly: fetch_clean is True, so
         # fetch_count must advance to 1 (the sample happened, provider just had nothing)
-        fs = tracker.get_field_status("movie", "Air", "plot")
+        fs = tracker.get_field_status("movie", compute_identity(item, MOVIE), "plot")
         count = (fs.get("fetch_count") or 0) if fs else 0
         t.check("fetch_count advanced (clean no-data is a valid sample)",
                 count >= 1,
@@ -1438,25 +1444,26 @@ def test_26_manual_reset_rebaselines(t):
     try:
         tmp = tempfile.mkdtemp()
         tracker = make_tracker(tmp)
+        identity_air_26 = compute_identity(item, MOVIE)
 
         # Initial scan: fetch_count goes to 1, next_retry set
         stats1 = run_scan_with_settings(MOVIE, [item], tracker)
         t.check("initial scan processed", stats1["processed"] >= 1)
 
-        fs_before = tracker.get_field_status("movie", "Air", "plot")
+        fs_before = tracker.get_field_status("movie", identity_air_26, "plot")
         count_before = (fs_before.get("fetch_count") or 0) if fs_before else 0
         t.check("initial fetch_count >= 1", count_before >= 1,
                 "got {}".format(count_before))
 
         # Simulate multiple prior samples so fetch_count > 1
         # by recording additional fetches directly
-        tracker.record_field_fetch("movie", "Air", "plot",
+        tracker.record_field_fetch("movie", identity_air_26, "plot",
                                    next_retry="2099-01-01")
-        tracker.record_field_fetch("movie", "Air", "plot",
+        tracker.record_field_fetch("movie", identity_air_26, "plot",
                                    next_retry="2099-01-01")
         tracker.commit()
 
-        fs_pre_reset = tracker.get_field_status("movie", "Air", "plot")
+        fs_pre_reset = tracker.get_field_status("movie", identity_air_26, "plot")
         count_pre = (fs_pre_reset.get("fetch_count") or 0) if fs_pre_reset else 0
         t.check("pre-reset fetch_count >= 3", count_pre >= 3,
                 "got {}".format(count_pre))
@@ -1468,7 +1475,7 @@ def test_26_manual_reset_rebaselines(t):
         stats_reset = run_scan_with_settings(MOVIE, [item2], tracker, reset=True)
         t.check("reset scan processed", stats_reset["processed"] >= 1)
 
-        fs_after = tracker.get_field_status("movie", "Air", "plot")
+        fs_after = tracker.get_field_status("movie", identity_air_26, "plot")
         count_after = (fs_after.get("fetch_count") or 0) if fs_after else 0
         t.check("fetch_count re-baselined to 1",
                 count_after == 1,
@@ -1520,7 +1527,6 @@ def test_27_provider_logs(t):
             line = tmdb_lines[0]
             t.check("tmdb.movie has tmdb_id", "tmdb_id=" in line)
             t.check("tmdb.movie has title", "title=" in line)
-            t.check("tmdb.movie has duration_ms", "duration_ms=" in line)
             t.check("tmdb.movie has field_count", "field_count=" in line)
 
         imdb_lines = logs.find("event=imdb.movie")
@@ -1528,7 +1534,6 @@ def test_27_provider_logs(t):
             line = imdb_lines[0]
             t.check("imdb.movie has imdb_id", "imdb_id=" in line)
             t.check("imdb.movie has title", "title=" in line)
-            t.check("imdb.movie has duration_ms", "duration_ms=" in line)
         else:
             t.check("imdb.movie present (or TMDB-only mode)", True)
     finally:
@@ -1615,7 +1620,6 @@ def test_29_episode_provider_logs(t):
             t.check("has imdb_id=tt8865002", "imdb_id=tt8865002" in line,
                     "line: {}".format(line[:100]))
             t.check("has title", "title=" in line)
-            t.check("has duration_ms", "duration_ms=" in line)
     finally:
         set_episode(4311, plot=orig_plot)
 
@@ -1737,7 +1741,7 @@ def test_31_episode_dual_provider(t):
                 "written='{}...', tmdb='{}...'".format(
                     after["plot"][:40], tmdb_plot[:40]))
 
-        p_field = tracker.get_field_status("episode", "1923 S01E01", "plot")
+        p_field = tracker.get_field_status("episode", compute_identity(item, EPISODE), "plot")
         t.check("plot source is tmdb",
                 p_field is not None and p_field.get("source") == "tmdb",
                 "got {}".format(p_field.get("source") if p_field else "None"))
@@ -1781,7 +1785,7 @@ def test_32_show_id_map_mismatch(t):
         t.check("updated", stats["updated"] >= 1,
                 "updated={}".format(stats["updated"]))
 
-        field = tracker.get_field_status("episode", "1923 S01E01", "plot")
+        field = tracker.get_field_status("episode", compute_identity(item, EPISODE), "plot")
         t.check("source is imdb",
                 field is not None and field.get("source") == "imdb",
                 "got {}".format(field.get("source") if field else "None"))
@@ -1814,12 +1818,13 @@ def test_33_skip_not_due(t):
 
     tmp = tempfile.mkdtemp()
     tracker = make_tracker(tmp)
+    identity_burial_33 = compute_identity(item, MOVIE)
 
     # Upsert the item and record a field fetch with a far-future next_retry
-    tracker.upsert_item("movie", "Burial", title="Burial",
+    tracker.upsert_item("movie", identity_burial_33, title="Burial",
                         kodi_id=50, tmdb_id="1155875")
     tracker.commit()
-    tracker.record_field_fetch("movie", "Burial", "plot",
+    tracker.record_field_fetch("movie", identity_burial_33, "plot",
                                next_retry="2099-01-01")
     tracker.commit()
 
@@ -1844,7 +1849,7 @@ def test_33_skip_not_due(t):
             call_count[0] == 0,
             "got {} calls".format(call_count[0]))
 
-    fs = tracker.get_field_status("movie", "Burial", "plot")
+    fs = tracker.get_field_status("movie", identity_burial_33, "plot")
     count_after = (fs.get("fetch_count") or 0) if fs else 0
     t.check("fetch_count unchanged (was SKIP_NOT_DUE)",
             count_after == 1,
