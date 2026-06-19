@@ -117,8 +117,7 @@ def _load_settings() -> Dict[str, Any]:
 
     Returns:
         Dict with tmdb_api_key, rating_source, plot_source, default_source,
-        enabled_fields (FrozenSet), min_votes_movie,
-        min_votes_episode, stale_threshold_days, refetch_schedule,
+        enabled_fields (FrozenSet), stale_threshold_days, refetch_schedule,
         rate_limit, scan_interval, show_notifications, and
         resume_interrupted.
     """
@@ -134,8 +133,6 @@ def _load_settings() -> Dict[str, Any]:
         "plot_source": get_int_setting("plot_source", 0),
         "default_source": get_int_setting("default_source", 0),
         "enabled_fields": frozenset(fields),
-        "min_votes_movie": get_int_setting("min_votes_movie", 50),
-        "min_votes_episode": get_int_setting("min_votes_episode", 20),
         "stale_threshold_days": get_int_setting("stale_threshold_days", 365),
         "refetch_schedule": get_setting("refetch_schedule"),
         "rate_limit": get_float_setting("rate_limit", 0.25),

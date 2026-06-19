@@ -471,3 +471,63 @@ msgstr ""
 msgctxt "#32352"
 msgid "Reset {} exhausted fields"
 msgstr ""
+
+# --- Reset tracker dialog (32360-32362) ---
+
+msgctxt "#32360"
+msgid "Reset tracker?"
+msgstr ""
+
+msgctxt "#32361"
+msgid "Clear all maturity tracking and refetch every field on the next scan?"
+msgstr ""
+
+msgctxt "#32362"
+msgid "Reset tracker: {} fields cleared"
+msgstr ""
+
+# --- Default source / refetch schedule settings (32370-32380) ---
+
+msgctxt "#32370"
+msgid "Default source"
+msgstr ""
+
+msgctxt "#32371"
+msgid "Default provider to use when a field has no per-field source preference configured. Applied to all fields that do not override this setting."
+msgstr ""
+
+msgctxt "#32372"
+msgid "TMDB preferred"
+msgstr ""
+
+msgctxt "#32373"
+msgid "IMDb preferred"
+msgstr ""
+
+msgctxt "#32374"
+msgid "TMDB only"
+msgstr ""
+
+msgctxt "#32375"
+msgid "IMDb only"
+msgstr ""
+
+msgctxt "#32376"
+msgid "Refresh schedule (days)"
+msgstr ""
+
+msgctxt "#32377"
+msgid "Comma-separated list of ages in days at which recently-released content is re-fetched. Example: 7,30,90 re-fetches at one week, one month, and three months after release."
+msgstr ""
+
+msgctxt "#32378"
+msgid "Reset tracker"
+msgstr ""
+
+msgctxt "#32379"
+msgid "Clear all maturity tracking so every field is re-fetched from scratch on the next scan. Use this after a misconfiguration or when you want to force a full refresh."
+msgstr ""
+
+msgctxt "#32380"
+msgid "Content age in days before metadata is treated as stable; older content is fetched once, newer content is refreshed on a schedule."
+msgstr ""
