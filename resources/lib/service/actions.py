@@ -69,11 +69,16 @@ def _init_logging() -> None:
 
 
 def reset_exhausted() -> None:
-    """Reset all exhausted field_status rows and notify the user."""
+    """Clear all recorded field sampling facts so every field is resampled.
+
+    Under the maturity model there is no "exhausted" state. The user-facing
+    "give everything another chance" action clears the field_status rows, so the
+    next scan treats every field as a first encounter (fetch_count 0 -> due).
+    """
     _init_logging()
 
     log.info(
-        "Reset exhausted fields action starting",
+        "Reset field sampling action starting",
         event="actions.reset_exhausted_start",
     )
 
@@ -90,15 +95,15 @@ def reset_exhausted() -> None:
     tracker = None
     try:
         tracker = TrackerDB(_get_db_path())
-        count = tracker.reset_exhausted_fields()
+        count = tracker.clear_field_status()
         log.info(
-            "Reset exhausted fields action complete",
+            "Reset field sampling action complete",
             event="actions.reset_exhausted",
             count=count,
         )
         notify(lang(32352).format(count))  # Reset {} exhausted fields
     except Exception:
-        log.exception("Reset exhausted fields action failed", event="actions.error")
+        log.exception("Reset field sampling action failed", event="actions.error")
     finally:
         release_scan_lock()
         if tracker is not None:

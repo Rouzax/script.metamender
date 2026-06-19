@@ -33,7 +33,7 @@ def _fake_lang(string_id):
 def patched(monkeypatch: pytest.MonkeyPatch):
     """Patch everything actions.reset_exhausted() touches."""
     tracker = MagicMock()
-    tracker.reset_exhausted_fields = MagicMock(return_value=3)
+    tracker.clear_field_status = MagicMock(return_value=3)
     tracker_cls = MagicMock(return_value=tracker)
     notify = MagicMock()
     acquire = MagicMock(return_value=True)
@@ -56,7 +56,7 @@ def patched(monkeypatch: pytest.MonkeyPatch):
 
 def test_reset_exhausted_calls_tracker_and_notifies(patched):
     actions.reset_exhausted()
-    patched["tracker"].reset_exhausted_fields.assert_called_once_with()
+    patched["tracker"].clear_field_status.assert_called_once_with()
     patched["notify"].assert_called_once()
     message = patched["notify"].call_args[0][0]
     assert "3" in message
@@ -64,7 +64,7 @@ def test_reset_exhausted_calls_tracker_and_notifies(patched):
 
 
 def test_reset_exhausted_closes_tracker_on_error(patched):
-    patched["tracker"].reset_exhausted_fields.side_effect = RuntimeError("boom")
+    patched["tracker"].clear_field_status.side_effect = RuntimeError("boom")
     actions.reset_exhausted()  # should not raise
     patched["tracker"].close.assert_called_once_with()
     patched["notify"].assert_not_called()
@@ -75,7 +75,7 @@ def test_reset_exhausted_skips_when_scan_running(patched):
     patched["acquire"].return_value = False
     actions.reset_exhausted()
     patched["tracker_cls"].assert_not_called()
-    patched["tracker"].reset_exhausted_fields.assert_not_called()
+    patched["tracker"].clear_field_status.assert_not_called()
     patched["notify"].assert_called_once()
 
 

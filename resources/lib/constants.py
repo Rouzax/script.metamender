@@ -70,14 +70,6 @@ SOURCES_CONFIG_FILENAME = "sources.json"
 # migrations have a marker to branch on. Stored in scan_state on init.
 SCHEMA_VERSION = 2
 
-# Retry intervals in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
-RETRY_INTERVALS = (7, 30, 90)
-DEFAULT_MAX_RETRIES = 4
-
-# Days after a field exhausts before it gets ONE automatic re-attempt; if that
-# also finds nothing, the field is permanently exhausted (next_retry cleared).
-EXHAUSTED_AUTORETRY_DAYS = 180
-
 # Default refetch schedule in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
 DEFAULT_REFETCH_SCHEDULE = (7, 30, 90)  # type: Tuple[int, ...]
 
