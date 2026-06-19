@@ -37,8 +37,12 @@ def compute_identity(item: Dict[str, Any], media_type: MediaType) -> str:
     if imdb:
         return "imdb:{}".format(imdb)
 
+    # No external ID: fall back to "title (year)". The year is derived from the
+    # date field the scan already requests (premiered/firstaired); Kodi does not
+    # return a `year` property unless explicitly asked, and the scan does not ask.
     title = item.get("title", "")
-    year = item.get("year")
-    if year:
+    date_value = item.get(media_type.date_field) or ""
+    year = date_value[:4]
+    if len(year) == 4 and year.isdigit():
         return "{} ({})".format(title, year)
     return title
