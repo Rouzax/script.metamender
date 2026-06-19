@@ -21,6 +21,7 @@ Logging:
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
@@ -290,6 +291,487 @@ def _extract_fields(
     return fields
 
 
+class _Pacer:
+    """Rate-limit pacing for provider calls.
+
+    Sleeps ``rate_limit`` seconds before a call, but only once "armed", so the
+    first call in a scan is not delayed and subsequent ones are spaced out.
+    """
+
+    def __init__(self, rate_limit: float) -> None:
+        self._rate = rate_limit
+        self._armed = False
+
+    def wait(self) -> None:
+        """Sleep before this call if armed, then arm for the next one."""
+        if self._armed and self._rate > 0:
+            time.sleep(self._rate)
+        self._armed = True
+
+    def arm(self) -> None:
+        """Arm without sleeping (a call happened without going through wait())."""
+        self._armed = True
+
+
+@dataclass(frozen=True)
+class _ScanCtx:
+    """Scan-level constants shared across one run_scan cycle.
+
+    Holds everything that does not vary per item, so the per-item helpers take a
+    single ``ctx`` plus the handful of per-item values. Mutable members
+    (breaker, pacer, season_cache, tracker) are referenced, not copied.
+    """
+
+    media_type: MediaType
+    tracker: TrackerDB
+    breaker: CircuitBreaker
+    pacer: _Pacer
+    tmdb_api_key: str
+    default_language: str
+    sources: List[Dict[str, Any]]
+    enabled_fields: FrozenSet[str]
+    show_id_map: Dict[str, str]
+    season_cache: Dict[str, Optional[List[Dict[str, Any]]]]
+    settings: Dict[str, Any]
+    rating_source: int
+    plot_source: int
+    max_retries: int
+    force: bool
+
+
+def _call_provider(
+    provider: str,
+    fn: Any,
+    ctx: _ScanCtx,
+    identity: str,
+    best_effort: bool = False,
+) -> Any:
+    """Pace, run a provider fn, and apply circuit-breaker bookkeeping.
+
+    Records breaker success on any non-raising return (including None). On
+    ApiKeyError re-raises (terminal). On TransientProviderError records a breaker
+    failure, logs the trip once, and returns None. When ``best_effort`` is True
+    (episode ID enrichment) BOTH exceptions are swallowed, logged at scan.error,
+    and None is returned, and the breaker is left untouched.
+    """
+    ctx.pacer.wait()
+    try:
+        result = fn()
+    except ApiKeyError:
+        if best_effort:
+            log.exception(
+                "Provider call failed (best effort)",
+                event="scan.error", provider=provider, identity=identity,
+            )
+            return None
+        log.exception(
+            "Provider API key invalid",
+            event="scan.apikey", provider=provider, identity=identity,
+        )
+        raise
+    except TransientProviderError:
+        if best_effort:
+            log.exception(
+                "Provider call failed (best effort)",
+                event="scan.error", provider=provider, identity=identity,
+            )
+            return None
+        if ctx.breaker.record_failure(provider):
+            log.warning(
+                "Provider disabled for this cycle after repeated failures",
+                event="scan.breaker", provider=provider,
+                threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD, identity=identity,
+            )
+        return None
+    ctx.breaker.record_success(provider)
+    return result
+
+
+def _enrich_imdb_id(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    kodi_id: Any,
+    title: str,
+    identity: str,
+    new_imdb: str,
+) -> None:
+    """Write a discovered IMDB ID back to Kodi and the tracker."""
+    uid = item.get("uniqueid", {})
+    uid["imdb"] = new_imdb
+    update_item(kodi_id, ctx.media_type, title, uniqueid=uid)
+    ctx.tracker.upsert_item(ctx.media_type.name, identity, imdb_id=new_imdb)
+    log.info(
+        "Enriched IMDB ID from TMDB",
+        event="scan.enrich_id", title=title, imdb_id=new_imdb,
+    )
+
+
+def _fetch_movie_or_show(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    kodi_id: Any,
+    title: str,
+    identity: str,
+    tmdb_id: Optional[str],
+    imdb_id: Optional[str],
+    tvdb_id: Optional[str],
+    language: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
+    """Fetch movie/TV show data from TMDB then IMDb. Returns
+    (tmdb_data, imdb_data, imdb_id). Caller has checked both_disabled()."""
+    tmdb_data = None  # type: Optional[Dict[str, Any]]
+    imdb_data = None  # type: Optional[Dict[str, Any]]
+
+    # Resolve TMDB ID if missing (show-level only).
+    if not tmdb_id and not ctx.breaker.is_disabled("tmdb"):
+        tmdb_id = _call_provider(
+            "tmdb",
+            lambda: resolve_id(ctx.tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id),
+            ctx, identity,
+        )
+        if tmdb_id:
+            ctx.tracker.upsert_item(ctx.media_type.name, identity, tmdb_id=tmdb_id)
+
+    # Fetch TMDB data.
+    if tmdb_id and not ctx.breaker.is_disabled("tmdb"):
+        if ctx.media_type.name == "movie":
+            tmdb_data = _call_provider(
+                "tmdb",
+                lambda: tmdb_fetch_movie(tmdb_id, ctx.tmdb_api_key, language),
+                ctx, identity,
+            )
+        else:
+            tmdb_data = _call_provider(
+                "tmdb",
+                lambda: tmdb_fetch_tvshow(tmdb_id, ctx.tmdb_api_key, language),
+                ctx, identity,
+            )
+
+    # Enrich: if TMDB returned an IMDB ID and the item lacks one, write it back.
+    if not imdb_id and tmdb_data and tmdb_data.get("imdb_id"):
+        new_imdb = tmdb_data["imdb_id"]
+        _enrich_imdb_id(ctx, item, kodi_id, title, identity, new_imdb)
+        imdb_id = new_imdb
+
+    # Fetch IMDb data if available and not TMDB-only.
+    if (imdb_id and not ctx.breaker.is_disabled("imdb")
+            and not (ctx.rating_source == TMDB_ONLY and ctx.plot_source == TMDB_ONLY)):
+        imdb_data = _call_provider(
+            "imdb", lambda: imdb_fetch_movie(imdb_id), ctx, identity,
+        )
+
+    return tmdb_data, imdb_data, imdb_id
+
+
+def _fetch_episode_tmdb(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    kodi_id: Any,
+    title: str,
+    identity: str,
+    ep_show_tmdb_id: str,
+    season_number: int,
+    tmdb_id: str,
+    imdb_id: Optional[str],
+    language: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """TMDB episode path: look up the season (cached), match by episode ID, and
+    best-effort enrich the IMDB ID. Returns (tmdb_episode_data, imdb_id).
+
+    Mirrors the original behaviour exactly: the (cached) season fetch is NOT
+    preceded by a pacing sleep and only arms the pacer on a cache MISS; breaker
+    success is recorded once at the end; ApiKeyError propagates and a transient
+    failure trips the breaker.
+    """
+    tmdb_data = None  # type: Optional[Dict[str, Any]]
+    try:
+        cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
+        is_cache_miss = cache_key not in ctx.season_cache
+        season_data = _get_season_data(
+            ep_show_tmdb_id, season_number, ctx.tmdb_api_key, language, ctx.season_cache
+        )
+        if season_data is not None:
+            tmdb_data = _find_episode_by_tmdb_id(season_data, tmdb_id)
+            # Enrich: if the episode has no IMDB ID, fetch it from TMDB.
+            if not imdb_id and tmdb_data is not None:
+                ep_num = tmdb_data.get("episode_number", 0)
+                enriched = _call_provider(
+                    "tmdb",
+                    lambda: tmdb_fetch_episode_ids(
+                        ep_show_tmdb_id, season_number, ep_num, ctx.tmdb_api_key,
+                    ),
+                    ctx, identity, best_effort=True,
+                )
+                if enriched:
+                    _enrich_imdb_id(ctx, item, kodi_id, title, identity, enriched)
+                    imdb_id = enriched
+        if is_cache_miss:
+            ctx.pacer.arm()
+        ctx.breaker.record_success("tmdb")
+    except ApiKeyError:
+        log.exception(
+            "Provider API key invalid",
+            event="scan.apikey", provider="tmdb", identity=identity,
+        )
+        raise
+    except TransientProviderError:
+        if ctx.breaker.record_failure("tmdb"):
+            log.warning(
+                "Provider disabled for this cycle after repeated failures",
+                event="scan.breaker", provider="tmdb",
+                threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD, identity=identity,
+            )
+    return tmdb_data, imdb_id
+
+
+def _fetch_episode(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    kodi_id: Any,
+    title: str,
+    identity: str,
+    tmdb_id: Optional[str],
+    imdb_id: Optional[str],
+    language: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
+    """Fetch episode data by ID. Returns (tmdb_data, imdb_data, imdb_id). Caller
+    has checked both_disabled() and that at least one ID is present."""
+    tmdb_data = None  # type: Optional[Dict[str, Any]]
+    imdb_data = None  # type: Optional[Dict[str, Any]]
+
+    # TMDB path first (so enrichment can provide imdb_id for the IMDb path).
+    if tmdb_id and not ctx.breaker.is_disabled("tmdb"):
+        showtitle = item.get("showtitle", "")
+        ep_show_tmdb_id = (ctx.show_id_map or {}).get(showtitle)
+        if not ep_show_tmdb_id:
+            log.debug(
+                "No show TMDB ID for episode, skipping TMDB path",
+                event="scan.skip", title=title, showtitle=showtitle,
+            )
+        if ep_show_tmdb_id:
+            season_number = item.get("season", 0)
+            tmdb_data, imdb_id = _fetch_episode_tmdb(
+                ctx, item, kodi_id, title, identity,
+                ep_show_tmdb_id, season_number, tmdb_id, imdb_id, language,
+            )
+
+    # IMDb path: direct episode fetch by IMDB ID.
+    if imdb_id and not ctx.breaker.is_disabled("imdb"):
+        imdb_data = _call_provider(
+            "imdb", lambda: imdb_fetch_episode(imdb_id), ctx, identity,
+        )
+
+    return tmdb_data, imdb_data, imdb_id
+
+
+def _build_gaps(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    fs_map: Dict[str, Any],
+    today: str,
+) -> List[str]:
+    """Per-field gap construction. Each enabled, writable field is evaluated
+    independently from its field_status row (first encounter, empty-and-due,
+    exhausted auto-retry) and whether a filled value is still present or stale."""
+    candidate_fields = (
+        {_TMDB_TO_KODI.get(k, k) for k in _TMDB_TO_KODI}
+        & ctx.enabled_fields & ctx.media_type.backfill_fields
+    )
+
+    gaps = []  # type: List[str]
+    if ctx.force:
+        # Force path (Update now): every enabled candidate field is a gap. The
+        # title field only exists for episodes; skip it for movies/TV shows.
+        for field in sorted(candidate_fields):
+            if field == "title" and ctx.media_type.name != "episode":
+                continue
+            gaps.append(field)
+        return gaps
+
+    for field in sorted(candidate_fields):
+        fs = fs_map.get(field)
+        # Title is only a gap for episodes with a placeholder title.
+        if field == "title":
+            if (ctx.media_type.name == "episode"
+                    and is_placeholder_title(item.get("title", ""))):
+                if _field_due(fs, today):
+                    gaps.append(field)
+            continue
+        kodi_empty = is_field_empty(field, item.get(field))
+        if fs is None:
+            gaps.append(field)  # first encounter: establish a baseline
+        elif fs.get("status") in ("filled", "checked"):
+            if field == "rating" and _rating_is_stale(
+                item, ctx.media_type, fs, ctx.settings
+            ):
+                gaps.append("rating")
+            elif kodi_empty:
+                gaps.append(field)  # value disappeared from Kodi -> refill
+        elif _field_due(fs, today):
+            gaps.append(field)  # 'empty' due, or 'exhausted' auto-retry due
+    return gaps
+
+
+def _write_fields(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    kodi_id: Any,
+    title: str,
+    identity: str,
+    fields_to_write: Dict[str, Any],
+    source_map: Dict[str, str],
+    ratings_source: Optional[str],
+    ratings_votes: Optional[int],
+    stats: Dict[str, Any],
+) -> set:
+    """Write fields to Kodi and record field_status. Returns the set of fields
+    considered resolved this pass (empty if the write failed or nothing to write)."""
+    ratings_written = "ratings" in fields_to_write
+    write_succeeded = False
+
+    if fields_to_write:
+        write_succeeded = update_item(kodi_id, ctx.media_type, title, **fields_to_write)
+        if write_succeeded:
+            stats["updated"] += 1
+            for field_name in fields_to_write:
+                stats["fields"][field_name] = stats["fields"].get(field_name, 0) + 1
+            log.info(
+                "Item updated",
+                event="scan.updated", title=title, identity=identity,
+                media_type=ctx.media_type.name,
+                fields_written=list(fields_to_write.keys()),
+            )
+            # field_status for non-rating written fields.
+            for field_name in fields_to_write:
+                if field_name == "ratings":
+                    continue
+                tmdb_key = _KODI_TO_TMDB.get(field_name, field_name)
+                field_source = source_map.get(tmdb_key, "tmdb")
+                ctx.tracker.set_field_status(
+                    ctx.media_type.name, identity, field_name, "filled",
+                    source=field_source,
+                )
+            # field_status for the rating (+ votes mirror) when written.
+            if ratings_written:
+                for rf in ("rating", "votes"):
+                    ctx.tracker.set_field_status(
+                        ctx.media_type.name, identity, rf, "filled",
+                        source=ratings_source, vote_count=ratings_votes,
+                    )
+        else:
+            stats["errors"] += 1
+
+    written = set()  # type: set
+    if write_succeeded:
+        written = set(fields_to_write.keys())
+        if ratings_written:
+            written.update({"rating", "votes"})
+            written.discard("ratings")
+    return written
+
+
+def _record_field_outcomes(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    title: str,
+    identity: str,
+    gaps: List[str],
+    written: set,
+    fs_map: Dict[str, Any],
+) -> int:
+    """Record a "checked" for fields Kodi already has, and a per-field retry
+    attempt (with backoff / exhaustion) for fields nothing could fill. Returns
+    the count of fields that hit exhaustion this pass."""
+    exhausted_fields = 0
+    for gap_field in gaps:
+        if gap_field in written:
+            continue  # filled this pass (status already set to "filled")
+        # Was there an existing non-empty Kodi value the provider confirmed?
+        tmdb_key = _KODI_TO_TMDB.get(gap_field, gap_field)
+        kodi_val = item.get(gap_field)
+        if kodi_val is None:
+            kodi_val = item.get(tmdb_key)
+        if not is_field_empty(gap_field, kodi_val):
+            ctx.tracker.set_field_status(ctx.media_type.name, identity, gap_field, "checked")
+            continue
+        # No data anywhere: record a per-field attempt with backoff / exhaust.
+        prev = fs_map.get(gap_field) or {}
+        was_exhausted = prev.get("status") == "exhausted"
+        next_attempt = int(prev.get("attempt_count") or 0) + 1
+        if was_exhausted:
+            # The one-time auto-retry still found nothing: exhaust permanently.
+            ctx.tracker.set_field_status(ctx.media_type.name, identity, gap_field, "exhausted")
+            ctx.tracker.set_field_next_retry(ctx.media_type.name, identity, gap_field, None)
+            exhausted_fields += 1
+            log.debug(
+                "Field exhausted",
+                event="scan.field_exhausted", title=title, identity=identity,
+                field=gap_field, permanent=True,
+            )
+            continue
+        next_retry = compute_next_retry(next_attempt, ctx.max_retries)
+        ctx.tracker.record_field_attempt(
+            ctx.media_type.name, identity, gap_field, next_retry=next_retry
+        )
+        if next_retry is None:
+            # Reached max_retries: mark exhausted but schedule ONE auto-retry (D3).
+            ctx.tracker.set_field_status(ctx.media_type.name, identity, gap_field, "exhausted")
+            auto = (date.today() + timedelta(days=EXHAUSTED_AUTORETRY_DAYS)).isoformat()
+            ctx.tracker.set_field_next_retry(ctx.media_type.name, identity, gap_field, auto)
+            exhausted_fields += 1
+            log.debug(
+                "Field exhausted",
+                event="scan.field_exhausted", title=title, identity=identity,
+                field=gap_field, permanent=False,
+            )
+        else:
+            ctx.tracker.set_field_status(ctx.media_type.name, identity, gap_field, "empty")
+    return exhausted_fields
+
+
+def _rollup_item_status(
+    ctx: _ScanCtx,
+    identity: str,
+    gaps: List[str],
+    written: set,
+    exhausted_fields: int,
+) -> None:
+    """Set the item rollup status (complete / exhausted / partial). A failed
+    write leaves its fields unresolved, so the item is not marked complete."""
+    gap_count = len(gaps)
+    resolved = sum(1 for g in gaps if g in written)
+    for g in gaps:
+        if g not in written:
+            fs2 = ctx.tracker.get_field_status(ctx.media_type.name, identity, g)
+            if fs2 and fs2.get("status") == "checked":
+                resolved += 1
+    if resolved == gap_count:
+        ctx.tracker.update_item_status(ctx.media_type.name, identity, "complete")
+    elif exhausted_fields and (resolved + exhausted_fields) == gap_count:
+        ctx.tracker.update_item_status(ctx.media_type.name, identity, "exhausted")
+    else:
+        ctx.tracker.update_item_status(ctx.media_type.name, identity, "partial")
+
+
+def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
+    """Pause the scan while a video is playing, resume when it stops."""
+    if monitor is None or not xbmc.getCondVisibility("Player.HasVideo"):
+        return
+    log.info(
+        "Scan paused, video playing",
+        event="scan.pause", media_type=ctx.media_type.name, processed=processed,
+    )
+    while (xbmc.getCondVisibility("Player.HasVideo")
+           and not monitor.abortRequested()):
+        if monitor.waitForAbort(10):
+            break
+    if not monitor.abortRequested():
+        log.info(
+            "Scan resumed, playback stopped",
+            event="scan.resume", media_type=ctx.media_type.name,
+        )
+
+
 def run_scan(
     media_type: MediaType,
     tracker: TrackerDB,
@@ -348,10 +830,23 @@ def run_scan(
     stats = _make_stats()
     if breaker is None:
         breaker = CircuitBreaker()
-    rate_limit = settings.get("rate_limit", 0.25)
-    max_retries = settings.get("max_retries", 4)
-    sources = source_config.get("sources", [])
-    default_language = source_config.get("default_language", "en-US")
+    ctx = _ScanCtx(
+        media_type=media_type,
+        tracker=tracker,
+        breaker=breaker,
+        pacer=_Pacer(settings.get("rate_limit", 0.25)),
+        tmdb_api_key=tmdb_api_key,
+        default_language=source_config.get("default_language", "en-US"),
+        sources=source_config.get("sources", []),
+        enabled_fields=enabled_fields,
+        show_id_map=show_id_map or {},
+        season_cache={},
+        settings=settings,
+        rating_source=settings.get("rating_source", 0),
+        plot_source=settings.get("plot_source", 0),
+        max_retries=settings.get("max_retries", 4),
+        force=force,
+    )
 
     log.info(
         "Scan starting",
@@ -363,10 +858,6 @@ def run_scan(
     if items is None:
         items = get_all_items(media_type, kodi_filter=kodi_filter)
 
-    # Season cache for episode batching
-    season_cache = {}  # type: Dict[str, Optional[List[Dict[str, Any]]]]
-    # Track whether we need a rate-limit sleep before the next API call
-    needs_sleep = False
     # Running total of fields that hit exhaustion this scan (per-item below).
     exhausted_fields_total = 0
 
@@ -382,23 +873,7 @@ def run_scan(
             break
 
         # Yield: pause while video is playing
-        if monitor is not None and xbmc.getCondVisibility("Player.HasVideo"):
-            log.info(
-                "Scan paused, video playing",
-                event="scan.pause",
-                media_type=media_type.name,
-                processed=stats["processed"],
-            )
-            while (xbmc.getCondVisibility("Player.HasVideo")
-                   and not monitor.abortRequested()):
-                if monitor.waitForAbort(10):
-                    break
-            if not monitor.abortRequested():
-                log.info(
-                    "Scan resumed, playback stopped",
-                    event="scan.resume",
-                    media_type=media_type.name,
-                )
+        _yield_to_playback(ctx, monitor, stats["processed"])
 
         identity = compute_identity(item, media_type)
         title = _item_title(item, media_type)
@@ -414,7 +889,7 @@ def run_scan(
                 continue
 
         # Match source
-        source = match_source(item.get("file", ""), sources)
+        source = match_source(item.get("file", ""), ctx.sources)
         if not source.get("enabled", True):
             log.debug(
                 "Skipping disabled source",
@@ -425,7 +900,7 @@ def run_scan(
             stats["skipped"] += 1
             continue
 
-        language = source.get("language", default_language)
+        language = source.get("language", ctx.default_language)
 
         # Extract external IDs
         tmdb_id, imdb_id, tvdb_id = _extract_ids(item)
@@ -453,52 +928,10 @@ def run_scan(
         )
         tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
 
-        # Per-field gap construction. Each enabled, writable field is
-        # evaluated independently: its own field_status row decides whether
-        # it is due (first encounter, empty-and-due, or exhausted auto-retry)
-        # and whether a filled value is still present in Kodi or stale.
+        # Per-field gap construction (see _build_gaps).
         today = date.today().isoformat()
         fs_map = tracker.get_field_status_map(media_type.name, identity)
-
-        candidate_fields = (
-            {_TMDB_TO_KODI.get(k, k) for k in _TMDB_TO_KODI}
-            & enabled_fields & media_type.backfill_fields
-        )
-
-        gaps = []  # type: List[str]
-        if force:
-            # Force path (Update now): every enabled candidate field is a gap,
-            # ignoring gating, exhaustion, checked/filled status, and
-            # staleness. The title field only exists for episodes; for movies
-            # and TV shows it is never written, so skip it there.
-            # _extract_fields(force=True) handles the actual overwrite,
-            # including a non-placeholder episode title.
-            for field in sorted(candidate_fields):
-                if field == "title" and media_type.name != "episode":
-                    continue
-                gaps.append(field)
-        else:
-            for field in sorted(candidate_fields):
-                fs = fs_map.get(field)
-                # Title is only a gap for episodes with a placeholder title
-                if field == "title":
-                    if (media_type.name == "episode"
-                            and is_placeholder_title(item.get("title", ""))):
-                        if _field_due(fs, today):
-                            gaps.append(field)
-                    continue
-                kodi_empty = is_field_empty(field, item.get(field))
-                if fs is None:
-                    gaps.append(field)  # first encounter: establish a baseline
-                elif fs.get("status") in ("filled", "checked"):
-                    if field == "rating" and _rating_is_stale(
-                        item, media_type, fs, settings
-                    ):
-                        gaps.append("rating")
-                    elif kodi_empty:
-                        gaps.append(field)  # value disappeared from Kodi -> refill
-                elif _field_due(fs, today):
-                    gaps.append(field)  # 'empty' due, or 'exhausted' auto-retry due
+        gaps = _build_gaps(ctx, item, fs_map, today)
 
         if not gaps:
             tracker.update_item_status(media_type.name, identity, "complete")
@@ -516,410 +949,72 @@ def run_scan(
             gaps=gaps,
         )
 
-        # --- Provider fetch: movies and TV shows ---
-        rating_source = settings.get("rating_source", 0)
-        plot_source = settings.get("plot_source", 0)
+        # --- Provider fetch ---
         tmdb_data = None  # type: Optional[Dict[str, Any]]
         imdb_data = None  # type: Optional[Dict[str, Any]]
         source_map = {}  # type: Dict[str, str]
 
+        if breaker.both_disabled():
+            log.warning(
+                "Both providers disabled, stopping scan",
+                event="scan.breaker", scope="both",
+                media_type=media_type.name, processed=stats["processed"],
+            )
+            break
+
         if media_type.name in ("movie", "tvshow"):
-            # Check circuit breaker: both providers down
-            if breaker.both_disabled():
-                log.warning(
-                    "Both providers disabled, stopping scan",
-                    event="scan.breaker",
-                    scope="both",
-                    media_type=media_type.name,
-                    processed=stats["processed"],
-                )
-                break
-
-            # Resolve TMDB ID if missing (show-level only)
-            if not tmdb_id and not breaker.is_disabled("tmdb"):
-                try:
-                    if needs_sleep and rate_limit > 0:
-                        time.sleep(rate_limit)
-                    tmdb_id = resolve_id(tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id)
-                    needs_sleep = True
-                    breaker.record_success("tmdb")
-                except ApiKeyError:
-                    # Terminal: an invalid key affects every item. Surface it to
-                    # the caller (daemon/manual/actions) instead of silently
-                    # ending the scan as a no-op. resolve_id returns None on a
-                    # transient failure (never raises TransientProviderError),
-                    # so there is no transient arm to handle here.
-                    log.exception(
-                        "TMDB API key invalid",
-                        event="scan.apikey",
-                        provider="tmdb",
-                        identity=identity,
-                    )
-                    raise
-
-                if tmdb_id:
-                    tracker.upsert_item(media_type.name, identity, tmdb_id=tmdb_id)
-
-            # Fetch TMDB data
-            if tmdb_id and not breaker.is_disabled("tmdb"):
-                try:
-                    if needs_sleep and rate_limit > 0:
-                        time.sleep(rate_limit)
-                    if media_type.name == "movie":
-                        tmdb_data = tmdb_fetch_movie(tmdb_id, tmdb_api_key, language)
-                    else:
-                        tmdb_data = tmdb_fetch_tvshow(tmdb_id, tmdb_api_key, language)
-                    needs_sleep = True
-                    breaker.record_success("tmdb")
-                except ApiKeyError:
-                    # Terminal: an invalid key affects every item. Surface it to
-                    # the caller (daemon/manual/actions) instead of silently
-                    # ending the scan as a no-op.
-                    log.exception(
-                        "TMDB API key invalid",
-                        event="scan.apikey",
-                        provider="tmdb",
-                        identity=identity,
-                    )
-                    raise
-                except TransientProviderError:
-                    if breaker.record_failure("tmdb"):
-                        log.warning(
-                            "TMDB disabled for this cycle after repeated failures",
-                            event="scan.breaker",
-                            provider="tmdb",
-                            threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
-                            identity=identity,
-                        )
-
-            # Enrich: if TMDB returned an IMDB ID and the item lacks one, write it
-            if not imdb_id and tmdb_data and tmdb_data.get("imdb_id"):
-                enriched_imdb = tmdb_data["imdb_id"]
-                uid = item.get("uniqueid", {})
-                uid["imdb"] = enriched_imdb
-                update_item(kodi_id, media_type, title, uniqueid=uid)
-                tracker.upsert_item(media_type.name, identity, imdb_id=enriched_imdb)
-                imdb_id = enriched_imdb
-                log.info(
-                    "Enriched IMDB ID from TMDB",
-                    event="scan.enrich_id",
-                    title=title,
-                    imdb_id=enriched_imdb,
-                )
-
-            # Fetch IMDb data if available and not TMDB-only
-            if imdb_id and not breaker.is_disabled("imdb") and not (rating_source == TMDB_ONLY and plot_source == TMDB_ONLY):
-                try:
-                    if needs_sleep and rate_limit > 0:
-                        time.sleep(rate_limit)
-                    imdb_data = imdb_fetch_movie(imdb_id)
-                    needs_sleep = True
-                    breaker.record_success("imdb")
-                except ApiKeyError:
-                    # Terminal: surface to the caller (see TMDB arm above).
-                    log.exception(
-                        "IMDb API key invalid",
-                        event="scan.apikey",
-                        provider="imdb",
-                        identity=identity,
-                    )
-                    raise
-                except TransientProviderError:
-                    if breaker.record_failure("imdb"):
-                        log.warning(
-                            "IMDb disabled for this cycle after repeated failures",
-                            event="scan.breaker",
-                            provider="imdb",
-                            threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
-                            identity=identity,
-                        )
-
-            if tmdb_data is None and imdb_data is None:
-                # No data found (not a provider failure): fall through to the
-                # per-field post-process, which records a per-field retry
-                # attempt. No write happens and it is not counted as an error.
-                merged_data, source_map = {}, {}
-            else:
-                # Resolve best values per field
-                merged_data, source_map = resolve_metadata(
-                    tmdb_data, imdb_data,
-                    _RESOLVE_FIELDS,
-                    rating_source, plot_source,
-                )
-
-        # --- Provider fetch: episodes (ID-based matching) ---
+            tmdb_data, imdb_data, imdb_id = _fetch_movie_or_show(
+                ctx, item, kodi_id, title, identity,
+                tmdb_id, imdb_id, tvdb_id, language,
+            )
         elif media_type.name == "episode":
-            if breaker.both_disabled():
-                log.warning(
-                    "Both providers disabled, stopping scan",
-                    event="scan.breaker",
-                    scope="both",
-                    media_type=media_type.name,
-                    processed=stats["processed"],
-                )
-                break
-
             if not imdb_id and not tmdb_id:
                 log.debug(
                     "Episode has no usable ID, skipping (re-checked each scan)",
-                    event="scan.skip",
-                    title=title,
-                    media_type=media_type.name,
+                    event="scan.skip", title=title, media_type=media_type.name,
                 )
                 tracker.mark_cycle_processed(media_type.name, identity)
                 stats["skipped"] += 1
                 continue
-
-            # TMDB path first: match by TMDB episode ID in season data
-            # (runs before IMDb so enrichment can provide imdb_id)
-            if tmdb_id and not breaker.is_disabled("tmdb"):
-                showtitle = item.get("showtitle", "")
-                ep_show_tmdb_id = (show_id_map or {}).get(showtitle)
-                if not ep_show_tmdb_id:
-                    log.debug(
-                        "No show TMDB ID for episode, skipping TMDB path",
-                        event="scan.skip",
-                        title=title,
-                        showtitle=showtitle,
-                    )
-                if ep_show_tmdb_id:
-                    season_number = item.get("season", 0)
-                    try:
-                        cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
-                        is_cache_miss = cache_key not in season_cache
-                        season_data = _get_season_data(
-                            ep_show_tmdb_id, season_number, tmdb_api_key, language, season_cache
-                        )
-                        if season_data is not None:
-                            tmdb_data = _find_episode_by_tmdb_id(season_data, tmdb_id)
-                            # Enrich: if episode has no IMDB ID, fetch it from TMDB
-                            if not imdb_id and tmdb_data is not None:
-                                ep_num = tmdb_data.get("episode_number", 0)
-                                try:
-                                    if needs_sleep and rate_limit > 0:
-                                        time.sleep(rate_limit)
-                                    enriched_imdb = tmdb_fetch_episode_ids(
-                                        ep_show_tmdb_id, season_number, ep_num, tmdb_api_key,
-                                    )
-                                    needs_sleep = True
-                                    if enriched_imdb:
-                                        uid = item.get("uniqueid", {})
-                                        uid["imdb"] = enriched_imdb
-                                        update_item(kodi_id, media_type, title, uniqueid=uid)
-                                        tracker.upsert_item(media_type.name, identity, imdb_id=enriched_imdb)
-                                        imdb_id = enriched_imdb
-                                        log.info(
-                                            "Enriched IMDB ID from TMDB",
-                                            event="scan.enrich_id",
-                                            title=title,
-                                            imdb_id=enriched_imdb,
-                                        )
-                                except (ApiKeyError, TransientProviderError):
-                                    # Enrichment is best-effort; a failure here
-                                    # does not abort the episode scan.
-                                    log.exception(
-                                        "Episode external IDs fetch failed",
-                                        event="scan.error",
-                                        title=title,
-                                    )
-                        if is_cache_miss:
-                            needs_sleep = True
-                        breaker.record_success("tmdb")
-                    except ApiKeyError:
-                        # Terminal: surface to the caller (see TMDB arm above).
-                        log.exception(
-                            "TMDB API key invalid",
-                            event="scan.apikey",
-                            provider="tmdb",
-                            identity=identity,
-                        )
-                        raise
-                    except TransientProviderError:
-                        if breaker.record_failure("tmdb"):
-                            log.warning(
-                                "TMDB disabled for this cycle after repeated failures",
-                                event="scan.breaker",
-                                provider="tmdb",
-                                threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
-                                identity=identity,
-                            )
-
-            # IMDb path: direct episode fetch by IMDB ID
-            # (runs after TMDB so enrichment can provide imdb_id)
-            if imdb_id and not breaker.is_disabled("imdb"):
-                try:
-                    if needs_sleep and rate_limit > 0:
-                        time.sleep(rate_limit)
-                    imdb_data = imdb_fetch_episode(imdb_id)
-                    needs_sleep = True
-                    breaker.record_success("imdb")
-                except ApiKeyError:
-                    # Terminal: surface to the caller (see TMDB arm above).
-                    log.exception(
-                        "IMDb API key invalid",
-                        event="scan.apikey",
-                        provider="imdb",
-                        identity=identity,
-                    )
-                    raise
-                except TransientProviderError:
-                    if breaker.record_failure("imdb"):
-                        log.warning(
-                            "IMDb disabled for this cycle after repeated failures",
-                            event="scan.breaker",
-                            provider="imdb",
-                            threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
-                            identity=identity,
-                        )
-
-            if tmdb_data is None and imdb_data is None:
-                # No data found (not a provider failure): fall through to the
-                # per-field post-process, which records a per-field retry
-                # attempt. No write happens and it is not counted as an error.
-                merged_data, source_map = {}, {}
-            else:
-                # Resolve best values per field
-                merged_data, source_map = resolve_metadata(
-                    tmdb_data, imdb_data,
-                    _RESOLVE_FIELDS,
-                    rating_source, plot_source,
-                )
-
+            tmdb_data, imdb_data, imdb_id = _fetch_episode(
+                ctx, item, kodi_id, title, identity, tmdb_id, imdb_id, language,
+            )
         else:
             continue
 
-        # Extract writable non-rating fields from resolved provider data
+        # Resolve best values per field (empty when no provider returned data).
+        if tmdb_data is None and imdb_data is None:
+            merged_data, source_map = {}, {}
+        else:
+            merged_data, source_map = resolve_metadata(
+                tmdb_data, imdb_data, _RESOLVE_FIELDS,
+                ctx.rating_source, ctx.plot_source,
+            )
+
+        # Extract writable non-rating fields, then build the named-slot ratings map.
         fields_to_write = _extract_fields(merged_data, gaps, media_type, item, force=force)
 
-        # Build the named-slot ratings map when rating is in scope
         ratings_source = None  # type: Optional[str]
         ratings_votes = None  # type: Optional[int]
-        ratings_in_scope = "rating" in gaps or "votes" in gaps
-        if ratings_in_scope:
+        if "rating" in gaps or "votes" in gaps:
             new_ratings, ratings_source, ratings_votes = build_ratings(
                 tmdb_data or {}, imdb_data or {}, item.get("ratings") or {},
-                rating_source,
+                ctx.rating_source,
             )
             if new_ratings is not None:
                 fields_to_write["ratings"] = new_ratings
 
-        ratings_written = "ratings" in fields_to_write
-        write_succeeded = False
+        written = _write_fields(
+            ctx, item, kodi_id, title, identity, fields_to_write,
+            source_map, ratings_source, ratings_votes, stats,
+        )
 
-        if fields_to_write:
-            write_succeeded = update_item(kodi_id, media_type, title, **fields_to_write)
-            if write_succeeded:
-                stats["updated"] += 1
-                for field_name in fields_to_write:
-                    stats["fields"][field_name] = stats["fields"].get(field_name, 0) + 1
-                log.info(
-                    "Item updated",
-                    event="scan.updated",
-                    title=title,
-                    identity=identity,
-                    media_type=media_type.name,
-                    fields_written=list(fields_to_write.keys()),
-                )
-                # field_status for non-rating written fields
-                for field_name in fields_to_write:
-                    if field_name == "ratings":
-                        continue
-                    tmdb_key = _KODI_TO_TMDB.get(field_name, field_name)
-                    field_source = source_map.get(tmdb_key, "tmdb")
-                    tracker.set_field_status(
-                        media_type.name, identity, field_name, "filled",
-                        source=field_source,
-                    )
-                # field_status for the rating (+ votes mirror) when written
-                if ratings_written:
-                    for rf in ("rating", "votes"):
-                        tracker.set_field_status(
-                            media_type.name, identity, rf, "filled",
-                            source=ratings_source, vote_count=ratings_votes,
-                        )
-            else:
-                stats["errors"] += 1
-
-        # The set of fields considered successfully resolved this pass
-        written = set()  # type: set
-        if write_succeeded:
-            written = set(fields_to_write.keys())
-            if ratings_written:
-                written.update({"rating", "votes"})
-                written.discard("ratings")
-
-        # Per-field post-process: record a "checked" for fields Kodi already
-        # has, and a per-field retry attempt (with backoff / exhaustion) for
-        # fields nothing could fill.
-        exhausted_fields = 0
-        gap_count = len(gaps)
-        for gap_field in gaps:
-            if gap_field in written:
-                continue  # filled this pass (status already set to "filled")
-            # Was there an existing non-empty Kodi value the provider confirmed?
-            tmdb_key = _KODI_TO_TMDB.get(gap_field, gap_field)
-            kodi_val = item.get(gap_field)
-            if kodi_val is None:
-                kodi_val = item.get(tmdb_key)
-            if not is_field_empty(gap_field, kodi_val):
-                tracker.set_field_status(media_type.name, identity, gap_field, "checked")
-                continue
-            # No data anywhere: record a per-field attempt with backoff / exhaust
-            prev = fs_map.get(gap_field) or {}
-            was_exhausted = prev.get("status") == "exhausted"
-            next_attempt = int(prev.get("attempt_count") or 0) + 1
-            if was_exhausted:
-                # This was the one-time auto-retry and it still found nothing:
-                # exhaust permanently (next_retry cleared).
-                tracker.set_field_status(media_type.name, identity, gap_field, "exhausted")
-                tracker.set_field_next_retry(media_type.name, identity, gap_field, None)
-                exhausted_fields += 1
-                log.debug(
-                    "Field exhausted",
-                    event="scan.field_exhausted",
-                    title=title,
-                    identity=identity,
-                    field=gap_field,
-                    permanent=True,
-                )
-                continue
-            next_retry = compute_next_retry(next_attempt, max_retries)
-            tracker.record_field_attempt(
-                media_type.name, identity, gap_field, next_retry=next_retry
-            )
-            if next_retry is None:
-                # Reached max_retries: mark exhausted but schedule ONE auto-retry (D3)
-                tracker.set_field_status(media_type.name, identity, gap_field, "exhausted")
-                auto = (date.today() + timedelta(days=EXHAUSTED_AUTORETRY_DAYS)).isoformat()
-                tracker.set_field_next_retry(media_type.name, identity, gap_field, auto)
-                exhausted_fields += 1
-                log.debug(
-                    "Field exhausted",
-                    event="scan.field_exhausted",
-                    title=title,
-                    identity=identity,
-                    field=gap_field,
-                    permanent=False,
-                )
-            else:
-                tracker.set_field_status(media_type.name, identity, gap_field, "empty")
-
+        exhausted_fields = _record_field_outcomes(
+            ctx, item, title, identity, gaps, written, fs_map
+        )
         exhausted_fields_total += exhausted_fields
 
-        # Item rollup status. A failed write leaves its fields unresolved (A9),
-        # so they remain gaps and the item is not marked complete.
-        resolved = sum(1 for g in gaps if g in written)
-        for g in gaps:
-            if g not in written:
-                fs2 = tracker.get_field_status(media_type.name, identity, g)
-                if fs2 and fs2.get("status") == "checked":
-                    resolved += 1
-        if resolved == gap_count:
-            tracker.update_item_status(media_type.name, identity, "complete")
-        elif exhausted_fields and (resolved + exhausted_fields) == gap_count:
-            tracker.update_item_status(media_type.name, identity, "exhausted")
-        else:
-            tracker.update_item_status(media_type.name, identity, "partial")
+        _rollup_item_status(ctx, identity, gaps, written, exhausted_fields)
 
         tracker.mark_cycle_processed(media_type.name, identity)
         stats["processed"] += 1

@@ -433,6 +433,61 @@ def test_run_scan_propagates_kodi_query_error(mock_get_all, tmp_path, kodi_stubs
 
 
 # ---------------------------------------------------------------------------
+# Rate-limit pacing (characterization: sleep BEFORE a call only when armed)
+# ---------------------------------------------------------------------------
+
+
+@patch("resources.lib.engine.scan.update_item", return_value=True)
+@patch("resources.lib.engine.scan.imdb_fetch_movie", return_value=None)
+@patch("resources.lib.engine.scan.tmdb_fetch_movie")
+@patch("resources.lib.engine.scan.get_all_items")
+def test_run_scan_paces_between_provider_calls(
+    mock_get_all, mock_tmdb, _mock_imdb, _mock_update, tmp_path, kodi_stubs
+):
+    """The default movie makes two provider calls (tmdb then imdb). The first
+    is not preceded by a sleep (pacer not yet armed); the second sleeps once."""
+    mock_get_all.return_value = [_make_movie_item()]
+    mock_tmdb.return_value = _tmdb_movie_response()
+    settings = _make_settings()
+    settings["rate_limit"] = 0.25
+
+    tracker = _make_tracker(tmp_path)
+    with patch("resources.lib.engine.scan.time.sleep") as mock_sleep:
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating", "plot"}),
+            "fake_key", settings,
+        )
+    tracker.close()
+
+    assert mock_sleep.call_count == 1
+    mock_sleep.assert_called_once_with(0.25)
+
+
+@patch("resources.lib.engine.scan.update_item", return_value=True)
+@patch("resources.lib.engine.scan.imdb_fetch_movie", return_value=None)
+@patch("resources.lib.engine.scan.tmdb_fetch_movie")
+@patch("resources.lib.engine.scan.get_all_items")
+def test_run_scan_no_sleep_when_rate_limit_zero(
+    mock_get_all, mock_tmdb, _mock_imdb, _mock_update, tmp_path, kodi_stubs
+):
+    """rate_limit=0 (the test default) never sleeps."""
+    mock_get_all.return_value = [_make_movie_item()]
+    mock_tmdb.return_value = _tmdb_movie_response()
+
+    tracker = _make_tracker(tmp_path)
+    with patch("resources.lib.engine.scan.time.sleep") as mock_sleep:
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"rating", "plot"}),
+            "fake_key", _make_settings(),
+        )
+    tracker.close()
+
+    mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Integration tests: run_scan
 # ---------------------------------------------------------------------------
 
