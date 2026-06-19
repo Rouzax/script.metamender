@@ -655,7 +655,7 @@ def run_scan(
     items: Optional[List[Dict[str, Any]]] = None,
     kodi_filter: Optional[Dict[str, str]] = None,
     breaker: Optional[CircuitBreaker] = None,
-    force: bool = False,
+    reset: bool = False,
 ) -> Dict[str, int]:
     """Run a single scan cycle for one media type.
 
@@ -686,11 +686,12 @@ def run_scan(
             media-type pass so a provider that fails repeatedly stays
             disabled across passes. When None, a fresh per-call breaker
             is created (single-pass / test convenience).
-        force: Single-item "Update now" correction path. When True every
-            candidate field is treated as due, the cycle-processed resume
-            skip is bypassed, provider values overwrite existing non-empty
-            fields, and each field's clock is re-baselined (reset_field_clock)
-            instead of advanced. Intended for items=[one_item].
+        reset: Single-item "Update now" re-baseline path. When True every
+            candidate field is treated as due regardless of recorded maturity,
+            the disabled-source gate is skipped (so the action always runs),
+            the playback yield is skipped, and each field's clock is
+            re-baselined (reset_field_clock) instead of advanced. Intended
+            for items=[one_item].
 
     Returns:
         Stats dict with processed, skipped, updated, errors, and
@@ -729,7 +730,7 @@ def run_scan(
         "Scan starting",
         event="scan.start",
         media_type=media_type.name,
-        force=force,
+        reset=reset,
     )
 
     if items is None:
@@ -746,25 +747,29 @@ def run_scan(
             )
             break
 
-        # Yield: pause while video is playing
-        _yield_to_playback(ctx, monitor, stats["processed"])
+        # Yield: pause while video is playing. The reset path (Update now)
+        # skips this so a manual single-item action does not silently block.
+        if not reset:
+            _yield_to_playback(ctx, monitor, stats["processed"])
 
         identity = compute_identity(item, media_type)
         title = _item_title(item, media_type)
         kodi_id = item.get(media_type.kodi_id_field, 0)
 
-        # Resume: skip items already processed in this cycle. The force path
+        # Resume: skip items already processed in this cycle. The reset path
         # (Update now) bypasses this so a just-scanned item can still be
         # corrected on demand.
-        if not force:
+        if not reset:
             pre_tracker = tracker.get_item(media_type.name, identity)
             if pre_tracker and pre_tracker.get("cycle_processed"):
                 stats["skipped"] += 1
                 continue
 
-        # Match source
+        # Match source. The reset path (Update now) bypasses the disabled-source
+        # gate: the user explicitly requested a refresh, so the source setting
+        # must not silently block it.
         source = match_source(item.get("file", ""), ctx.sources)
-        if not source.get("enabled", True):
+        if not reset and not source.get("enabled", True):
             log.debug(
                 "Skipping disabled source",
                 event="scan.skip",
@@ -817,9 +822,9 @@ def run_scan(
         for f in candidate_fields:
             if f == "title" and media_type.name != "episode":
                 continue
-            if force:
-                # Forced single-item correction: every candidate field is due
-                # and re-baselined, regardless of its recorded maturity.
+            if reset:
+                # Reset path (Update now): every candidate field is due
+                # regardless of its recorded maturity so the clock re-baselines.
                 decisions[f] = FETCH_NOW
                 continue
             fs = fs_map.get(f, {})
@@ -899,11 +904,11 @@ def run_scan(
 
         # Advance counters ONLY on a clean answer; a transient failure leaves
         # them put so the field is retried next scan instead of being wrongly
-        # sampled/finalized. A forced correction re-baselines each clock.
+        # sampled/finalized. The reset path (Update now) re-baselines each clock.
         if fetch_clean:
             premiered = item.get(media_type.date_field, "")
             for f in nonfinal:
-                if force:
+                if reset:
                     tracker.reset_field_clock(media_type.name, identity, f)
                     continue
                 new_count = int(fs_map.get(f, {}).get("fetch_count") or 0) + 1
@@ -931,7 +936,7 @@ def run_scan(
         "Scan complete",
         event="scan.complete",
         media_type=media_type.name,
-        force=force,
+        reset=reset,
         processed=stats["processed"],
         skipped=stats["skipped"],
         updated=stats["updated"],

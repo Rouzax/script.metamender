@@ -113,10 +113,11 @@ def reset_exhausted() -> None:
 def update_now(dbtype: str, dbid: str) -> None:
     """Force a fresh single-item correction (D3 "Update now" context action).
 
-    Runs a force scan of one library item: it bypasses gating, exhaustion,
-    the cycle-processed skip, and the empty-only overwrite guard so provider
-    data overwrites existing non-empty fields. Acquires the shared scan lock
-    so it never runs concurrently with the service/manual scan.
+    Runs a reset scan of one library item: it bypasses the disabled-source
+    gate, the playback yield, and the cycle-processed skip, treats every
+    enabled field as due, and re-baselines each field's maturity clock.
+    Acquires the shared scan lock so it never runs concurrently with the
+    service/manual scan.
 
     Args:
         dbtype: Kodi ListItem.DBTYPE ("movie", "tvshow", or "episode").
@@ -199,7 +200,7 @@ def update_now(dbtype: str, dbid: str) -> None:
             settings=settings,
             monitor=xbmc.Monitor(),
             items=[item],
-            force=True,
+            reset=True,
             breaker=CircuitBreaker(),
             show_id_map=show_id_map,
         )

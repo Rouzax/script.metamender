@@ -1,7 +1,7 @@
 """Tests for entry-point action handlers (reset_exhausted, A20/D12)."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -124,12 +124,12 @@ def update_patched(monkeypatch: pytest.MonkeyPatch):
     }
 
 
-def test_update_now_movie_runs_force_scan(update_patched):
+def test_update_now_movie_runs_reset_scan(update_patched):
     actions.update_now("movie", "7")
     update_patched["get_item_by_id"].assert_called_once()
     update_patched["run_scan"].assert_called_once()
     _, kwargs = update_patched["run_scan"].call_args
-    assert kwargs["force"] is True
+    assert kwargs["reset"] is True
     assert kwargs["items"] == [{"title": "Air", "movieid": 7}]
     update_patched["notify"].assert_called_once()
     update_patched["release"].assert_called_once_with()
@@ -168,7 +168,7 @@ def test_update_now_episode_builds_show_id_map(update_patched):
     update_patched["build_show_id_map"].assert_called_once()
     _, kwargs = update_patched["run_scan"].call_args
     assert kwargs["show_id_map"] == {"Some Show": "555"}
-    assert kwargs["force"] is True
+    assert kwargs["reset"] is True
 
 
 def test_update_now_no_changes_notifies(update_patched):
@@ -176,3 +176,42 @@ def test_update_now_no_changes_notifies(update_patched):
     actions.update_now("movie", "7")
     msg = update_patched["notify"].call_args[0][0]
     assert "No changes" in msg or "no changes" in msg.lower()
+
+
+@patch("resources.lib.service.actions.run_scan")
+@patch("resources.lib.service.actions.get_item_by_id")
+def test_update_now_runs_on_disabled_source(mock_get, mock_scan, kodi_stubs, settings_mock):
+    """Source disabled in config: the reset path must still run a scan."""
+    from resources.lib.service import actions as _actions
+
+    # Wire up the minimal set of dependencies that update_now touches
+    # before calling run_scan (lock, db path, sources config, settings).
+    with patch.object(_actions, "acquire_scan_lock", return_value=True), \
+         patch.object(_actions, "release_scan_lock"), \
+         patch.object(_actions, "TrackerDB"), \
+         patch.object(_actions, "_get_db_path", return_value=":memory:"), \
+         patch.object(_actions, "_get_sources_config_path", return_value="s.json"), \
+         patch.object(_actions, "load_source_config",
+                      return_value={"sources": [], "default_language": "en-US"}), \
+         patch.object(_actions, "_load_settings", return_value={
+             "tmdb_api_key": "key",
+             "enabled_fields": frozenset({"plot"}),
+             "rate_limit": 0.0,
+         }), \
+         patch.object(_actions, "notify"), \
+         patch.object(_actions, "lang", _fake_lang), \
+         patch.object(_actions, "get_bool_setting", return_value=False), \
+         patch.object(_actions.StructuredLogger, "initialize", MagicMock()):
+
+        mock_get.return_value = {
+            "movieid": 1,
+            "title": "X",
+            "file": "smb://disabled/x.mkv",
+            "uniqueid": {"tmdb": "1"},
+        }
+        mock_scan.return_value = {"updated": 1}
+
+        _actions.update_now("movie", "1")
+
+    assert mock_scan.called, "run_scan was not called even though source is disabled"
+    assert mock_scan.call_args.kwargs.get("reset") is True

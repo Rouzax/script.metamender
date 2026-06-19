@@ -1638,17 +1638,17 @@ def test_same_title_movies_get_separate_tracker_rows(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# run_scan force path (D3 "Update now")
+# run_scan reset path (D3 "Update now")
 # ---------------------------------------------------------------------------
 
 
-class TestRunScanForce:
+class TestRunScanReset:
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_force_overwrites_nonempty_plot(
+    def test_reset_overwrites_nonempty_plot(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
-        """A force run overwrites an existing non-empty plot."""
+        """A reset run overwrites an existing non-empty plot."""
         item = _make_movie_item(plot="Existing curated plot")
         mock_fetch.return_value = _tmdb_movie_response(plot="Fresh provider plot")
         mock_update.return_value = True
@@ -1658,7 +1658,7 @@ class TestRunScanForce:
             MOVIE, tracker, _make_source_config(),
             frozenset({"plot"}),
             "fake_key", _make_settings(),
-            items=[item], force=True,
+            items=[item], reset=True,
         )
         tracker.close()
 
@@ -1668,10 +1668,10 @@ class TestRunScanForce:
 
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_force_refetches_final_field(
+    def test_reset_refetches_final_field(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
-        """Force ignores maturity: a field a normal scan would treat as final
+        """Reset ignores maturity: a field a normal scan would treat as final
         (old content, already sampled) is refetched and overwritten."""
         item = _make_movie_item(plot="Existing curated plot")
         item["premiered"] = "2000-01-01"  # old -> would be final after one sample
@@ -1687,7 +1687,7 @@ class TestRunScanForce:
             MOVIE, tracker, _make_source_config(),
             frozenset({"plot"}),
             "fake_key", _make_settings(),
-            items=[item], force=True,
+            items=[item], reset=True,
         )
 
         assert mock_fetch.called
@@ -1701,7 +1701,7 @@ class TestRunScanForce:
     def test_normal_scan_skips_final_field(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
-        """Control: without force, a final field (old content, already sampled)
+        """Control: without reset, a final field (old content, already sampled)
         is not fetched."""
         item = _make_movie_item(plot="Existing curated plot")
         item["premiered"] = "2000-01-01"
@@ -1725,10 +1725,10 @@ class TestRunScanForce:
 
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_force_rebaselines_field_clock(
+    def test_reset_rebaselines_field_clock(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
-        """A force run re-baselines the field clock (fetch_count 1, next_retry
+        """A reset run re-baselines the field clock (fetch_count 1, next_retry
         cleared) regardless of prior samples."""
         item = _make_movie_item(plot="")
         item["premiered"] = "2000-01-01"
@@ -1748,7 +1748,7 @@ class TestRunScanForce:
             MOVIE, tracker, _make_source_config(),
             frozenset({"plot"}),
             "fake_key", _make_settings(),
-            items=[item], force=True,
+            items=[item], reset=True,
         )
 
         field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
@@ -1759,10 +1759,10 @@ class TestRunScanForce:
 
     @patch("resources.lib.engine.scan.update_item")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_force_ignores_cycle_processed(
+    def test_reset_ignores_cycle_processed(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
-        """Force bypasses the cycle-processed resume skip."""
+        """Reset bypasses the cycle-processed resume skip."""
         item = _make_movie_item(plot="Old plot")
         mock_fetch.return_value = _tmdb_movie_response(plot="New plot")
         mock_update.return_value = True
@@ -1775,9 +1775,79 @@ class TestRunScanForce:
             MOVIE, tracker, _make_source_config(),
             frozenset({"plot"}),
             "fake_key", _make_settings(),
-            items=[item], force=True,
+            items=[item], reset=True,
         )
         tracker.close()
 
         assert mock_fetch.called
         assert stats["updated"] >= 1
+
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_reset_bypasses_disabled_source(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Reset skips the disabled-source gate: Update now must run even when
+        the item's source is toggled off in the source config."""
+        item = _make_movie_item(plot="")
+        item["file"] = "smb://disabled-share/movies/test.mkv"
+        mock_fetch.return_value = _tmdb_movie_response(plot="Fetched plot")
+        mock_update.return_value = True
+
+        source_config = {
+            "sources": [
+                {
+                    "path": "smb://disabled-share/",
+                    "enabled": False,
+                    "language": "en-US",
+                }
+            ],
+            "default_language": "en-US",
+        }
+
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, source_config,
+            frozenset({"plot"}),
+            "fake_key", _make_settings(),
+            items=[item], reset=True,
+        )
+        tracker.close()
+
+        assert mock_fetch.called, "Provider should be called even with disabled source"
+        assert stats["updated"] >= 1
+
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_normal_scan_skips_disabled_source(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Control: without reset, a disabled source causes the item to be
+        skipped and the provider is not called."""
+        item = _make_movie_item(plot="")
+        item["file"] = "smb://disabled-share/movies/test.mkv"
+        mock_fetch.return_value = _tmdb_movie_response(plot="Fetched plot")
+        mock_update.return_value = True
+
+        source_config = {
+            "sources": [
+                {
+                    "path": "smb://disabled-share/",
+                    "enabled": False,
+                    "language": "en-US",
+                }
+            ],
+            "default_language": "en-US",
+        }
+
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, source_config,
+            frozenset({"plot"}),
+            "fake_key", _make_settings(),
+            items=[item],
+        )
+        tracker.close()
+
+        assert not mock_fetch.called
+        assert stats["skipped"] >= 1
