@@ -102,6 +102,10 @@ def _make_stats() -> Dict[str, Any]:
         "updated": 0,
         "errors": 0,
         "fields": {},
+        # True when the pass stopped before reaching the end of the library
+        # (shutdown, or every provider disabled). The caller must not treat
+        # such a pass as a completed cycle.
+        "aborted": False,
     }
 
 
@@ -753,6 +757,7 @@ def run_scan(
                 media_type=media_type.name,
                 processed=stats["processed"],
             )
+            stats["aborted"] = True
             break
 
         # Yield: pause while video is playing. The reset path (Update now)
@@ -867,6 +872,7 @@ def run_scan(
                 event="scan.breaker", scope="both",
                 media_type=media_type.name, processed=stats["processed"],
             )
+            stats["aborted"] = True
             break
 
         if media_type.name == "episode" and not imdb_id and not tmdb_id:

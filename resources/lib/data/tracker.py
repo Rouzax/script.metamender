@@ -23,6 +23,11 @@ from resources.lib.utils import get_logger
 
 log = get_logger('tracker')
 
+# scan_state key holding "0" while a cycle is open and "1" once it finished.
+# A missing value means no cycle has ever been opened, which begin_cycle treats
+# as "not interrupted" so the first run starts fresh.
+_CYCLE_COMPLETE_KEY = "cycle_complete"
+
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -453,6 +458,36 @@ class TrackerDB:
             event="tracker.cycle_start",
             items_reset=cursor.rowcount,
         )
+
+    def begin_cycle(self, resume_interrupted: bool) -> bool:
+        """Open a scan cycle. Returns True if a fresh cycle was started.
+
+        A cycle is resumed only when the previous one was interrupted AND the
+        user asked to resume. A cycle that ran to completion always starts
+        fresh: `cycle_processed` would otherwise stay 1 for every item, the
+        whole library would be skipped from the second cycle on, and the
+        per-field refetch schedule would never come around again.
+        """
+        interrupted = self.get_scan_state(_CYCLE_COMPLETE_KEY) == "0"
+        started_fresh = not (interrupted and resume_interrupted)
+        if started_fresh:
+            self.start_new_cycle()
+        else:
+            log.info(
+                "Resuming interrupted scan cycle",
+                event="tracker.cycle_resume",
+            )
+        self.set_scan_state(_CYCLE_COMPLETE_KEY, "0")
+        return started_fresh
+
+    def mark_cycle_complete(self) -> None:
+        """Record that the current cycle reached the end of the library.
+
+        Only a cycle that was not cut short (shutdown, providers down) may be
+        marked complete, or the next run resumes from a watermark that never
+        covered the whole library.
+        """
+        self.set_scan_state(_CYCLE_COMPLETE_KEY, "1")
 
     def mark_cycle_processed(self, media_type: str, identity: str) -> None:
         """Mark an item as processed in the current cycle."""

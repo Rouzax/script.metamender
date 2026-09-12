@@ -407,8 +407,7 @@ def run() -> None:
                             _get_sources_config_path()
                         )
 
-                        if not settings["resume_interrupted"]:
-                            tracker.start_new_cycle()
+                        tracker.begin_cycle(settings["resume_interrupted"])
 
                         scan_start = time.perf_counter()
                         try:
@@ -469,16 +468,32 @@ def run() -> None:
 
                         last_scan = time.time()
                         monitor.clear_scan_request()
-                        tracker.set_scan_state(
-                            "last_scan_completed",
-                            time.strftime("%Y-%m-%d %H:%M:%S"),
-                        )
 
-                        # Prune orphaned tracker rows. Guarded to run only
-                        # after a FULL scan (kodi_filter is None); see
-                        # _maybe_prune_orphans for why a targeted scan must
-                        # never prune.
-                        _maybe_prune_orphans(tracker, settings, kodi_filter)
+                        # A pass that stopped early (shutdown, providers down)
+                        # did not cover the library. Closing the cycle then
+                        # would advance the watermark over items it never
+                        # visited, and pruning would delete the tracker rows of
+                        # items whose last_seen it never refreshed.
+                        cycle_aborted = any(
+                            s.get("aborted") for s in all_stats.values()
+                        )
+                        if cycle_aborted:
+                            log.info(
+                                "Scan cycle left open after early termination",
+                                event="service.cycle_incomplete",
+                            )
+                        else:
+                            tracker.mark_cycle_complete()
+                            tracker.set_scan_state(
+                                "last_scan_completed",
+                                time.strftime("%Y-%m-%d %H:%M:%S"),
+                            )
+
+                            # Prune orphaned tracker rows. Guarded to run only
+                            # after a FULL scan (kodi_filter is None); see
+                            # _maybe_prune_orphans for why a targeted scan must
+                            # never prune.
+                            _maybe_prune_orphans(tracker, settings, kodi_filter)
 
                         # Notification
                         if settings["show_notifications"]:

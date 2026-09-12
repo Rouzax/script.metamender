@@ -80,9 +80,12 @@ def test_manual_skips_when_no_api_key(
     assert any(k.get("event") == "manual.skip_no_key" for _a, k in warnings)
 
 
-def test_manual_resume_true_skips_new_cycle(
+def test_manual_resume_true_opens_cycle_with_resume(
     monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock]
 ) -> None:
+    """resume_interrupted is passed to begin_cycle, which decides whether the
+    previous cycle is resumable. It must not gate cycle creation outright: that
+    left cycle_processed set forever and skipped the whole library."""
     monkeypatch.setattr(
         manual,
         "_load_settings",
@@ -91,11 +94,11 @@ def test_manual_resume_true_skips_new_cycle(
 
     manual.run()
 
-    patched["tracker"].start_new_cycle.assert_not_called()
+    patched["tracker"].begin_cycle.assert_called_once_with(True)
     assert patched["run_scan"].called
 
 
-def test_manual_resume_false_starts_new_cycle(
+def test_manual_resume_false_opens_fresh_cycle(
     monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock]
 ) -> None:
     monkeypatch.setattr(
@@ -106,5 +109,37 @@ def test_manual_resume_false_starts_new_cycle(
 
     manual.run()
 
-    patched["tracker"].start_new_cycle.assert_called_once()
+    patched["tracker"].begin_cycle.assert_called_once_with(False)
     assert patched["run_scan"].called
+
+
+def test_manual_completed_scan_marks_cycle_complete(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock]
+) -> None:
+    monkeypatch.setattr(
+        manual,
+        "_load_settings",
+        MagicMock(return_value=_settings(resume_interrupted=True)),
+    )
+
+    manual.run()
+
+    patched["tracker"].mark_cycle_complete.assert_called_once()
+
+
+def test_manual_aborted_scan_leaves_cycle_open(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock]
+) -> None:
+    monkeypatch.setattr(
+        manual,
+        "_load_settings",
+        MagicMock(return_value=_settings(resume_interrupted=True)),
+    )
+    patched["run_scan"].return_value = {
+        "processed": 1, "skipped": 0, "updated": 0, "errors": 0,
+        "fields": {}, "aborted": True,
+    }
+
+    manual.run()
+
+    patched["tracker"].mark_cycle_complete.assert_not_called()
