@@ -497,7 +497,12 @@ def run() -> None:
                         release_scan_lock()
 
             except Exception:
+                # Back off like the typed handlers above. Without this the loop
+                # re-triggers on the very next tick (SERVICE_SLEEP_INTERVAL_SEC
+                # is 1s) because neither last_scan nor next_retry_after moved,
+                # turning any unanticipated fault into a 1 Hz full-library scan.
                 log.exception("Scan cycle failed", event="service.scan_error")
+                next_retry_after = time.time() + SCAN_FAILURE_BACKOFF_SEC
 
             if monitor.waitForAbort(SERVICE_SLEEP_INTERVAL_SEC):
                 break
