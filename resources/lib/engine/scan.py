@@ -465,7 +465,7 @@ def _fetch_episode_tmdb(
     success is recorded once at the end; ApiKeyError propagates and a transient
     failure trips the breaker.
     """
-    tmdb_data = None  # type: Optional[Dict[str, Any]]
+    tmdb_data = None  # type: Any
     try:
         cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
         is_cache_miss = cache_key not in ctx.season_cache
@@ -497,6 +497,10 @@ def _fetch_episode_tmdb(
         )
         raise
     except TransientProviderError:
+        # Signal "provider down", not "provider has nothing": returning None
+        # here would make _fetch_for_item compute fetch_clean=True and advance
+        # the maturity clock on an answer that was never received.
+        tmdb_data = _TRANSIENT
         if ctx.breaker.record_failure("tmdb"):
             log.warning(
                 "Provider disabled for this cycle after repeated failures",

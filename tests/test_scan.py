@@ -1855,3 +1855,39 @@ class TestRunScanReset:
 
         assert not mock_fetch.called
         assert stats["skipped"] >= 1
+
+
+
+
+class TestEpisodeTransientDoesNotAdvanceClock:
+    """A TMDB transient failure on the episode path is not an answer, so it
+    must not advance the maturity clock (the _TRANSIENT sentinel contract)."""
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.imdb_fetch_episode")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_season_transient_leaves_fetch_count_at_zero(
+        self, mock_fetch_season, mock_imdb, mock_update, mock_get_all,
+        tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        mock_get_all.return_value = [_make_episode_item()]
+        mock_fetch_season.side_effect = TransientProviderError("http 503")
+        mock_imdb.return_value = None
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, _make_source_config(),
+            frozenset({"rating", "plot", "title"}),
+            "fake_key", _make_settings(),
+            show_id_map={"Test Show": "55555"},
+        )
+        fs_map = tracker.get_field_status_map(
+            "episode", compute_identity(_make_episode_item(), EPISODE)
+        )
+        tracker.close()
+
+        assert fs_map == {}
