@@ -25,16 +25,16 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 import xbmc
 
-from resources.lib.data.identity import compute_identity
-from resources.lib.data.kodi import get_all_items, update_item
-from resources.lib.data.media_types import MediaType
-from resources.lib.data.sources import match_source
-from resources.lib.data.tracker import TrackerDB
 from resources.lib.constants import (
     DEFAULT_REFETCH_SCHEDULE,
     PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
     parse_refetch_schedule,
 )
+from resources.lib.data.identity import compute_identity
+from resources.lib.data.kodi import get_all_items, update_item
+from resources.lib.data.media_types import MediaType
+from resources.lib.data.sources import match_source
+from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.maturity import (
     FETCH_NOW,
@@ -250,9 +250,11 @@ def _extract_fields(
             value = int(value) * 60
 
         # firstaired: only write a full ISO date; skip bare-year values
-        if kodi_key == "firstaired":
-            if not (isinstance(value, str) and len(value) == 10 and value[4] == "-" and value[7] == "-"):
-                continue
+        if kodi_key == "firstaired" and not (
+            isinstance(value, str) and len(value) == 10
+            and value[4] == "-" and value[7] == "-"
+        ):
+            continue
 
         current = item.get(kodi_key)
 

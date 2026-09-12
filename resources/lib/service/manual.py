@@ -16,6 +16,7 @@ import time
 
 import xbmc
 
+from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
@@ -27,7 +28,6 @@ from resources.lib.service.daemon import (
     _load_settings,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
-from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.utils import (
     ApiKeyError,
     StructuredLogger,
