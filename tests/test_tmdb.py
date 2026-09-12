@@ -617,7 +617,12 @@ class TestFetchTvshow:
 
 
 class TestResolveId:
-    @patch("resources.lib.providers.tmdb.requests.get")
+    """resolve_id goes through provider_get, so it shares the one HTTP
+    classification: 404/no-match is a clean None, but 5xx/timeout/malformed
+    JSON raise TransientProviderError and count toward the circuit breaker.
+    """
+
+    @patch("resources.lib.providers.http.requests.get")
     def test_resolves_from_tvdb_id(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_TVDB)
 
@@ -627,7 +632,7 @@ class TestResolveId:
         call_kwargs = mock_get.call_args
         assert "tvdb_id" in call_kwargs[1]["params"]["external_source"]
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_resolves_from_imdb_id(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_IMDB)
 
@@ -637,7 +642,7 @@ class TestResolveId:
         call_kwargs = mock_get.call_args
         assert "imdb_id" in call_kwargs[1]["params"]["external_source"]
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_prefers_tvdb_over_imdb(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_TVDB)
 
@@ -647,7 +652,7 @@ class TestResolveId:
         assert "tvdb_id" in call_kwargs[1]["params"]["external_source"]
         assert "/find/395557" in call_kwargs[0][0]
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_when_not_found(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_EMPTY)
 
@@ -655,34 +660,40 @@ class TestResolveId:
 
         assert result is None
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
     def test_returns_none_when_no_ids_given(self, mock_get: MagicMock) -> None:
         result = resolve_id("fake_key")
         assert result is None
         mock_get.assert_not_called()
 
-    @patch("resources.lib.providers.tmdb.requests.get")
+    @patch("resources.lib.providers.http.requests.get")
+    def test_returns_none_on_404(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(404)
+        result = resolve_id("fake_key", tvdb_id="395557")
+        assert result is None
+
+    @patch("resources.lib.providers.http.requests.get")
     def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(401)
         with pytest.raises(ApiKeyError):
             resolve_id("fake_key", tvdb_id="395557")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
-    def test_returns_none_on_network_error(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         import requests as req
 
         mock_get.side_effect = req.ConnectionError("timeout")
-        result = resolve_id("fake_key", tvdb_id="395557")
-        assert result is None
+        with pytest.raises(TransientProviderError):
+            resolve_id("fake_key", tvdb_id="395557")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
-    def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_5xx(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(500)
-        result = resolve_id("fake_key", tvdb_id="395557")
-        assert result is None
+        with pytest.raises(TransientProviderError):
+            resolve_id("fake_key", tvdb_id="395557")
 
-    @patch("resources.lib.providers.tmdb.requests.get")
-    def test_returns_none_on_invalid_json(self, mock_get: MagicMock) -> None:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_raises_transient_on_invalid_json(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, raise_for_json=True)
-        result = resolve_id("fake_key", tvdb_id="395557")
-        assert result is None
+        with pytest.raises(TransientProviderError):
+            resolve_id("fake_key", tvdb_id="395557")

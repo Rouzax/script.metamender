@@ -19,11 +19,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-import requests
-
-from resources.lib.constants import METAMENDER_USER_AGENT, TMDB_BASE_URL
+from resources.lib.constants import TMDB_BASE_URL
 from resources.lib.providers.http import provider_get
-from resources.lib.utils import ApiKeyError, get_logger, log_timing
+from resources.lib.utils import get_logger, log_timing
 
 log = get_logger('tmdb')
 
@@ -125,8 +123,10 @@ def resolve_id(
 ) -> Optional[str]:
     """Resolve a TMDB ID from an external ID using the /find endpoint.
 
-    Tries tvdb_id first, then imdb_id. Returns the TMDB ID as a string,
-    or None if resolution fails. Raises ApiKeyError on HTTP 401.
+    Tries tvdb_id first, then imdb_id. Returns the TMDB ID as a string, or
+    None when the provider answered and had no match (404, or empty results).
+    Raises ApiKeyError on HTTP 401 and TransientProviderError when the provider
+    could not be reached, so a failure is never mistaken for "no match".
     """
     external_id = None  # type: Optional[str]
     source = None  # type: Optional[str]
@@ -142,42 +142,20 @@ def resolve_id(
 
     url = "{}/find/{}".format(TMDB_BASE_URL, external_id)
 
-    try:
-        with log_timing(log, "tmdb.resolve_id", tmdb_id=external_id):
-            resp = requests.get(
-                url,
-                params={"api_key": api_key, "external_source": source},
-                timeout=10,
-                headers={"User-Agent": METAMENDER_USER_AGENT},
-            )
-    except requests.RequestException:
-        log.exception(
-            "Resolve request failed",
-            event="tmdb.error",
-            tmdb_id=external_id,
+    # Routed through provider_get like every other outbound call, so a 5xx,
+    # timeout or malformed response raises TransientProviderError and counts
+    # toward the circuit breaker. Returning None on those would report a
+    # provider outage to the scan engine as a clean "no match".
+    with log_timing(log, "tmdb.resolve_id", tmdb_id=external_id):
+        data = provider_get(
+            url,
+            logger=log,
+            label="tmdb.resolve_id",
+            params={"api_key": api_key, "external_source": source},
+            provider="tmdb",
         )
-        return None
 
-    if resp.status_code == 401:
-        raise ApiKeyError("tmdb")
-
-    if resp.status_code != 200:
-        log.warning(
-            "Resolve returned unexpected status",
-            event="tmdb.error",
-            tmdb_id=external_id,
-            status_code=resp.status_code,
-        )
-        return None
-
-    try:
-        data = resp.json()
-    except ValueError:
-        log.exception(
-            "Invalid JSON in resolve response",
-            event="tmdb.error",
-            tmdb_id=external_id,
-        )
+    if data is None:
         return None
 
     # Intentionally show-level only: "tv_episode_results" is omitted. Episodes
