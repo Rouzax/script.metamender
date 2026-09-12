@@ -1891,3 +1891,59 @@ class TestEpisodeTransientDoesNotAdvanceClock:
         tracker.close()
 
         assert fs_map == {}
+
+
+
+
+class TestFailedWriteLeavesClockAlone:
+    """A field whose Kodi write failed was not filled, so its maturity clock
+    must not advance: otherwise aged content goes FINAL and is abandoned."""
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.imdb_fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_failed_write_does_not_advance_fetch_count(
+        self, mock_tmdb, mock_imdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_tmdb.return_value = {"plot": "A plot"}
+        mock_imdb.return_value = None
+        mock_update.return_value = False  # Kodi rejected the write
+
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "fake_key", _make_settings(),
+        )
+        fs_map = tracker.get_field_status_map(
+            "movie", compute_identity(_make_movie_item(), MOVIE)
+        )
+        tracker.close()
+
+        assert stats["errors"] == 1
+        assert fs_map.get("plot", {}).get("fetch_count", 0) == 0
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.imdb_fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_successful_write_does_advance_fetch_count(
+        self, mock_tmdb, mock_imdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_tmdb.return_value = {"plot": "A plot"}
+        mock_imdb.return_value = None
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "fake_key", _make_settings(),
+        )
+        fs_map = tracker.get_field_status_map(
+            "movie", compute_identity(_make_movie_item(), MOVIE)
+        )
+        tracker.close()
+
+        assert fs_map["plot"]["fetch_count"] == 1

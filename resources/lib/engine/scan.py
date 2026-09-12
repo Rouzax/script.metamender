@@ -905,10 +905,21 @@ def run_scan(
             if new_ratings is not None:
                 fields_to_write["ratings"] = new_ratings
 
-        _write_fields(
+        written = _write_fields(
             ctx, item, kodi_id, title, identity, fields_to_write,
             source_map, ratings_source, ratings_votes, stats,
         )
+
+        # A field whose write was attempted and rejected by Kodi was NOT filled,
+        # so its clock must not advance: otherwise aged content reaches FINAL on
+        # the next scan and is never written again. Fields with nothing to write
+        # (provider answered, value empty or unchanged) are a clean sample and
+        # do advance.
+        attempted = set(fields_to_write)
+        if "ratings" in attempted:
+            attempted.discard("ratings")
+            attempted.update({"rating", "votes"})
+        write_failed = attempted - written
 
         # Advance counters ONLY on a clean answer; a transient failure leaves
         # them put so the field is retried next scan instead of being wrongly
@@ -916,6 +927,8 @@ def run_scan(
         if fetch_clean:
             premiered = item.get(media_type.date_field, "")
             for f in nonfinal:
+                if f in write_failed:
+                    continue
                 if reset:
                     nd = compute_next_due(
                         1, ctx.schedule, premiered, threshold, today,
