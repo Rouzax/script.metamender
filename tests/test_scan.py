@@ -1855,3 +1855,184 @@ class TestRunScanReset:
 
         assert not mock_fetch.called
         assert stats["skipped"] >= 1
+
+
+class TestCycleCompletionReporting:
+    """run_scan must tell the caller whether it reached the end of the library.
+
+    The daemon may only mark a cycle complete when it did; otherwise the resume
+    watermark advances over items the scan never visited.
+    """
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_completed_scan_reports_not_aborted(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_fetch.return_value = {"plot": "A plot"}
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "fake_key", _make_settings(),
+        )
+        tracker.close()
+        assert stats["aborted"] is False
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_aborted_scan_reports_aborted(
+        self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [
+            _make_movie_item(),
+            _make_movie_item(title="Movie 2", tmdb_id="99999"),
+        ]
+        monitor = MagicMock()
+        monitor.abortRequested.return_value = True
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "fake_key", _make_settings(), monitor=monitor,
+        )
+        tracker.close()
+        assert stats["aborted"] is True
+
+
+class TestFailedWriteLeavesClockAlone:
+    """A field whose Kodi write failed was not filled, so its maturity clock
+    must not advance: otherwise aged content goes FINAL and is abandoned."""
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.imdb_fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_failed_write_does_not_advance_fetch_count(
+        self, mock_tmdb, mock_imdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_tmdb.return_value = {"plot": "A plot"}
+        mock_imdb.return_value = None
+        mock_update.return_value = False  # Kodi rejected the write
+
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "fake_key", _make_settings(),
+        )
+        fs_map = tracker.get_field_status_map(
+            "movie", compute_identity(_make_movie_item(), MOVIE)
+        )
+        tracker.close()
+
+        assert stats["errors"] == 1
+        assert fs_map.get("plot", {}).get("fetch_count", 0) == 0
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.imdb_fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_successful_write_does_advance_fetch_count(
+        self, mock_tmdb, mock_imdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_tmdb.return_value = {"plot": "A plot"}
+        mock_imdb.return_value = None
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "fake_key", _make_settings(),
+        )
+        fs_map = tracker.get_field_status_map(
+            "movie", compute_identity(_make_movie_item(), MOVIE)
+        )
+        tracker.close()
+
+        assert fs_map["plot"]["fetch_count"] == 1
+
+
+class TestEpisodeTransientDoesNotAdvanceClock:
+    """A TMDB transient failure on the episode path is not an answer, so it
+    must not advance the maturity clock (the _TRANSIENT sentinel contract)."""
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.imdb_fetch_episode")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_season_transient_leaves_fetch_count_at_zero(
+        self, mock_fetch_season, mock_imdb, mock_update, mock_get_all,
+        tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        mock_get_all.return_value = [_make_episode_item()]
+        mock_fetch_season.side_effect = TransientProviderError("http 503")
+        mock_imdb.return_value = None
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, _make_source_config(),
+            frozenset({"rating", "plot", "title"}),
+            "fake_key", _make_settings(),
+            show_id_map={"Test Show": "55555"},
+        )
+        fs_map = tracker.get_field_status_map(
+            "episode", compute_identity(_make_episode_item(), EPISODE)
+        )
+        tracker.close()
+
+        assert fs_map == {}
+
+
+class TestConsecutiveCycles:
+    """End-to-end guard for the defect where the shipped default configuration
+    never started a second cycle: cycle_processed stayed 1 for every item, so
+    the whole library was skipped from cycle 2 on and last_seen froze."""
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item")
+    @patch("resources.lib.engine.scan.imdb_fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_second_cycle_processes_the_library_again(
+        self, mock_tmdb, mock_imdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_tmdb.return_value = {"plot": "A plot"}
+        mock_imdb.return_value = None
+        mock_update.return_value = True
+
+        tracker = _make_tracker(tmp_path)
+        fields = frozenset({"plot"})
+        settings = _make_settings()
+
+        # Cycle 1, run to completion.
+        tracker.begin_cycle(resume_interrupted=True)
+        first = run_scan(
+            MOVIE, tracker, _make_source_config(), fields, "k", settings,
+        )
+        tracker.mark_cycle_complete()
+
+        # Cycle 2, with resume_interrupted still at its shipped default.
+        # Backdate last_seen so a refresh in cycle 2 is observable.
+        identity = compute_identity(_make_movie_item(), MOVIE)
+        tracker._conn.execute(
+            "UPDATE items SET last_seen = ?", ("2000-01-01",),
+        )
+        tracker._conn.commit()
+
+        tracker.begin_cycle(resume_interrupted=True)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), fields, "k", settings,
+        )
+        last_seen_after_cycle_2 = tracker.get_item("movie", identity)["last_seen"]
+        tracker.close()
+
+        # Cycle 2 need not re-fetch (the field is not due yet), but it MUST
+        # reach the item: with the cycle never reopening, the resume check
+        # short-circuited above update_last_seen, last_seen froze at cycle 1,
+        # and prune_orphans then deleted the rows of items still in the library.
+        assert first["processed"] == 1
+        assert last_seen_after_cycle_2 == date.today().isoformat()

@@ -25,16 +25,16 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 import xbmc
 
-from resources.lib.data.identity import compute_identity
-from resources.lib.data.kodi import get_all_items, update_item
-from resources.lib.data.media_types import MediaType
-from resources.lib.data.sources import match_source
-from resources.lib.data.tracker import TrackerDB
 from resources.lib.constants import (
     DEFAULT_REFETCH_SCHEDULE,
     PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
     parse_refetch_schedule,
 )
+from resources.lib.data.identity import compute_identity
+from resources.lib.data.kodi import get_all_items, update_item
+from resources.lib.data.media_types import MediaType
+from resources.lib.data.sources import match_source
+from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.maturity import (
     FETCH_NOW,
@@ -102,6 +102,10 @@ def _make_stats() -> Dict[str, Any]:
         "updated": 0,
         "errors": 0,
         "fields": {},
+        # True when the pass stopped before reaching the end of the library
+        # (shutdown, or every provider disabled). The caller must not treat
+        # such a pass as a completed cycle.
+        "aborted": False,
     }
 
 
@@ -246,9 +250,11 @@ def _extract_fields(
             value = int(value) * 60
 
         # firstaired: only write a full ISO date; skip bare-year values
-        if kodi_key == "firstaired":
-            if not (isinstance(value, str) and len(value) == 10 and value[4] == "-" and value[7] == "-"):
-                continue
+        if kodi_key == "firstaired" and not (
+            isinstance(value, str) and len(value) == 10
+            and value[4] == "-" and value[7] == "-"
+        ):
+            continue
 
         current = item.get(kodi_key)
 
@@ -465,7 +471,7 @@ def _fetch_episode_tmdb(
     success is recorded once at the end; ApiKeyError propagates and a transient
     failure trips the breaker.
     """
-    tmdb_data = None  # type: Optional[Dict[str, Any]]
+    tmdb_data = None  # type: Any
     try:
         cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
         is_cache_miss = cache_key not in ctx.season_cache
@@ -497,6 +503,10 @@ def _fetch_episode_tmdb(
         )
         raise
     except TransientProviderError:
+        # Signal "provider down", not "provider has nothing": returning None
+        # here would make _fetch_for_item compute fetch_clean=True and advance
+        # the maturity clock on an answer that was never received.
+        tmdb_data = _TRANSIENT
         if ctx.breaker.record_failure("tmdb"):
             log.warning(
                 "Provider disabled for this cycle after repeated failures",
@@ -749,6 +759,7 @@ def run_scan(
                 media_type=media_type.name,
                 processed=stats["processed"],
             )
+            stats["aborted"] = True
             break
 
         # Yield: pause while video is playing. The reset path (Update now)
@@ -863,6 +874,7 @@ def run_scan(
                 event="scan.breaker", scope="both",
                 media_type=media_type.name, processed=stats["processed"],
             )
+            stats["aborted"] = True
             break
 
         if media_type.name == "episode" and not imdb_id and not tmdb_id:
@@ -901,10 +913,21 @@ def run_scan(
             if new_ratings is not None:
                 fields_to_write["ratings"] = new_ratings
 
-        _write_fields(
+        written = _write_fields(
             ctx, item, kodi_id, title, identity, fields_to_write,
             source_map, ratings_source, ratings_votes, stats,
         )
+
+        # A field whose write was attempted and rejected by Kodi was NOT filled,
+        # so its clock must not advance: otherwise aged content reaches FINAL on
+        # the next scan and is never written again. Fields with nothing to write
+        # (provider answered, value empty or unchanged) are a clean sample and
+        # do advance.
+        attempted = set(fields_to_write)
+        if "ratings" in attempted:
+            attempted.discard("ratings")
+            attempted.update({"rating", "votes"})
+        write_failed = attempted - written
 
         # Advance counters ONLY on a clean answer; a transient failure leaves
         # them put so the field is retried next scan instead of being wrongly
@@ -912,6 +935,8 @@ def run_scan(
         if fetch_clean:
             premiered = item.get(media_type.date_field, "")
             for f in nonfinal:
+                if f in write_failed:
+                    continue
                 if reset:
                     nd = compute_next_due(
                         1, ctx.schedule, premiered, threshold, today,

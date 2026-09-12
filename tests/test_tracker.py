@@ -401,3 +401,47 @@ def test_reset_field_clock(tmp_path, kodi_stubs):
     t.close()
     assert row["fetch_count"] == 1
     assert row["next_retry"] == "2026-09-15"
+
+
+# --- Cycle lifecycle: begin_cycle / mark_cycle_complete ---
+
+def test_begin_cycle_starts_fresh_cycle_on_first_run(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
+    db.mark_cycle_processed("movie", "Movie A")
+    assert db.begin_cycle(resume_interrupted=True) is True
+    assert db.get_item("movie", "Movie A")["cycle_processed"] == 0
+    db.close()
+
+
+def test_begin_cycle_starts_fresh_cycle_after_previous_completed(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
+    db.begin_cycle(resume_interrupted=True)
+    db.mark_cycle_processed("movie", "Movie A")
+    db.mark_cycle_complete()
+    # resume_interrupted must NOT hold the previous completed cycle open.
+    assert db.begin_cycle(resume_interrupted=True) is True
+    assert db.get_item("movie", "Movie A")["cycle_processed"] == 0
+    db.close()
+
+
+def test_begin_cycle_resumes_interrupted_cycle(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
+    db.begin_cycle(resume_interrupted=True)
+    db.mark_cycle_processed("movie", "Movie A")
+    # No mark_cycle_complete: the cycle was interrupted.
+    assert db.begin_cycle(resume_interrupted=True) is False
+    assert db.get_item("movie", "Movie A")["cycle_processed"] == 1
+    db.close()
+
+
+def test_begin_cycle_restarts_interrupted_cycle_when_resume_disabled(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Movie A", kodi_id=1, tmdb_id="1")
+    db.begin_cycle(resume_interrupted=False)
+    db.mark_cycle_processed("movie", "Movie A")
+    assert db.begin_cycle(resume_interrupted=False) is True
+    assert db.get_item("movie", "Movie A")["cycle_processed"] == 0
+    db.close()

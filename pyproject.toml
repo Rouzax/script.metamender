@@ -1,3 +1,58 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.ruff]
+# Kodi Omega ships Python 3.8. Pinned to match pyrightconfig.json so neither
+# tool proposes syntax the target interpreter cannot run.
+target-version = "py38"
+
+[tool.ruff.lint]
+# UP (pyupgrade) is disabled rather than fixed: most of it rewrites typing
+# imports to 3.9+ builtin generics and X | Y unions, which break on the 3.8
+# floor above. The version-independent members (UP032 f-strings) are excluded
+# with them so the codebase keeps one .format() style throughout.
+#
+# DTZ wants timezone-aware datetimes. Every call it flags is deliberate local
+# time: content age, refetch due dates and per-scan log filenames are all
+# reasoned about in the user's timezone, and the maturity clock compares them
+# against dates Kodi stores as local. Making them UTC would shift due dates.
+ignore = ["UP", "DTZ"]
+
+[tool.ruff.lint.isort]
+# Keep aliased members grouped in one statement per module. Without this, isort
+# emits a separate `from x import (y as z)` block per alias, which is noise in
+# the provider imports.
+combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# Baseline: findings in files the 2026-09-12 review fixes did not touch, left
+# reported-but-not-blocking so the gate is green at a level the codebase
+# already meets. This list only shrinks: when you next edit one of these files,
+# clear its findings and delete the entry. Do not add to it.
+#
+# utils.py SIM115 is the exception and is permanent: the per-scan log file is
+# deliberately held open between start_scan_log and stop_scan_log, so it cannot
+# use a context manager.
+# gaps.py is dead code (no caller outside tests) and should be deleted rather
+# than fixed; see docs/superpowers/reviews/2026-09-12-adversarial-review.
+"resources/lib/utils.py" = ["I001", "SIM102", "SIM103", "SIM115"]
+"resources/lib/engine/gaps.py" = ["SIM103"]
+"resources/lib/engine/resolve.py" = ["PLC0206"]
+
+# tests/ and docker/ were never in the lint gate (the repo's validation command
+# is `ruff check resources/lib/`). Baselined at their current findings so an
+# unscoped `ruff check .` is green too, rather than turning test linting into a
+# new blocking gate. Same rule as above: this list only shrinks.
+"tests/**/*.py" = [
+    "BLE001",
+    "E402",
+    "EXE001",
+    "I001",
+    "PLR1711",
+    "RET501",
+    "RUF059",
+    "RUF100",
+    "SIM102",
+]
+"docker/**/*.py" = ["I001"]

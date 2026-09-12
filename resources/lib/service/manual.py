@@ -16,6 +16,7 @@ import time
 
 import xbmc
 
+from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
@@ -27,7 +28,6 @@ from resources.lib.service.daemon import (
     _load_settings,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
-from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.utils import (
     ApiKeyError,
     StructuredLogger,
@@ -78,8 +78,7 @@ def run() -> None:
         tracker = TrackerDB(_get_db_path())
         source_config = load_source_config(_get_sources_config_path())
 
-        if not settings["resume_interrupted"]:
-            tracker.start_new_cycle()
+        tracker.begin_cycle(settings["resume_interrupted"])
 
         tmdb_api_key = settings["tmdb_api_key"]
         enabled_fields = settings["enabled_fields"]
@@ -134,6 +133,11 @@ def run() -> None:
             episodes_updated=episode_stats.get("updated", 0),
             duration_ms=duration_ms,
         )
+
+        # Only a pass that reached the end of the library closes the cycle;
+        # otherwise the next run would start fresh over items it never visited.
+        if not any(s.get("aborted") for s in all_stats.values()):
+            tracker.mark_cycle_complete()
 
         # Notification
         total_updated = (
