@@ -11,7 +11,7 @@ Usage:
     python3 tests/live_integration_test.py 1        # run test 1 only
 
 Requires:
-    - Kodi running at localhost:8085
+    - Kodi running at localhost:8101
     - TMDB API key
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-KODI_URL = os.environ.get("KODI_URL", "http://localhost:8085/jsonrpc")
+KODI_URL = os.environ.get("KODI_URL", "http://localhost:8101/jsonrpc")
 TMDB_KEY = os.environ.get("TMDB_API_KEY", "")  # set TMDB_API_KEY env var to run
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
