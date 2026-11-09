@@ -140,7 +140,7 @@ The seeded settings enable the metadata field groups with **certifications off**
 | `verify.py` | Host-harness surgical checks | No (bundled commands) |
 | `setup.sh` | Install MetaMender into the container | Backs up first |
 | `teardown.sh` | Remove MetaMender (`--restore` to roll back the DB) | No (optional restore) |
-| `run-test.sh` | `--status` report / trigger scan / `--log` | `--status` no; scan yes |
+| `run-test.sh` | `--status` report / trigger scan / `--log` | `--status` no; scan: stops at the lock, writes nothing |
 | `kodi-rpc.sh` | Send a raw JSON-RPC payload | Depends on payload |
 | `wait-for-kodi.sh` | Wait for JSON-RPC readiness (shared) | No |
 | `backup-db.sh` / `restore-db.sh` | Shared DB backup/restore wrappers | restore yes |

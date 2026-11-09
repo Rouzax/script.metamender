@@ -821,7 +821,7 @@ _BUURMAN_TVDB = "80767"
 
 def test_11_tvdb_series_verification(t):
     # type: (TestResult) -> None
-    """TVDB's "Pat a Mat" carries the Dutch title the library uses.
+    """TVDB's "Buurman en Buurman" (80767) carries the Dutch title the library uses.
 
     The library holds this show's TVDB id as an untyped "unknown" uniqueid;
     the scan accepts it only when one of the series' names matches.
