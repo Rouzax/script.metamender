@@ -69,10 +69,24 @@ staleness.py, retry ladder) removed. 344 unit tests green; live suite refreshed.
 - [x] 7c.7 Tests + live Kodi validation (maturity ladder, age-based one-shot finalize, manual reset, refresh-on-diff, SKIP_NOT_DUE)
 - [x] 7c.8 Doc sync: new design spec written (docs/superpowers/specs/2026-06-19-field-maturity-model-design.md); "superseded by maturity model" banners added to the eucert master specs (engine/storage/settings/overview/scan-engine-v2) and to the write-correctness and retry-exhaustion plans (banners point to the current design; spec internals not rewritten)
 
-## Phase 8: Port Certification Module
-- [ ] 8.1 Port presets and config (country JSON presets, load/inference/seed)
-- [ ] 8.2 Port certification providers (FSK, BBFC, Kijkwijzer, Medieraadet)
-- [ ] 8.3 Port certification backfill logic (multi-tier lookup)
+## Review fixes (adversarial review, 2026-09-12)
+- [x] Five verified runtime defects fixed (resolve_id through provider_get, transient sentinel on the episode TMDB path, clock untouched on a failed Kodi write, service backoff, cycle reopen)
+- [x] Unreachable provider (open breaker, transient ID lookup) is transient, never "empty"
+- [x] API keys redacted at the logging layer
+- [x] Rig scripts moved to JSON-RPC port 8101
+
+## Phase 7d: Replace the IMDb provider
+api.imdbapi.dev shut down in July 2026. Design not yet written.
+- [ ] 7d.1 Design: IMDb ratings via script.module.imdbratings, TMDB for text, TVDB Dutch-text fallback, id resolution for items without ids
+- [ ] 7d.2 Implementation plan
+- [ ] 7d.3 Implement and remove providers/imdbapi.py
+- [ ] 7d.4 Live validation on Omega and Piers
+
+## Phase 8: Certifications (rewrite, not a port of script.eucert.fixer)
+- [ ] 8.0 Settle the ten decisions in the Phase 8 review action list
+- [ ] 8.1 Presets and config (country JSON presets, load/inference/seed)
+- [ ] 8.2 Certification sources: TMDB, then preset inference, then BBFC, FSK, Medieraadet (Kijkwijzer dropped: bot challenge)
+- [ ] 8.3 Certification backfill logic (multi-tier lookup)
 - [ ] 8.4 Integrate certifications into scan engine
 
 ## Phase 9: Source Configuration Dialog
@@ -103,4 +117,3 @@ staleness.py, retry ladder) removed. 344 unit tests green; live suite refreshed.
 - [x] Docker infrastructure: media mount (/mnt/media/Data), path substitution, MetaMender volume
 - [x] Live integration test suite (10 scenarios, 53 checks, runs against Docker Kodi)
 
-## Test Count: 246 unit + 185 integration = 431 total
