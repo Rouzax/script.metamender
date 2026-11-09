@@ -86,6 +86,8 @@ sys.modules.setdefault("xbmc", _xbmc)
 sys.modules.setdefault("xbmcaddon", _xbmcaddon)
 sys.modules.setdefault("xbmcgui", _xbmcgui)
 sys.modules.setdefault("xbmcvfs", MagicMock())
+# script.module.imdbratings is a Kodi add-on module, not installed under pytest.
+sys.modules.setdefault("imdbratings", MagicMock())
 
 # Add project root to path so `resources.lib` resolves
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -114,3 +116,16 @@ def settings_mock() -> Generator[MagicMock, None, None]:
     original = addon_mock.getSetting.side_effect
     yield addon_mock.getSetting
     addon_mock.getSetting.side_effect = original
+
+
+@pytest.fixture
+def imdbratings_stub() -> Generator[MagicMock, None, None]:
+    """A fresh stand-in for script.module.imdbratings, restored on teardown."""
+    stub = MagicMock()
+    previous = sys.modules.get("imdbratings")
+    sys.modules["imdbratings"] = stub
+    yield stub
+    if previous is None:
+        sys.modules.pop("imdbratings", None)
+    else:
+        sys.modules["imdbratings"] = previous
