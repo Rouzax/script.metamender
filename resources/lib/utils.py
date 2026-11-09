@@ -199,6 +199,12 @@ class ApiKeyError(Exception):
         super().__init__("Invalid API key for {}".format(provider))
 
 
+class TvdbAuthError(Exception):
+    """TheTVDB login failed, or a request was still refused with 401 after one
+    fresh login. TVDB is unusable for the rest of the cycle; other providers
+    are unaffected."""
+
+
 class TransientProviderError(Exception):
     """A provider request failed transiently (429, 5xx, timeout, connection,
     malformed JSON). Counts toward the circuit breaker; the item is retried."""
