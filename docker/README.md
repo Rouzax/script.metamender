@@ -2,7 +2,7 @@
 
 These scripts test MetaMender against the shared headless Kodi container
 documented at `~/docker/kodi-headless/README.md` (container
-`kodi-test`, JSON-RPC on `http://localhost:8085/jsonrpc`, shared MariaDB
+`kodi-test`, JSON-RPC on `http://localhost:8101/jsonrpc`, shared MariaDB
 library `testvideo131`). MetaMender is already bind-mounted there at
 `/addon-metamender`, so no compose changes are needed.
 

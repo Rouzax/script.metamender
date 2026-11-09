@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-KODI_URL="${KODI_URL:-http://localhost:8085/jsonrpc}"
+KODI_URL="${KODI_URL:-http://localhost:8101/jsonrpc}"
 CONTAINER="${CONTAINER:-kodi-test}"
 ADDON_ID="script.metamender"
 ADDON_DATA="/config/.kodi/userdata/addon_data/$ADDON_ID"

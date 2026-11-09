@@ -17,7 +17,7 @@ Commands:
                         tracker is a throwaway temp DB).
 
 Env:
-    KODI_URL        default http://localhost:8085/jsonrpc
+    KODI_URL        default http://localhost:8101/jsonrpc
     TMDB_API_KEY    optional; only needed if you extend this with real-write
                     tests. The bundled commands do not require it.
 
@@ -36,7 +36,7 @@ from unittest.mock import MagicMock
 
 import requests
 
-KODI_URL = os.environ.get("KODI_URL", "http://localhost:8085/jsonrpc")
+KODI_URL = os.environ.get("KODI_URL", "http://localhost:8101/jsonrpc")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 
