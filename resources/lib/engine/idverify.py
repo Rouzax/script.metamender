@@ -13,7 +13,8 @@ that remains must match. A year is compared separately: when both sides
 have one (from a trailing "(year)" or passed in) they must be within a year
 of each other, so a same-titled remake is not taken for the original. The
 tolerance allows for a premiere that falls on either side of New Year in
-different countries.
+different countries. A year mismatch is reported apart from a name mismatch,
+because the scan can confirm such a show by its episode ids instead.
 
 Logging:
     None (pure functions).
@@ -71,23 +72,45 @@ def _years_agree(a: Optional[int], b: Optional[int]) -> bool:
     return a is None or b is None or abs(a - b) <= _YEAR_TOLERANCE
 
 
+NAME_MISMATCH = "name_mismatch"
+YEAR_MISMATCH = "year_mismatch"
+
+
+def show_mismatch(
+    kodi_title: str,
+    candidate_names: List[str],
+    kodi_year: Optional[int] = None,
+    candidate_year: Optional[int] = None,
+) -> Optional[str]:
+    """Why the Kodi title does not name the candidate show, or None when it
+    does.
+
+    It does when the title equals one of the candidate names after
+    normalization and the years agree where both sides have one. A year in
+    the title wins over the passed year. YEAR_MISMATCH means a name matched
+    but no matching name agreed on the year; NAME_MISMATCH means no name
+    matched (an empty normalized title never does). The caller may confirm a
+    year mismatch by other evidence; a name mismatch is final.
+    """
+    wanted = normalize_title(kodi_title)
+    if not wanted:
+        return NAME_MISMATCH
+    own_year = _title_year(kodi_title) or kodi_year
+    reason = NAME_MISMATCH
+    for name in candidate_names:
+        if normalize_title(name) != wanted:
+            continue
+        if _years_agree(own_year, _title_year(name) or candidate_year):
+            return None
+        reason = YEAR_MISMATCH
+    return reason
+
+
 def show_matches(
     kodi_title: str,
     candidate_names: List[str],
     kodi_year: Optional[int] = None,
     candidate_year: Optional[int] = None,
 ) -> bool:
-    """True when the Kodi title equals one of the candidate names after
-    normalization, and the years agree where both sides have one. A year in
-    the title wins over the passed year. An empty normalized title never
-    matches."""
-    wanted = normalize_title(kodi_title)
-    if not wanted:
-        return False
-    own_year = _title_year(kodi_title) or kodi_year
-    for name in candidate_names:
-        if normalize_title(name) != wanted:
-            continue
-        if _years_agree(own_year, _title_year(name) or candidate_year):
-            return True
-    return False
+    """True when show_mismatch finds no reason the title does not match."""
+    return show_mismatch(kodi_title, candidate_names, kodi_year, candidate_year) is None

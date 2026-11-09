@@ -4664,3 +4664,162 @@ class TestSettingsChangeWrites:
         assert row["fetch_count"] == 1
         assert row["source"] == "tmdb"
         assert row["from_fallback"] == 0
+
+
+def _buurman_show():
+    # type: () -> Dict[str, Any]
+    """Buurman en Buurman as the library holds it: an untyped TVDB id and a
+    Kodi year (1976) TVDB does not share (1979)."""
+    item = _nl_show()
+    item["premiered"] = "1976-01-01"
+    return item
+
+
+def _kodi_episodes(unknown_ids):
+    # type: (Any) -> Any
+    return [
+        _episode(200 + n, {"unknown": uid}, episode=n + 1)
+        for n, uid in enumerate(unknown_ids)
+    ]
+
+
+def _tvdb_list(ids):
+    # type: (Any) -> Dict[str, Dict[str, str]]
+    return {i: {"title": "", "plot": ""} for i in ids}
+
+
+_BUURMAN_SERIES = {
+    "name": "Buurman en Buurman", "overview": "Twee buren klussen.",
+    "names": _BUURMAN_NAMES, "year": 1979,
+}
+
+
+class TestYearMismatchConfirmedByEpisodes:
+    """A show id whose names match but whose year does not is accepted when
+    the show's own untyped episode ids are in that series' episode list."""
+
+    def _scan(self, tmp_path, kodi_episodes, tvdb_episodes, item=None):
+        tracker = _make_tracker(tmp_path)
+        with patch("resources.lib.engine.scan.tvdb_fetch_series",
+                   return_value=_BUURMAN_SERIES), \
+                patch("resources.lib.engine.scan.tvdb_fetch_series_episodes",
+                      **tvdb_episodes) as mock_eps, \
+                patch("resources.lib.engine.scan.get_all_items",
+                      **kodi_episodes) as mock_kodi, \
+                patch("resources.lib.engine.scan.update_item", return_value=True), \
+                patch("resources.lib.engine.scan.log") as mock_log:
+            stats = run_scan(
+                TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+                "k", _make_settings(), items=[item or _buurman_show()],
+            )
+        row = _row(tracker, TVSHOW, item or _buurman_show())
+        fs_map = _fs(tracker, TVSHOW, item or _buurman_show())
+        tracker.close()
+        return stats, row, fs_map, mock_eps, mock_kodi, mock_log
+
+    @staticmethod
+    def _reasons(mock_log, event):
+        return [
+            c.kwargs.get("reason")
+            for level in (mock_log.info, mock_log.debug)
+            for c in level.call_args_list
+            if c.kwargs.get("event") == event
+        ]
+
+    def test_accepted_when_episode_ids_confirm(self, tmp_path, kodi_stubs):
+        stats, row, fs_map, mock_eps, mock_kodi, mock_log = self._scan(
+            tmp_path,
+            {"return_value": _kodi_episodes(["1", "2", "3"])},
+            {"return_value": _tvdb_list(["1", "2", "3", "4"])},
+        )
+
+        assert row["tvdb_id"] == "80767"
+        assert mock_kodi.call_args.kwargs == {"tvshowid": 10}
+        assert mock_kodi.call_args.args[0] is EPISODE
+        assert mock_eps.call_args.args == ("80767", "nld")
+        assert self._reasons(mock_log, "scan.unknown_id_accepted") == ["accepted_by_episodes"]
+        assert fs_map["plot"]["source"] == "tvdb"
+
+    def test_rejected_when_only_one_episode_confirms(self, tmp_path, kodi_stubs):
+        _stats, row, _fs_map, _eps, _kodi, mock_log = self._scan(
+            tmp_path,
+            {"return_value": _kodi_episodes(["1"])},
+            {"return_value": _tvdb_list(["1", "2"])},
+        )
+
+        assert row["tvdb_id"] is None
+        assert self._reasons(mock_log, "scan.unknown_id_rejected") == ["year_mismatch"]
+
+    def test_rejected_without_a_majority(self, tmp_path, kodi_stubs):
+        _stats, row, _fs_map, _eps, _kodi, _log = self._scan(
+            tmp_path,
+            {"return_value": _kodi_episodes(["1", "2", "8", "9"])},
+            {"return_value": _tvdb_list(["1", "2", "3"])},
+        )
+
+        assert row["tvdb_id"] is None
+
+    def test_rejected_when_show_has_no_unknown_episode_ids(self, tmp_path, kodi_stubs):
+        _stats, row, _fs_map, mock_eps, _kodi, mock_log = self._scan(
+            tmp_path,
+            {"return_value": [_episode(200, {"tvdb": "1"})]},
+            {"return_value": _tvdb_list(["1"])},
+        )
+
+        assert row["tvdb_id"] is None
+        assert row["ids_checked"] == date.today().isoformat()
+        mock_eps.assert_not_called()
+        assert self._reasons(mock_log, "scan.unknown_id_rejected") == ["year_mismatch"]
+
+    def test_transient_episode_list_is_not_a_rejection(self, tmp_path, kodi_stubs):
+        from resources.lib.utils import TransientProviderError
+
+        _stats, row, fs_map, _eps, _kodi, mock_log = self._scan(
+            tmp_path,
+            {"return_value": _kodi_episodes(["1", "2"])},
+            {"side_effect": TransientProviderError("503")},
+        )
+
+        assert row["tvdb_id"] is None
+        assert row["ids_checked"] is None  # retried next scan
+        assert _count(fs_map, "plot") == 0
+        assert self._reasons(mock_log, "scan.unknown_id_rejected") == []
+
+    def test_kodi_query_failure_is_transient(self, tmp_path, kodi_stubs):
+        from resources.lib.utils import KodiQueryError
+
+        _stats, row, _fs_map, mock_eps, _kodi, mock_log = self._scan(
+            tmp_path,
+            {"side_effect": KodiQueryError("rpc")},
+            {"return_value": _tvdb_list(["1", "2"])},
+        )
+
+        assert row["tvdb_id"] is None
+        assert row["ids_checked"] is None
+        mock_eps.assert_not_called()
+        assert self._reasons(mock_log, "scan.unknown_id_rejected") == []
+
+    def test_name_mismatch_never_confirmed_by_episodes(self, tmp_path, kodi_stubs):
+        item = _nl_show(title="Alfred Jodocus Kwak")
+        item["premiered"] = "1976-01-01"
+        _stats, row, _fs_map, mock_eps, mock_kodi, mock_log = self._scan(
+            tmp_path,
+            {"return_value": _kodi_episodes(["1", "2", "3"])},
+            {"return_value": _tvdb_list(["1", "2", "3"])},
+            item=item,
+        )
+
+        assert row["tvdb_id"] is None
+        mock_kodi.assert_not_called()
+        mock_eps.assert_not_called()
+        assert self._reasons(mock_log, "scan.unknown_id_rejected") == ["name_mismatch"]
+
+    def test_matching_year_needs_no_episode_fetch(self, tmp_path, kodi_stubs):
+        item = _nl_show()
+        item["premiered"] = "1979-03-01"
+        _stats, row, _fs_map, _eps, mock_kodi, _log = self._scan(
+            tmp_path, {"return_value": []}, {"return_value": None}, item=item,
+        )
+
+        assert row["tvdb_id"] == "80767"
+        mock_kodi.assert_not_called()

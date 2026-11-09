@@ -824,9 +824,14 @@ def test_11_tvdb_series_verification(t):
     """TVDB's "Buurman en Buurman" (80767) carries the Dutch title the library uses.
 
     The library holds this show's TVDB id as an untyped "unknown" uniqueid;
-    the scan accepts it only when one of the series' names matches.
+    the scan accepts it only when one of the series' names matches. Kodi says
+    1976 and TVDB 1979, so the name matches but the year does not, and the
+    show's own untyped episode ids must confirm the id instead.
     """
-    from resources.lib.engine.idverify import show_matches
+    from unittest.mock import patch
+
+    from resources.lib.data.media_types import TVSHOW
+    from resources.lib.engine.idverify import YEAR_MISMATCH, show_matches, show_mismatch
     from resources.lib.providers.tvdb import fetch_series
 
     print("\n--- Test 11: TVDB series verification (tvdb:{}) ---".format(_BUURMAN_TVDB))
@@ -838,10 +843,51 @@ def test_11_tvdb_series_verification(t):
     t.check("Dutch name is Buurman en Buurman",
             series["name"] == "Buurman en Buurman", "got {!r}".format(series["name"]))
     t.check("Kodi title matches a series name",
-            show_matches("Buurman en Buurman", series["names"], 1976, series["year"]),
-            "names={} year={}".format(series["names"], series["year"]))
+            show_matches("Buurman en Buurman", series["names"]),
+            "names={}".format(series["names"]))
     t.check("an unrelated title does not match",
             not show_matches("Bluey", series["names"]))
+
+    show = find_by_title("VideoLibrary.GetTVShows", "tvshows", "Buurman en Buurman",
+                         ["title", "uniqueid", "premiered", "file", "plot", "rating",
+                          "votes", "dateadded", "genre", "mpaa"])
+    t.check("show in library", show is not None)
+    if show is None:
+        return
+    kodi_year = int(str(show.get("premiered") or "0")[:4] or 0) or None
+    reason = show_mismatch(show["title"], series["names"], kodi_year, series["year"])
+    t.check("years differ, so the episodes must confirm the id",
+            reason == YEAR_MISMATCH,
+            "reason={} kodi_year={} tvdb_year={}".format(reason, kodi_year, series["year"]))
+
+    # A real show pass over the library item in a Dutch folder, with Kodi
+    # writes disabled so the check stays read-only: the episode confirmation
+    # reads Kodi's episode list for the show and TVDB's Dutch episode list.
+    from resources.lib.engine.scan import run_scan
+
+    # The scan adds an IMDb id it finds to the item's uniqueid in place, so
+    # the tracker key is taken first.
+    identity = compute_identity(show, TVSHOW)
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
+    tracker = make_tracker(tmp)
+    try:
+        with patch("resources.lib.engine.scan.update_item", return_value=True):
+            run_scan(
+                media_type=TVSHOW, tracker=tracker,
+                source_config={
+                    "sources": [{"path": show["file"], "language": "nl-NL",
+                                 "enabled": True}],
+                    "default_language": "nl-NL",
+                },
+                enabled_fields=frozenset({"plot"}), tmdb_api_key=TMDB_KEY,
+                settings=_default_settings(), items=[show],
+            )
+        row = tracker.get_item("tvshow", identity) or {}
+        t.check("scan accepts the unknown id as the TVDB id",
+                row.get("tvdb_id") == _BUURMAN_TVDB,
+                "tracker tvdb_id={!r}".format(row.get("tvdb_id")))
+    finally:
+        tracker.close()
 
 
 # ---------------------------------------------------------------------------

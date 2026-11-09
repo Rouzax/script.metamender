@@ -38,9 +38,13 @@ Logging:
           unexpectedly; the rating is transient for that item. Logged with
           the traceback once per scan, at DEBUG after that
         - scan.unknown_id_accepted (DEBUG): An `unknown`-type uniqueid was
-          verified as the item's TVDB id
+          verified as the item's TVDB id; `reason` says how (name_match,
+          accepted_by_episodes, in_series_list)
         - scan.unknown_id_rejected (INFO): An `unknown`-type uniqueid names a
-          different TVDB series, or an episode outside the show's TVDB list
+          different TVDB series, or an episode outside the show's TVDB list;
+          `reason` says which (name_mismatch, year_mismatch, ...)
+        - scan.unknown_id_episodes (DEBUG): A show whose TVDB names match but
+          whose year does not, checked against its own episode ids
         - scan.language_unmapped (WARNING): A folder or fallback language code
           has no TheTVDB language, so TVDB is not asked for it; once per code
           per scan
@@ -64,13 +68,13 @@ from resources.lib.constants import (
 )
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.kodi import get_all_items, update_item
-from resources.lib.data.media_types import MediaType
+from resources.lib.data.media_types import EPISODE, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome, Step, run_chain
-from resources.lib.engine.idverify import show_matches
+from resources.lib.engine.idverify import YEAR_MISMATCH, show_mismatch
 from resources.lib.engine.maturity import (
     FETCH_NOW,
     FINAL,
@@ -98,6 +102,7 @@ from resources.lib.providers.tvdb import (
 )
 from resources.lib.utils import (
     ApiKeyError,
+    KodiQueryError,
     TransientProviderError,
     TvdbAuthError,
     get_logger,
@@ -733,7 +738,8 @@ def _unknown_verdict(
     ctx: _ScanCtx, ids: _Ids, identity: str, unknown_id: str,
     accepted: Any, reason: str,
 ) -> None:
-    """Apply a verification result (True, False or TRANSIENT) to ``ids``."""
+    """Apply a verification result (True, False or TRANSIENT) to ``ids``;
+    ``reason`` says why it was accepted or rejected."""
     if accepted is TRANSIENT:
         ids.tvdb_transient = True
         ids.lookup_failed = True
@@ -746,7 +752,7 @@ def _unknown_verdict(
         log.debug(
             "Unknown-type id verified as TVDB id",
             event="scan.unknown_id_accepted", identity=identity,
-            media_type=ctx.media_type.name, tvdb_id=unknown_id,
+            media_type=ctx.media_type.name, tvdb_id=unknown_id, reason=reason,
         )
     else:
         log.info(
@@ -756,12 +762,21 @@ def _unknown_verdict(
         )
 
 
+# A show id whose names match but whose year does not is accepted when at
+# least this many of the show's untyped episode ids, and a majority of them,
+# are in that TVDB series' episode list. TVDB episode ids are unique across
+# series, so a remake or namesake cannot confirm itself this way, and one
+# stray or mistyped episode id cannot carry a show.
+_MIN_CONFIRMING_EPISODES = 2
+
+
 def _verify_unknown_show(
     ctx: _ScanCtx, item: Dict[str, Any], identity: str, ids: _Ids,
     unknown_id: str, folder_lang: str,
 ) -> None:
     """Accept the show's unknown id when the TVDB series it names carries the
-    Kodi title among its names, translations or aliases."""
+    Kodi title among its names, translations or aliases, and the years agree
+    or the show's own episode ids confirm it (_confirmed_by_episodes)."""
     series = _tvdb_cached(
         ctx, "series", unknown_id, _verification_lang(ctx, folder_lang),
         tvdb_fetch_series, identity,
@@ -772,11 +787,57 @@ def _verify_unknown_show(
     if series is None:
         _unknown_verdict(ctx, ids, identity, unknown_id, False, "no_such_series")
         return
-    matched = show_matches(
+    reason = show_mismatch(
         item.get("title", ""), series.get("names") or [],
         kodi_year=_premiered_year(item), candidate_year=series.get("year"),
     )
-    _unknown_verdict(ctx, ids, identity, unknown_id, matched, "name_mismatch")
+    if reason is None:
+        _unknown_verdict(ctx, ids, identity, unknown_id, True, "name_match")
+        return
+    if reason == YEAR_MISMATCH:
+        confirmed = _confirmed_by_episodes(ctx, item, identity, unknown_id, folder_lang)
+        if confirmed is TRANSIENT:
+            _unknown_verdict(ctx, ids, identity, unknown_id, TRANSIENT, "")
+            return
+        if confirmed:
+            _unknown_verdict(ctx, ids, identity, unknown_id, True, "accepted_by_episodes")
+            return
+    _unknown_verdict(ctx, ids, identity, unknown_id, False, reason)
+
+
+def _confirmed_by_episodes(
+    ctx: _ScanCtx, item: Dict[str, Any], identity: str, unknown_id: str,
+    folder_lang: str,
+) -> Any:
+    """Whether the show's untyped episode ids confirm ``unknown_id`` as its
+    TVDB series (see _MIN_CONFIRMING_EPISODES): True, False, or TRANSIENT
+    when Kodi's episode list or TVDB's could not be read.
+
+    The show pass runs before the episode pass, so the episodes come from
+    Kodi here, for this show only.
+    """
+    try:
+        episodes = get_all_items(EPISODE, tvshowid=item.get("tvshowid"))
+    except KodiQueryError:
+        # get_all_items logged it; the next scan asks again.
+        return TRANSIENT
+    candidates = {_extract_ids(ep)[3] for ep in episodes}
+    candidates.discard(None)
+    if not candidates:
+        return False
+    listed = _tvdb_cached(
+        ctx, "episodes", unknown_id, _verification_lang(ctx, folder_lang),
+        tvdb_fetch_series_episodes, identity,
+    )
+    if listed is TRANSIENT:
+        return TRANSIENT
+    confirming = len(candidates & set(listed or {}))
+    log.debug(
+        "Show episode ids checked against the TVDB series",
+        event="scan.unknown_id_episodes", identity=identity, tvdb_id=unknown_id,
+        checked=len(candidates), confirming=confirming,
+    )
+    return confirming >= _MIN_CONFIRMING_EPISODES and confirming * 2 > len(candidates)
 
 
 def _verify_unknown_episode(
@@ -801,7 +862,10 @@ def _verify_unknown_episode(
         _unknown_verdict(ctx, ids, identity, unknown_id, TRANSIENT, "")
         return
     listed = bool(episodes) and str(unknown_id) in episodes
-    _unknown_verdict(ctx, ids, identity, unknown_id, listed, "not_in_series_list")
+    _unknown_verdict(
+        ctx, ids, identity, unknown_id, listed,
+        "in_series_list" if listed else "not_in_series_list",
+    )
 
 
 def _resolve_tmdb_by_external(ctx: _ScanCtx, identity: str, ids: _Ids) -> None:

@@ -62,3 +62,19 @@ def test_year_ignored_when_one_side_has_none() -> None:
 
 
 _NAMES = ["Pat a Mat", "Buurman en Buurman"]
+
+
+def test_mismatch_reason_separates_year_from_name() -> None:
+    from resources.lib.engine.idverify import show_mismatch
+
+    assert show_mismatch("Buurman en Buurman", _NAMES, 1979, 1979) is None
+    assert show_mismatch("Buurman en Buurman", _NAMES, 1976, 1979) == "year_mismatch"
+    assert show_mismatch("Buurman en Buurman", ["Pat a Mat"], 1976, 1979) == "name_mismatch"
+    assert show_mismatch("Alfred Jodocus Kwak", ["Alfred J. Kwak"], 1989, 1989) == (
+        "name_mismatch"
+    )
+    assert show_mismatch("", [""]) == "name_mismatch"
+    # One name agreeing on the year is enough, even if another name does not.
+    assert show_mismatch(
+        "Doctor Who", ["Doctor Who (1963)", "Doctor Who"], 2005, 2005,
+    ) is None
