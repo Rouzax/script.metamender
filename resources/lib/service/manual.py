@@ -27,6 +27,7 @@ from resources.lib.service.daemon import (
     _get_sources_config_path,
     _load_settings,
     _prepare_imdb_ratings,
+    tvdb_auth_failed,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.utils import (
@@ -153,6 +154,8 @@ def run() -> None:
         if not parts:
             parts.append(lang(32348))  # No changes
         notify(", ".join(parts))
+        if tvdb_auth_failed(all_stats.values()):
+            notify(lang(32352))  # TheTVDB rejected the credentials
 
     except ApiKeyError:
         log.exception("Manual scan stopped: invalid API key", event="manual.apikey")

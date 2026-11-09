@@ -237,3 +237,12 @@ def test_update_now_runs_on_disabled_source(mock_get, mock_scan, kodi_stubs, set
 
     assert mock_scan.called, "run_scan was not called even though source is disabled"
     assert mock_scan.call_args.kwargs.get("reset") is True
+
+
+def test_update_now_tvdb_auth_failure_notified(update_patched, monkeypatch):
+    monkeypatch.setattr(actions, "lang", lambda i: "s{}".format(i))
+    update_patched["run_scan"].return_value = {"updated": 0, "tvdb_auth_failed": True}
+    actions.update_now("movie", "7")
+    notified = [c.args[0] for c in update_patched["notify"].call_args_list]
+    assert notified.count("s32352") == 1
+    assert "s32341" not in notified

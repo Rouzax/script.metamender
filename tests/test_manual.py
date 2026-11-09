@@ -140,3 +140,17 @@ def test_manual_aborted_scan_leaves_cycle_open(
     manual.run()
 
     patched["tracker"].mark_cycle_complete.assert_not_called()
+
+
+def test_manual_tvdb_auth_failure_notified_once(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock]
+) -> None:
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    monkeypatch.setattr(manual, "lang", lambda i: "s{}".format(i))
+    patched["run_scan"].return_value = {"updated": 0, "tvdb_auth_failed": True}
+
+    manual.run()
+
+    notified = [c.args[0] for c in manual.notify.call_args_list]
+    assert notified.count("s32352") == 1
+    assert "s32341" not in notified

@@ -21,6 +21,9 @@ class CircuitBreaker:
         self._threshold = threshold
         self._failures: Dict[str, int] = {}
         self._disabled: Set[str] = set()
+        # Disabled because the provider rejected the add-on's credentials,
+        # which the user is told about; a tripped breaker is not.
+        self._auth_rejected: Set[str] = set()
 
     def is_disabled(self, provider: str) -> bool:
         return provider in self._disabled
@@ -34,13 +37,21 @@ class CircuitBreaker:
         names = list(providers)
         return bool(names) and all(p in self._disabled for p in names)
 
-    def disable(self, provider: str) -> bool:
-        """Disable a provider outright (e.g. rejected credentials). Return
-        True only on the transition, so callers log once."""
+    def disable(self, provider: str, auth: bool = False) -> bool:
+        """Disable a provider outright; ``auth`` marks a credential rejection
+        (see auth_rejected). Return True only on the transition, so callers
+        log once."""
+        if auth:
+            self._auth_rejected.add(provider)
         if provider in self._disabled:
             return False
         self._disabled.add(provider)
         return True
+
+    def auth_rejected(self) -> List[str]:
+        """Names of the providers disabled this cycle because they rejected
+        the add-on's credentials, sorted."""
+        return sorted(self._auth_rejected)
 
     def record_success(self, provider: str) -> None:
         self._failures[provider] = 0

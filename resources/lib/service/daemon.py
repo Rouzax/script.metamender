@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 import time
 from datetime import date, timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 import xbmc
 import xbmcvfs
@@ -194,6 +194,14 @@ def _prepare_imdb_ratings(settings: Dict[str, Any], monitor: Any) -> bool:
             event="service.imdb_prepare_failed",
         )
         return False
+
+
+def tvdb_auth_failed(all_stats: Iterable[Dict[str, Any]]) -> bool:
+    """True when any pass of a cycle reports that TheTVDB rejected the
+    add-on's credentials. The callers notify once per cycle on it: the key
+    ships with the add-on, so the user cannot fix it, but TVDB titles and
+    plots stay paused until it works again."""
+    return any(s.get("tvdb_auth_failed") for s in all_stats)
 
 
 def _run_scan(
@@ -528,6 +536,12 @@ def run() -> None:
                             # _maybe_prune_orphans for why a targeted scan must
                             # never prune.
                             _maybe_prune_orphans(tracker, settings, kodi_filter)
+
+                        # Shown even with notifications off, like the invalid
+                        # TMDB key: otherwise the only trace of a provider
+                        # that is down for good is one ERROR line per cycle.
+                        if tvdb_auth_failed(all_stats.values()):
+                            notify(lang(32352))  # TheTVDB rejected the credentials
 
                         # Notification
                         if settings["show_notifications"]:

@@ -2399,6 +2399,7 @@ class TestTextChain:
 
         assert breaker.is_disabled("tvdb")
         assert not breaker.is_disabled("tmdb")
+        assert stats["tvdb_auth_failed"] is True
         assert _written(mock_update, "genre") == ["Drama"]
         assert _written(mock_update, "plot") is None
         assert _count(fs_map, "plot") == 0
@@ -4541,3 +4542,40 @@ class TestPerItemOutcomeCounts:
         tracker.close()
 
         assert _complete_kwargs(mock_log)["episodes_found_by_tvdb"] == 1
+
+
+class TestTvdbAuthStats:
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    def test_auth_failure_from_an_earlier_pass_is_reported(
+        self, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        """The flag reflects the cycle's breaker, so a pass that never called
+        TVDB itself still reports a rejection an earlier pass hit."""
+        from resources.lib.engine.breaker import CircuitBreaker
+
+        breaker = CircuitBreaker()
+        breaker.disable("tvdb", auth=True)
+        mock_tmdb.return_value = _tmdb_tvshow_response()
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            TVSHOW, tracker, _make_source_config(), frozenset({"genre"}),
+            "k", _make_settings(), items=[_make_tvshow_item()], breaker=breaker,
+        )
+        tracker.close()
+        assert stats["tvdb_auth_failed"] is True
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    def test_tripped_tvdb_is_not_an_auth_failure(
+        self, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        breaker = _tripped_breaker("tvdb")
+        mock_tmdb.return_value = _tmdb_tvshow_response()
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            TVSHOW, tracker, _make_source_config(), frozenset({"genre"}),
+            "k", _make_settings(), items=[_make_tvshow_item()], breaker=breaker,
+        )
+        tracker.close()
+        assert stats["tvdb_auth_failed"] is False

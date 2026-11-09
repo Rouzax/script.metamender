@@ -379,7 +379,7 @@ msgctxt "#32340"
 msgid "MetaMender: Update now"
 msgstr ""
 
-# Notifications (32341-32351)
+# Notifications
 msgctxt "#32341"
 msgid "Invalid TMDB API key"
 msgstr ""
@@ -422,6 +422,10 @@ msgstr ""
 
 msgctxt "#32351"
 msgid "No changes: {}"
+msgstr ""
+
+msgctxt "#32352"
+msgid "TheTVDB rejected the add-on's credentials; TV titles and plots from TheTVDB are paused"
 msgstr ""
 
 # --- Reset tracker dialog (32360-32362) ---

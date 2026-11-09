@@ -77,3 +77,19 @@ def test_disabled_lists_providers_sorted():
     cb.disable("tvdb")
     cb.record_failure("tmdb")
     assert cb.disabled() == ["tmdb", "tvdb"]
+
+
+def test_auth_rejection_is_remembered_apart_from_trips():
+    cb = CircuitBreaker(threshold=1)
+    cb.record_failure("tmdb")
+    assert cb.auth_rejected() == []
+    assert cb.disable("tvdb", auth=True) is True
+    assert cb.disable("tvdb", auth=True) is False
+    assert cb.is_disabled("tvdb")
+    assert cb.auth_rejected() == ["tvdb"]
+
+
+def test_plain_disable_is_not_an_auth_rejection():
+    cb = CircuitBreaker()
+    cb.disable("tvdb")
+    assert cb.auth_rejected() == []

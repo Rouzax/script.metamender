@@ -297,3 +297,34 @@ def test_aborted_scan_does_not_prune_orphans(kodi_stubs):
     tracker = _run_one_cycle(stats)
 
     tracker.prune_orphans.assert_not_called()
+
+
+def _notified_ids(all_stats):
+    """Run one daemon cycle; return the string ids passed to notify."""
+    from unittest.mock import patch
+
+    notify = MagicMock()
+    with patch.object(daemon, "notify", notify), \
+            patch.object(daemon, "lang", side_effect=lambda i: "s{}".format(i)):
+        _run_one_cycle(all_stats)
+    return [c.args[0] for c in notify.call_args_list]
+
+
+def test_tvdb_auth_failure_notified_once_per_cycle(kodi_stubs):
+    stats = _complete_stats()
+    stats["tvshow"]["tvdb_auth_failed"] = True
+    stats["episode"]["tvdb_auth_failed"] = True
+
+    notified = _notified_ids(stats)
+
+    assert notified.count("s32352") == 1
+    assert "s32341" not in notified
+
+
+def test_no_tvdb_message_without_auth_failure(kodi_stubs):
+    assert "s32352" not in _notified_ids(_complete_stats())
+
+
+def test_tvdb_auth_failed_helper():
+    assert daemon.tvdb_auth_failed([{"tvdb_auth_failed": False}, {"tvdb_auth_failed": True}])
+    assert not daemon.tvdb_auth_failed([{}, {"updated": 1}])

@@ -186,6 +186,10 @@ def _make_stats() -> Dict[str, Any]:
         # (shutdown, or every provider disabled). The caller must not treat
         # such a pass as a completed cycle.
         "aborted": False,
+        # True when TheTVDB has rejected the add-on's credentials this cycle
+        # (in this pass or an earlier one sharing the breaker), so the caller
+        # can tell the user TVDB text is paused.
+        "tvdb_auth_failed": False,
     }
 
 
@@ -528,7 +532,7 @@ def _call_provider(
     try:
         result = fn()
     except TvdbAuthError:
-        if ctx.breaker.disable("tvdb"):
+        if ctx.breaker.disable("tvdb", auth=True):
             log.exception(
                 "TheTVDB rejected the add-on's credentials, TVDB disabled for this cycle",
                 event="scan.tvdb_auth", identity=identity,
@@ -1888,6 +1892,7 @@ def run_scan(
         tracker.mark_cycle_processed(media_type.name, identity)
         stats["processed"] += 1
 
+    stats["tvdb_auth_failed"] = "tvdb" in breaker.auth_rejected()
     log.info(
         "Scan complete",
         event="scan.complete",
