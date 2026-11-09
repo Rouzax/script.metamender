@@ -68,7 +68,7 @@ SOURCES_CONFIG_FILENAME = "sources.json"
 
 # Tracker SQLite schema version. Bump when the schema changes so future
 # migrations have a marker to branch on. Stored in scan_state on init.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Default refetch schedule in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
 DEFAULT_REFETCH_SCHEDULE = (7, 30, 90)  # type: Tuple[int, ...]

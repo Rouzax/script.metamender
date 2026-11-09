@@ -463,3 +463,121 @@ def test_show_id_map_keyed_by_kodi_id_survives_same_title(tmp_path):
     result = tracker.get_show_id_map()
     tracker.close()
     assert result == {1: "2316", 2: "2996"}
+
+
+# --- Schema v3: provenance columns and settings fingerprint ---
+
+_V2_SCHEMA_SQL = """\
+CREATE TABLE items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_type TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    title TEXT NOT NULL,
+    kodi_id INTEGER, tmdb_id TEXT, imdb_id TEXT, tvdb_id TEXT,
+    source_path TEXT, premiered TEXT, date_added TEXT, last_scanned TEXT,
+    last_seen TEXT, next_retry TEXT,
+    attempt_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'pending',
+    cycle_processed INTEGER DEFAULT 0,
+    UNIQUE(media_type, identity)
+);
+CREATE TABLE field_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL REFERENCES items(id),
+    field TEXT NOT NULL,
+    source TEXT, vote_count INTEGER,
+    fetch_count INTEGER DEFAULT 0,
+    next_retry TEXT, fetched_at TEXT,
+    UNIQUE(item_id, field)
+);
+CREATE TABLE scan_state (key TEXT PRIMARY KEY, value TEXT);
+"""
+
+
+def test_older_schema_is_recreated(tmp_path, monkeypatch):
+    import sqlite3
+    from resources.lib.data import tracker as tracker_mod
+
+    path = str(tmp_path / "v2.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(_V2_SCHEMA_SQL)
+    conn.execute("INSERT INTO scan_state VALUES ('schema_version', '2')")
+    conn.execute("INSERT INTO items (media_type, identity, title) VALUES ('movie', 'a', 'A')")
+    conn.execute("INSERT INTO field_status (item_id, field) VALUES (1, 'plot')")
+    conn.commit()
+    conn.close()
+
+    warnings = []
+    monkeypatch.setattr(
+        tracker_mod.log, "warning", lambda *a, **k: warnings.append((a, k))
+    )
+    db = TrackerDB(path)
+    cols = {r["name"] for r in db._conn.execute("PRAGMA table_info(field_status)")}
+    n_items = db._conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+    n_fields = db._conn.execute("SELECT COUNT(*) FROM field_status").fetchone()[0]
+    version = db._conn.execute(
+        "SELECT value FROM scan_state WHERE key='schema_version'"
+    ).fetchone()["value"]
+    db.close()
+
+    assert {"written_value", "from_fallback", "fallback_checks", "settings_fp"} <= cols
+    assert n_items == 0 and n_fields == 0
+    assert version == "3"
+    assert [k.get("event") for _, k in warnings] == ["tracker.schema_reset"]
+
+
+def _tracker_with_item(tmp_path):
+    t = TrackerDB(str(tmp_path / "t.db"))
+    t.upsert_item("movie", "Air", kodi_id=1, tmdb_id="1")
+    return t
+
+
+def test_record_written_value_and_fallback(tmp_path):
+    t = _tracker_with_item(tmp_path)
+    t.record_field_fetch(
+        "movie", "Air", "plot", next_retry=None, source="imdb",
+        written_value="A plot", from_fallback=True, settings_fp="fp1",
+    )
+    row = t.get_field_status("movie", "Air", "plot")
+    assert row["written_value"] == "A plot"
+    assert row["from_fallback"] == 1
+    assert row["fallback_checks"] == 0
+    assert row["settings_fp"] == "fp1"
+    # None keeps the stored provenance
+    t.record_field_fetch("movie", "Air", "plot", next_retry=None, settings_fp="fp1")
+    row = t.get_field_status("movie", "Air", "plot")
+    t.close()
+    assert row["written_value"] == "A plot"
+    assert row["source"] == "imdb"
+
+
+def test_fallback_checks_increment_and_reset(tmp_path):
+    t = _tracker_with_item(tmp_path)
+    t.record_field_fetch("movie", "Air", "plot", None, from_fallback=False)
+    row = t.get_field_status("movie", "Air", "plot")
+    assert (row["from_fallback"], row["fallback_checks"]) == (0, 0)
+    t.record_field_fetch("movie", "Air", "plot", None, from_fallback=True)
+    row = t.get_field_status("movie", "Air", "plot")
+    assert (row["from_fallback"], row["fallback_checks"]) == (1, 0)
+    t.record_field_fetch("movie", "Air", "plot", None, from_fallback=True)
+    t.record_field_fetch("movie", "Air", "plot", None)
+    row = t.get_field_status("movie", "Air", "plot")
+    assert (row["from_fallback"], row["fallback_checks"]) == (1, 2)
+    t.record_field_fetch("movie", "Air", "plot", None, from_fallback=False)
+    row = t.get_field_status("movie", "Air", "plot")
+    t.close()
+    assert (row["from_fallback"], row["fallback_checks"]) == (0, 0)
+
+
+def test_settings_fp_overwritten(tmp_path):
+    t = _tracker_with_item(tmp_path)
+    t.record_field_fetch("movie", "Air", "plot", None, settings_fp="a")
+    t.record_field_fetch("movie", "Air", "plot", None, settings_fp="b")
+    assert t.get_field_status("movie", "Air", "plot")["settings_fp"] == "b"
+    t.record_field_fetch("movie", "Air", "plot", None)
+    assert t.get_field_status("movie", "Air", "plot")["settings_fp"] is None
+    t.reset_field_clock("movie", "Air", "plot", "2026-09-15", settings_fp="c")
+    row = t.get_field_status("movie", "Air", "plot")
+    t.close()
+    assert row["settings_fp"] == "c"
+    assert row["fetch_count"] == 1

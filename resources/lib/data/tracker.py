@@ -59,6 +59,10 @@ CREATE TABLE IF NOT EXISTS field_status (
     fetch_count INTEGER DEFAULT 0,
     next_retry TEXT,
     fetched_at TEXT,
+    written_value TEXT,
+    from_fallback INTEGER DEFAULT 0,
+    fallback_checks INTEGER DEFAULT 0,
+    settings_fp TEXT,
     UNIQUE(item_id, field)
 );
 
@@ -98,8 +102,9 @@ class TrackerDB:
         """Create tables/indexes if missing and reconcile the schema version.
 
         Fresh database: create everything and stamp SCHEMA_VERSION. Existing
-        database: read the stored version and, if older, run ordered migrations
-        (none defined yet for v2) before re-stamping. A database from a NEWER
+        database with an OLDER schema: drop and recreate every table (the
+        tracker only caches per-field progress, so it is rebuilt by the next
+        scan) and re-stamp. A database from a NEWER
         addon (stored > SCHEMA_VERSION) is left as-is with a warning rather than
         silently re-stamped, so a forward-incompatible open is at least visible.
         """
@@ -123,13 +128,20 @@ class TrackerDB:
             return
 
         if stored is not None and stored < SCHEMA_VERSION:
-            # Ordered migrations would run here as the schema evolves.
-            log.info(
-                "Migrating tracker schema",
-                event="tracker.schema_migrate",
+            # CREATE TABLE IF NOT EXISTS cannot add columns to the old tables,
+            # so they are dropped and rebuilt rather than altered.
+            log.warning(
+                "Tracker schema is older than supported; recreating tables",
+                event="tracker.schema_reset",
                 from_version=stored,
                 to_version=SCHEMA_VERSION,
             )
+            self._conn.executescript(
+                "DROP TABLE IF EXISTS field_status;"
+                "DROP TABLE IF EXISTS items;"
+                "DROP TABLE IF EXISTS scan_state;"
+            )
+            self._conn.executescript(_SCHEMA_SQL)
 
         self._conn.execute(
             "INSERT OR REPLACE INTO scan_state (key, value) VALUES ('schema_version', ?)",
@@ -356,26 +368,52 @@ class TrackerDB:
         next_retry: Optional[str],
         source: Optional[str] = None,
         vote_count: Optional[int] = None,
+        written_value: Optional[str] = None,
+        from_fallback: Optional[bool] = None,
+        settings_fp: Optional[str] = None,
     ) -> None:
         """Record a successful sample: bump fetch_count, stamp fetched_at, set the
-        next due date and (optionally) source/vote_count. COALESCE keeps prior
-        source/vote_count when the new call passes None."""
+        next due date and (optionally) provenance.
+
+        COALESCE keeps the prior source, vote_count, written_value and
+        from_fallback when the new call passes None. settings_fp is always
+        overwritten so it names the settings the latest answer was fetched
+        under. fallback_checks counts re-samples of a fallback-sourced value:
+        the first fallback write is not a recheck (0), later samples of a row
+        still flagged from_fallback add one, and from_fallback=False clears
+        both the flag and the counter.
+        """
         item_id = self._get_item_id(media_type, identity)
         if item_id is None:
             return
         today = date.today().isoformat()
+        fallback = None if from_fallback is None else int(from_fallback)
         try:
             self._conn.execute(
                 "INSERT INTO field_status "
-                "(item_id, field, fetch_count, fetched_at, next_retry, source, vote_count) "
-                "VALUES (?, ?, 1, ?, ?, ?, ?) "
+                "(item_id, field, fetch_count, fetched_at, next_retry, source, "
+                "vote_count, written_value, from_fallback, fallback_checks, settings_fp) "
+                "VALUES (:item_id, :field, 1, :today, :next_retry, :source, "
+                ":vote_count, :written_value, COALESCE(:fallback, 0), 0, :settings_fp) "
                 "ON CONFLICT(item_id, field) DO UPDATE SET "
                 "fetch_count = field_status.fetch_count + 1, "
                 "fetched_at = excluded.fetched_at, "
                 "next_retry = excluded.next_retry, "
                 "source = COALESCE(excluded.source, field_status.source), "
-                "vote_count = COALESCE(excluded.vote_count, field_status.vote_count)",
-                (item_id, field, today, next_retry, source, vote_count),
+                "vote_count = COALESCE(excluded.vote_count, field_status.vote_count), "
+                "written_value = COALESCE(excluded.written_value, field_status.written_value), "
+                "fallback_checks = CASE "
+                "WHEN :fallback = 0 THEN 0 "
+                "WHEN field_status.from_fallback = 1 THEN field_status.fallback_checks + 1 "
+                "ELSE 0 END, "
+                "from_fallback = COALESCE(:fallback, field_status.from_fallback), "
+                "settings_fp = excluded.settings_fp",
+                {
+                    "item_id": item_id, "field": field, "today": today,
+                    "next_retry": next_retry, "source": source,
+                    "vote_count": vote_count, "written_value": written_value,
+                    "fallback": fallback, "settings_fp": settings_fp,
+                },
             )
         except sqlite3.Error:
             log.exception(
@@ -387,13 +425,20 @@ class TrackerDB:
             )
 
     def reset_field_clock(
-        self, media_type: str, identity: str, field: str, next_retry: Optional[str]
+        self,
+        media_type: str,
+        identity: str,
+        field: str,
+        next_retry: Optional[str],
+        settings_fp: Optional[str] = None,
     ) -> None:
         """Re-baseline a field to its first sample (manual 'Update now').
 
         Stores the supplied next_retry date so young content is re-sampled on
         the normal schedule after a manual update, rather than being skipped
         forever because NULL next_retry is treated as "not due" by decide_field.
+        settings_fp is stored as given so the re-baselined row matches the
+        settings in force.
         """
         item_id = self._get_item_id(media_type, identity)
         if item_id is None:
@@ -401,11 +446,13 @@ class TrackerDB:
         today = date.today().isoformat()
         try:
             self._conn.execute(
-                "INSERT INTO field_status (item_id, field, fetch_count, fetched_at, next_retry) "
-                "VALUES (?, ?, 1, ?, ?) "
+                "INSERT INTO field_status "
+                "(item_id, field, fetch_count, fetched_at, next_retry, settings_fp) "
+                "VALUES (?, ?, 1, ?, ?, ?) "
                 "ON CONFLICT(item_id, field) DO UPDATE SET "
-                "fetch_count = 1, fetched_at = excluded.fetched_at, next_retry = excluded.next_retry",
-                (item_id, field, today, next_retry),
+                "fetch_count = 1, fetched_at = excluded.fetched_at, "
+                "next_retry = excluded.next_retry, settings_fp = excluded.settings_fp",
+                (item_id, field, today, next_retry, settings_fp),
             )
         except sqlite3.Error:
             log.exception(
