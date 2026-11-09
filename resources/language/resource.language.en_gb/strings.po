@@ -471,7 +471,7 @@ msgid "Text source order"
 msgstr ""
 
 msgctxt "#32391"
-msgid "Which provider to ask first for TV show and episode titles and plots in the source folder's language. If the first has nothing, the second is asked. Movies always use TMDB."
+msgid "Which provider to ask first for TV show plots and episode titles and plots in the source folder's language. If the first has nothing, the second is asked. Movies always use TMDB."
 msgstr ""
 
 msgctxt "#32392"
