@@ -74,28 +74,28 @@ def test_401_relogs_once_then_succeeds():
 def test_401_relogs_once_then_auth_error():
     with patch.object(tvdb, "provider_post", side_effect=_post_ok) as post, \
             patch.object(tvdb, "provider_get",
-                         side_effect=_router({"/series/1": ApiKeyError("tvdb")})):
-        with pytest.raises(TvdbAuthError):
-            tvdb._get("/series/1")
+                         side_effect=_router({"/series/1": ApiKeyError("tvdb")})), \
+            pytest.raises(TvdbAuthError):
+        tvdb._get("/series/1")
     assert post.call_count == 2
 
 
 def test_login_rejected_is_auth_error():
-    with patch.object(tvdb, "provider_post", side_effect=ApiKeyError("tvdb")):
-        with pytest.raises(TvdbAuthError):
-            tvdb._get("/series/1")
+    with patch.object(tvdb, "provider_post", side_effect=ApiKeyError("tvdb")), \
+            pytest.raises(TvdbAuthError):
+        tvdb._get("/series/1")
 
 
 def test_login_without_token_is_transient():
-    with patch.object(tvdb, "provider_post", return_value={"data": {}}):
-        with pytest.raises(TransientProviderError):
-            tvdb._get("/series/1")
+    with patch.object(tvdb, "provider_post", return_value={"data": {}}), \
+            pytest.raises(TransientProviderError):
+        tvdb._get("/series/1")
 
 
 def test_login_no_data_is_transient():
-    with patch.object(tvdb, "provider_post", return_value=None):
-        with pytest.raises(TransientProviderError):
-            tvdb._get("/series/1")
+    with patch.object(tvdb, "provider_post", return_value=None), \
+            pytest.raises(TransientProviderError):
+        tvdb._get("/series/1")
 
 
 SERIES = {"data": {"id": 80767, "name": "Pat a Mat", "overview": "cs plot"}}
@@ -197,17 +197,17 @@ def test_episode_page_failure_raises_transient_no_partial():
 
     pages = {"page=0": _page([1], "x?page=1"), "page=1": second}
     with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
-            patch.object(tvdb, "provider_get", side_effect=_router(pages)):
-        with pytest.raises(TransientProviderError):
-            tvdb.fetch_series_episodes("80767", "nld")
+            patch.object(tvdb, "provider_get", side_effect=_router(pages)), \
+            pytest.raises(TransientProviderError):
+        tvdb.fetch_series_episodes("80767", "nld")
 
 
 def test_episode_later_page_404_is_transient_not_partial():
     pages = {"page=0": _page([1], "x?page=1"), "page=1": None}
     with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
-            patch.object(tvdb, "provider_get", side_effect=_router(pages)):
-        with pytest.raises(TransientProviderError):
-            tvdb.fetch_series_episodes("80767", "nld")
+            patch.object(tvdb, "provider_get", side_effect=_router(pages)), \
+            pytest.raises(TransientProviderError):
+        tvdb.fetch_series_episodes("80767", "nld")
 
 
 def test_episodes_404_returns_none():
@@ -258,9 +258,9 @@ def test_episode_without_id_is_skipped():
 def test_translation_transient_error_propagates():
     routes = _series_routes(TransientProviderError("http 500"))
     with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
-            patch.object(tvdb, "provider_get", side_effect=_router(routes)):
-        with pytest.raises(TransientProviderError):
-            tvdb.fetch_series("80767", "nld")
+            patch.object(tvdb, "provider_get", side_effect=_router(routes)), \
+            pytest.raises(TransientProviderError):
+        tvdb.fetch_series("80767", "nld")
 
 
 class _Resp:
@@ -289,8 +289,8 @@ def test_project_key_not_logged(caplog):
         )
 
     with patch("resources.lib.providers.http.requests.post", side_effect=fake_post), \
-            patch("resources.lib.providers.http.requests.get", side_effect=fake_get):
-        with pytest.raises(TransientProviderError) as exc:
-            tvdb.fetch_series("80767", "nld")
+            patch("resources.lib.providers.http.requests.get", side_effect=fake_get), \
+            pytest.raises(TransientProviderError) as exc:
+        tvdb.fetch_series("80767", "nld")
     assert key not in caplog.text and token not in caplog.text
     assert key not in str(exc.value) and token not in str(exc.value)

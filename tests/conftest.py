@@ -96,7 +96,12 @@ sys.modules.setdefault("xbmcaddon", _xbmcaddon)
 sys.modules.setdefault("xbmcgui", _xbmcgui)
 sys.modules.setdefault("xbmcvfs", MagicMock())
 # script.module.imdbratings is a Kodi add-on module, not installed under pytest.
-sys.modules.setdefault("imdbratings", MagicMock())
+# The default stand-in reads as a store that is not loaded and has no ratings,
+# so a test that needs a loaded store must say so (see imdbratings_stub).
+_imdbratings = MagicMock()
+_imdbratings.dataset_date.return_value = None
+_imdbratings.get_rating.return_value = None
+sys.modules.setdefault("imdbratings", _imdbratings)
 
 # Add project root to path so `resources.lib` resolves
 _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
