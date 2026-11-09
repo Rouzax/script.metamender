@@ -402,25 +402,35 @@ def _fetch_movie_or_show(
     language: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
     """Fetch movie/TV show data from TMDB then IMDb. Returns
-    (tmdb_data, imdb_data, imdb_id). Caller has checked both_disabled()."""
-    tmdb_data = None  # type: Optional[Dict[str, Any]]
-    imdb_data = None  # type: Optional[Dict[str, Any]]
+    (tmdb_data, imdb_data, imdb_id). Caller has checked both_disabled().
 
-    # Resolve TMDB ID if missing (show-level only).
-    if not tmdb_id and not ctx.breaker.is_disabled("tmdb"):
-        resolved = _call_provider(
-            "tmdb",
-            lambda: resolve_id(ctx.tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id),
-            ctx, identity,
-        )
-        if resolved is _TRANSIENT:
-            resolved = None
-        tmdb_id = resolved
-        if tmdb_id:
-            ctx.tracker.upsert_item(ctx.media_type.name, identity, tmdb_id=tmdb_id)
+    A provider this item needs but cannot reach (breaker open, or the TMDB ID
+    lookup failed transiently) yields ``_TRANSIENT``, never None: None means the
+    provider answered "nothing", which would advance the maturity clock.
+    """
+    tmdb_data = None  # type: Any
+    imdb_data = None  # type: Any
+
+    # Resolve TMDB ID if missing.
+    if not tmdb_id:
+        if ctx.breaker.is_disabled("tmdb"):
+            tmdb_data = _TRANSIENT
+        else:
+            resolved = _call_provider(
+                "tmdb",
+                lambda: resolve_id(ctx.tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id),
+                ctx, identity,
+            )
+            if resolved is _TRANSIENT:
+                tmdb_data = _TRANSIENT
+            elif resolved:
+                tmdb_id = resolved
+                ctx.tracker.upsert_item(ctx.media_type.name, identity, tmdb_id=tmdb_id)
 
     # Fetch TMDB data.
-    if tmdb_id and not ctx.breaker.is_disabled("tmdb"):
+    if tmdb_id and ctx.breaker.is_disabled("tmdb"):
+        tmdb_data = _TRANSIENT
+    elif tmdb_id:
         if ctx.media_type.name == "movie":
             tmdb_data = _call_provider(
                 "tmdb",
@@ -442,11 +452,13 @@ def _fetch_movie_or_show(
         imdb_id = new_imdb
 
     # Fetch IMDb data if a source setting would consult it.
-    if (imdb_id and not ctx.breaker.is_disabled("imdb")
-            and wants_imdb(ctx.default_pref, ctx.rating_pref, ctx.plot_pref)):
-        imdb_data = _call_provider(
-            "imdb", lambda: imdb_fetch_movie(imdb_id), ctx, identity,
-        )
+    if imdb_id and wants_imdb(ctx.default_pref, ctx.rating_pref, ctx.plot_pref):
+        if ctx.breaker.is_disabled("imdb"):
+            imdb_data = _TRANSIENT
+        else:
+            imdb_data = _call_provider(
+                "imdb", lambda: imdb_fetch_movie(imdb_id), ctx, identity,
+            )
 
     return tmdb_data, imdb_data, imdb_id
 
@@ -527,12 +539,18 @@ def _fetch_episode(
     language: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
     """Fetch episode data by ID. Returns (tmdb_data, imdb_data, imdb_id). Caller
-    has checked both_disabled() and that at least one ID is present."""
-    tmdb_data = None  # type: Optional[Dict[str, Any]]
-    imdb_data = None  # type: Optional[Dict[str, Any]]
+    has checked both_disabled() and that at least one ID is present.
+
+    As in _fetch_movie_or_show, a needed provider whose breaker is open yields
+    ``_TRANSIENT`` rather than None.
+    """
+    tmdb_data = None  # type: Any
+    imdb_data = None  # type: Any
 
     # TMDB path first (so enrichment can provide imdb_id for the IMDb path).
-    if tmdb_id and not ctx.breaker.is_disabled("tmdb"):
+    if tmdb_id and ctx.breaker.is_disabled("tmdb"):
+        tmdb_data = _TRANSIENT
+    elif tmdb_id:
         showtitle = item.get("showtitle", "")
         ep_show_tmdb_id = (ctx.show_id_map or {}).get(showtitle)
         if not ep_show_tmdb_id:
@@ -548,11 +566,13 @@ def _fetch_episode(
             )
 
     # IMDb path: direct episode fetch by IMDB ID, if a source setting wants it.
-    if (imdb_id and not ctx.breaker.is_disabled("imdb")
-            and wants_imdb(ctx.default_pref, ctx.rating_pref, ctx.plot_pref)):
-        imdb_data = _call_provider(
-            "imdb", lambda: imdb_fetch_episode(imdb_id), ctx, identity,
-        )
+    if imdb_id and wants_imdb(ctx.default_pref, ctx.rating_pref, ctx.plot_pref):
+        if ctx.breaker.is_disabled("imdb"):
+            imdb_data = _TRANSIENT
+        else:
+            imdb_data = _call_provider(
+                "imdb", lambda: imdb_fetch_episode(imdb_id), ctx, identity,
+            )
 
     return tmdb_data, imdb_data, imdb_id
 

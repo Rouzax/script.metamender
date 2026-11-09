@@ -2036,3 +2036,109 @@ class TestConsecutiveCycles:
         # and prune_orphans then deleted the rows of items still in the library.
         assert first["processed"] == 1
         assert last_seen_after_cycle_2 == date.today().isoformat()
+
+
+def _tripped_breaker(provider):
+    # type: (str) -> Any
+    from resources.lib.engine.breaker import CircuitBreaker
+    breaker = CircuitBreaker()
+    while not breaker.is_disabled(provider):
+        breaker.record_failure(provider)
+    return breaker
+
+
+class TestUnheardProviderDoesNotAdvanceClock:
+    """A provider the item would have consulted but did not hear from, because
+    its breaker was already open or an earlier step of the same provider failed
+    transiently, is a missing answer, not an empty one. Recording it as a fetch
+    would finalize old content on nothing (the maturity-clock invariant)."""
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.imdb_fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_open_imdb_breaker_leaves_movie_clock_at_zero(
+        self, mock_tmdb, mock_imdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+        mock_tmdb.return_value = _tmdb_movie_response()
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+            "fake_key", _make_settings(), breaker=_tripped_breaker("imdb"),
+        )
+        fs_map = tracker.get_field_status_map("movie", _MOVIE_IDENTITY)
+        tracker.close()
+
+        mock_imdb.assert_not_called()
+        assert all(row["fetch_count"] == 0 for row in fs_map.values())
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.imdb_fetch_movie", return_value=None)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_open_tmdb_breaker_leaves_movie_clock_at_zero(
+        self, mock_tmdb, mock_imdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        mock_get_all.return_value = [_make_movie_item()]
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+            "fake_key", _make_settings(), breaker=_tripped_breaker("tmdb"),
+        )
+        fs_map = tracker.get_field_status_map("movie", _MOVIE_IDENTITY)
+        tracker.close()
+
+        mock_tmdb.assert_not_called()
+        assert all(row["fetch_count"] == 0 for row in fs_map.values())
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.imdb_fetch_movie", return_value=None)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    @patch("resources.lib.engine.scan.resolve_id")
+    def test_transient_resolve_id_leaves_clock_at_zero(
+        self, mock_resolve, mock_tmdb, mock_imdb, mock_update, mock_get_all,
+        tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        item = _make_movie_item()
+        item["uniqueid"] = {"imdb": "tt0000001"}
+        mock_get_all.return_value = [item]
+        mock_resolve.side_effect = TransientProviderError("http 503")
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+            "fake_key", _make_settings(),
+        )
+        fs_map = tracker.get_field_status_map("movie", compute_identity(item, MOVIE))
+        tracker.close()
+
+        mock_tmdb.assert_not_called()
+        assert all(row["fetch_count"] == 0 for row in fs_map.values())
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.imdb_fetch_episode")
+    def test_open_imdb_breaker_leaves_episode_clock_at_zero(
+        self, mock_imdb, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        item = _make_episode_item()
+        item["uniqueid"] = {"imdb": "tt0000002"}
+        mock_get_all.return_value = [item]
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+            "fake_key", _make_settings(), breaker=_tripped_breaker("imdb"),
+            show_id_map={"Test Show": "55555"},
+        )
+        fs_map = tracker.get_field_status_map("episode", compute_identity(item, EPISODE))
+        tracker.close()
+
+        mock_imdb.assert_not_called()
+        assert all(row["fetch_count"] == 0 for row in fs_map.values())
