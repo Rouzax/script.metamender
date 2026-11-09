@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import ssl
 import threading
 import time
@@ -44,6 +45,16 @@ from resources.lib.constants import (
 
 
 _TITLE_SEPARATORS = frozenset((" ", ":", "-"))
+
+# TMDB v3 takes its key as a query parameter, and requests puts the full URL
+# into its exception messages, so a key reaches log text through error= values
+# and tracebacks. Covers both the query form (api_key=...) and a repr'd params
+# dict ('api_key': '...').
+_SECRET_RE = re.compile(r"""(?i)(api_?key(?:=|['"]?\s*:\s*['"]?))[^&\s'"]+""")
+
+
+def _redact(text: str) -> str:
+    return _SECRET_RE.sub(r"\1***", text)
 
 
 def is_empty(value: Any) -> bool:
@@ -355,12 +366,16 @@ class StructuredLogger:
             cls._initialized = False
 
     def _format_message(self, message: str, **kwargs: Any) -> str:
-        """Format: [MetaMend.module] message | key=value, ..."""
-        base = "[{}.{}] {}".format(ADDON_PREFIX, self.module, message)
+        """Format: [MetaMend.module] message | key=value, ...
+
+        Secrets are redacted here so every sink is covered, and before
+        truncation so a cut cannot leave part of a key behind.
+        """
+        base = "[{}.{}] {}".format(ADDON_PREFIX, self.module, _redact(message))
         if kwargs:
             pairs = []
             for k, v in kwargs.items():
-                str_v = str(v)
+                str_v = _redact(str(v))
                 if k != 'trace' and len(str_v) > LOG_MAX_VALUE_LENGTH:
                     str_v = str_v[:LOG_MAX_VALUE_LENGTH] + "..."
                 pairs.append("{}={}".format(k, str_v))
