@@ -15,11 +15,14 @@ Logging:
     Logger: 'scan'
     Key events:
         - scan.start (INFO): Scan cycle starting for a media type
-        - scan.complete (INFO): Scan cycle finished with stats and the
-          providers disabled this cycle
+        - scan.complete (INFO): Scan cycle finished with stats, the
+          providers disabled this cycle, and counts of the per-item DEBUG
+          outcomes (unknown ids accepted, episodes found by TVDB id)
         - scan.skip (DEBUG): Item skipped (disabled source, not due, no
           candidates, or reason="unreachable": the media could not be found,
           so NFO state is unknown; scan.complete counts these)
+        - scan.transient (DEBUG): An episode's TMDB path waits because its
+          show's ids are not resolved yet (reason="show_unresolved")
         - scan.protected (DEBUG): An answered value was not written because
           the item is NFO-managed and the field holds a value metamender did
           not write
@@ -34,7 +37,7 @@ Logging:
         - scan.imdb_lookup_failed (ERROR): The IMDb ratings store raised
           unexpectedly; the rating is transient for that item. Logged with
           the traceback once per scan, at DEBUG after that
-        - scan.unknown_id_accepted (INFO): An `unknown`-type uniqueid was
+        - scan.unknown_id_accepted (DEBUG): An `unknown`-type uniqueid was
           verified as the item's TVDB id
         - scan.unknown_id_rejected (INFO): An `unknown`-type uniqueid names a
           different TVDB series, or an episode outside the show's TVDB list
@@ -491,6 +494,8 @@ class _ScanCtx:
     # Events already logged in full this scan, so a persistent failure does
     # not repeat its traceback for every item.
     logged_once: Set[str]
+    # Per-item outcomes logged at DEBUG, summed for scan.complete.
+    counts: Dict[str, int]
     schedule: Tuple[int, ...]
     rating_pref: int
     text_order: int
@@ -730,7 +735,8 @@ def _unknown_verdict(
     if accepted:
         ids.tvdb = unknown_id
         ctx.tracker.upsert_item(ctx.media_type.name, identity, tvdb_id=unknown_id)
-        log.info(
+        ctx.counts["unknown_ids_accepted"] += 1
+        log.debug(
             "Unknown-type id verified as TVDB id",
             event="scan.unknown_id_accepted", identity=identity,
             media_type=ctx.media_type.name, tvdb_id=unknown_id,
@@ -856,6 +862,7 @@ def _episode_tmdb_from_tvdb(
         return
     ids.looked_up = True
     if found:
+        ctx.counts["episodes_found_by_tvdb"] += 1
         ids.tmdb = found["tmdb_id"]
         ids.tmdb_season = found["season"]
         ctx.tracker.upsert_item(
@@ -1103,7 +1110,8 @@ def _fetch_episode(
             # Not knowing the show is not an answer from TMDB: hold the clock.
             log.debug(
                 "No show TMDB ID for episode, TMDB path transient",
-                event="scan.skip", title=title, tvshowid=item.get("tvshowid"),
+                event="scan.transient", reason="show_unresolved",
+                title=title, tvshowid=item.get("tvshowid"),
             )
             tmdb_data = TRANSIENT
     elif tmdb_id and ep_show_tmdb_id:
@@ -1548,6 +1556,7 @@ def run_scan(
         season_cache={},
         tvdb_cache={},
         logged_once=set(),
+        counts={"unknown_ids_accepted": 0, "episodes_found_by_tvdb": 0},
         schedule=schedule,
         rating_pref=settings.get("rating_source", 0),
         text_order=settings.get("text_source_order", TEXT_TMDB_FIRST),
@@ -1887,6 +1896,8 @@ def run_scan(
         errors=stats["errors"],
         unreachable=stats["unreachable"],
         protected=stats["protected"],
+        unknown_ids_accepted=ctx.counts["unknown_ids_accepted"],
+        episodes_found_by_tvdb=ctx.counts["episodes_found_by_tvdb"],
         disabled=breaker.disabled(),
         duration_ms=int((time.perf_counter() - scan_start) * 1000),
     )

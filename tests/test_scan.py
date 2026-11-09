@@ -4472,3 +4472,67 @@ class TestUnmappedLanguage:
         logged = warnings()
         assert len(logged) == 2  # once in each scan
         assert all(c.kwargs["language"] == "dutch" for c in logged)
+
+
+def _complete_kwargs(mock_log):
+    calls = [
+        c for c in mock_log.info.call_args_list
+        if c.kwargs.get("event") == "scan.complete"
+    ]
+    assert len(calls) == 1
+    return calls[0].kwargs
+
+
+class TestPerItemOutcomeCounts:
+    """Per-item id outcomes log at DEBUG and are counted in scan.complete."""
+
+    @patch("resources.lib.engine.scan.log")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series_episodes")
+    def test_unknown_ids_accepted_counted(
+        self, mock_eps, mock_update, mock_log, tmp_path, kodi_stubs
+    ):
+        items = [
+            _episode(100, {"unknown": "340249"}, episode=1),
+            _episode(101, {"unknown": "340250"}, episode=2),
+        ]
+        mock_eps.return_value = {
+            "340249": {"title": "A", "plot": ""}, "340250": {"title": "B", "plot": ""},
+        }
+        tracker = _make_tracker(tmp_path)
+        _register_checked_show(tracker)
+
+        run_scan(
+            EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
+            "k", _make_settings(), items=items, show_id_map={},
+        )
+        tracker.close()
+
+        assert _complete_kwargs(mock_log)["unknown_ids_accepted"] == 2
+        assert not [
+            c for c in mock_log.info.call_args_list
+            if c.kwargs.get("event") == "scan.unknown_id_accepted"
+        ]
+
+    @patch("resources.lib.engine.scan.log")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    @patch("resources.lib.engine.scan.tmdb_find_episode")
+    def test_episodes_found_by_tvdb_counted(
+        self, mock_find, mock_season, mock_update, mock_log, tmp_path, kodi_stubs
+    ):
+        mock_find.return_value = {
+            "tmdb_id": "99999", "show_tmdb_id": "55555", "season": 1, "episode": 1,
+        }
+        mock_season.return_value = [_tmdb_episode_data()]
+        tracker = _make_tracker(tmp_path)
+        _register_show(tracker)
+
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            "k", _make_settings(), items=[_episode(100, {"tvdb": "888"})],
+            show_id_map={10: "55555"},
+        )
+        tracker.close()
+
+        assert _complete_kwargs(mock_log)["episodes_found_by_tvdb"] == 1

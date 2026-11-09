@@ -7,13 +7,12 @@ certifications) rather than just certifications.
 
 Logging:
     Logger: 'tmdb'
-    Key events:
-        - tmdb.movie: Movie metadata fetched successfully
-        - tmdb.season: Season metadata fetched successfully
-        - tmdb.tvshow: TV show metadata fetched successfully
-        - tmdb.resolve_id: External ID resolved to TMDB ID
-        - tmdb.error: API request or parsing failure
-        - tmdb.auth_error: Invalid API key (HTTP 401)
+    Each call names its endpoint with the `label` it passes to provider_get
+    (tmdb.movie, tmdb.find_episode, ...), and every event it logs uses that
+    name: the answer under the label itself (INFO for a record, DEBUG for a
+    per-episode lookup), and failures from providers/http.py as
+    `<label>.transient` (WARNING) or `<label>.nodata` (404 at DEBUG). An HTTP
+    401 raises ApiKeyError, which the scan logs as scan.apikey.
 """
 from __future__ import annotations
 
@@ -446,7 +445,7 @@ def find_episode_by_tvdb(
             "season": int(result["season_number"]),
             "episode": int(result["episode_number"]),
         }
-        log.info(
+        log.debug(
             "Episode found by TVDB ID",
             event="tmdb.find_episode",
             tvdb_id=tvdb_episode_id,
