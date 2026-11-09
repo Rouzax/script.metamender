@@ -62,6 +62,14 @@ def _make_xbmcgui_stub() -> MagicMock:
     return stub
 
 
+def _listdir(path: str) -> Any:
+    """xbmcvfs.listdir shape: (directory names, file names)."""
+    entries = sorted(os.listdir(path))
+    dirs = [e for e in entries if os.path.isdir(os.path.join(path, e))]
+    files = [e for e in entries if not os.path.isdir(os.path.join(path, e))]
+    return dirs, files
+
+
 def _make_xbmcvfs_stub(tmp_path: str) -> MagicMock:
     stub = MagicMock()
     stub.translatePath = MagicMock(side_effect=lambda p: os.path.join(
@@ -71,6 +79,7 @@ def _make_xbmcvfs_stub(tmp_path: str) -> MagicMock:
     stub.mkdirs = MagicMock(side_effect=lambda p: os.makedirs(p, exist_ok=True))
     stub.delete = MagicMock(side_effect=lambda p: os.remove(p) if os.path.exists(p) else None)
     stub.rename = MagicMock(side_effect=lambda s, d: os.rename(s, d))
+    stub.listdir = MagicMock(side_effect=_listdir)
     stat_mock = MagicMock()
     stat_mock.st_size = MagicMock(return_value=0)
     stub.Stat = MagicMock(return_value=stat_mock)

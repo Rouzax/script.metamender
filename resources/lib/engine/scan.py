@@ -928,9 +928,14 @@ def run_scan(
         ratings_source = None  # type: Optional[str]
         ratings_votes = None  # type: Optional[int]
         if "rating" in nonfinal or "votes" in nonfinal:
-            new_ratings, ratings_source, ratings_votes = build_ratings(
-                tmdb_data or {}, imdb_data or {}, item.get("ratings") or {},
-                ctx.rating_pref,
+            imdb_dict = imdb_data or {}
+            imdb_rating = (
+                (imdb_dict["rating"], int(imdb_dict.get("votes") or 0))
+                if imdb_dict.get("rating") is not None else None
+            )
+            new_ratings, ratings_source, ratings_votes, _slot_fps = build_ratings(
+                tmdb_data or {}, imdb_rating, item.get("ratings") or {},
+                ctx.rating_pref, nfo_managed=False,
             )
             if new_ratings is not None:
                 fields_to_write["ratings"] = new_ratings

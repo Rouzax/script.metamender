@@ -38,7 +38,6 @@ combine-as-imports = true
 # than fixed; see docs/superpowers/reviews/2026-09-12-adversarial-review.
 "resources/lib/utils.py" = ["SIM115"]
 "resources/lib/engine/gaps.py" = ["SIM103"]
-"resources/lib/engine/resolve.py" = ["PLC0206"]
 
 # tests/ and docker/ were never in the lint gate (the repo's validation command
 # is `ruff check resources/lib/`). Baselined at their current findings so an
