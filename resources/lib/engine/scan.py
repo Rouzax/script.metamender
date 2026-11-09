@@ -42,6 +42,7 @@ Logging:
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import date
@@ -214,18 +215,38 @@ def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
     return item.get("title", "")
 
 
+_IMDB_ID = re.compile(r"tt\d+")
+
+
+def _clean_id(raw: Any, imdb: bool = False) -> Optional[str]:
+    """A uniqueid value as an id, or None when it cannot be one.
+
+    Scrapers leave values such as "", "None" and "0" behind. Ids are stored
+    for good once found, so such a value would be sent to the providers and
+    kept in the tracker forever: TMDB and TVDB ids must be positive integers,
+    an IMDb id must be "tt" and digits.
+    """
+    if raw is None or isinstance(raw, bool):
+        return None
+    value = str(raw).strip()
+    if imdb:
+        return value if _IMDB_ID.fullmatch(value) else None
+    return value if value.isdigit() and int(value) > 0 else None
+
+
 def _extract_ids(
     item: Dict[str, Any],
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Extract (tmdb_id, imdb_id, tvdb_id, unknown_id) from a Kodi item's
-    uniqueid dict. ``unknown_id`` is an id of type `unknown`, a TVDB id
-    candidate that is only used once verified."""
+    uniqueid dict, dropping values that cannot be an id (_clean_id).
+    ``unknown_id`` is an id of type `unknown`, a TVDB id candidate that is
+    only used once verified."""
     uid = item.get("uniqueid") or {}
     return (
-        uid.get("tmdb") or uid.get("themoviedb"),
-        uid.get("imdb"),
-        uid.get("tvdb") or uid.get("thetvdb"),
-        uid.get("unknown"),
+        _clean_id(uid.get("tmdb")) or _clean_id(uid.get("themoviedb")),
+        _clean_id(uid.get("imdb"), imdb=True),
+        _clean_id(uid.get("tvdb")) or _clean_id(uid.get("thetvdb")),
+        _clean_id(uid.get("unknown")),
     )
 
 
@@ -751,7 +772,9 @@ def _resolve_tmdb_by_external(ctx: _ScanCtx, identity: str, ids: _Ids) -> None:
     """Movie/show TMDB id from its TVDB or IMDb id via TMDB /find."""
     resolved = _lookup(
         "tmdb",
-        lambda: resolve_id(ctx.tmdb_api_key, tvdb_id=ids.tvdb, imdb_id=ids.imdb),
+        lambda: resolve_id(
+            ctx.tmdb_api_key, ctx.media_type.name, tvdb_id=ids.tvdb, imdb_id=ids.imdb,
+        ),
         ctx, identity,
     )
     if resolved is TRANSIENT:

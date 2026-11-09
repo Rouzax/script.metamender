@@ -118,28 +118,35 @@ def _normalize_certs(certs: Dict[str, str]) -> Dict[str, str]:
 
 def resolve_id(
     api_key: str,
+    media_type: str,
     tvdb_id: Optional[str] = None,
     imdb_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Resolve a TMDB ID from an external ID using the /find endpoint.
+    """Resolve a movie's or show's TMDB ID from its external ids via /find.
 
-    Tries tvdb_id first, then imdb_id. Returns the TMDB ID as a string, or
-    None when the provider answered and had no match (404, or empty results).
-    Raises ApiKeyError on HTTP 401 and TransientProviderError when the provider
-    could not be reached, so a failure is never mistaken for "no match".
+    Only the results of the asking media type count ("movie_results" for a
+    movie, "tv_results" for a show): the resolved id is stored for good, so
+    an id of the other kind would fetch an unrelated record forever. The TVDB
+    id is tried first; when TMDB has nothing for it, the IMDb id is tried.
+    Returns the TMDB ID as a string, or None when every lookup answered with
+    no match. Raises ApiKeyError on HTTP 401 and TransientProviderError when
+    TMDB could not be reached, so a failure is never mistaken for "no match"
+    (a transient first lookup does not fall through to the second).
     """
-    external_id = None  # type: Optional[str]
-    source = None  # type: Optional[str]
-    if tvdb_id:
-        external_id = tvdb_id
-        source = "tvdb_id"
-    elif imdb_id:
-        external_id = imdb_id
-        source = "imdb_id"
+    results_key = "movie_results" if media_type == "movie" else "tv_results"
+    for source, external_id in (("tvdb_id", tvdb_id), ("imdb_id", imdb_id)):
+        if not external_id:
+            continue
+        resolved = _find(api_key, external_id, source, results_key)
+        if resolved is not None:
+            return resolved
+    return None
 
-    if not external_id:
-        return None
 
+def _find(
+    api_key: str, external_id: str, source: str, results_key: str,
+) -> Optional[str]:
+    """One /find call: the first result under ``results_key``, or None."""
     url = "{}/find/{}".format(TMDB_BASE_URL, external_id)
 
     # Routed through provider_get like every other outbound call, so a 5xx,
@@ -158,23 +165,19 @@ def resolve_id(
     if data is None:
         return None
 
-    # Intentionally show-level only: "tv_episode_results" is omitted. Episodes
-    # are matched by their own TMDB/IMDB id (no /find), so resolve_id never
-    # needs episode-level resolution. (The spec mentions tv_episode_results;
-    # that predates the ID-only episode decision and does not apply here.)
-    for key in ("movie_results", "tv_results"):
-        results = data.get(key, [])
-        if results:
-            resolved_id = results[0].get("id")
-            if resolved_id is not None:
-                log.info(
-                    "Resolved TMDB ID",
-                    event="tmdb.resolve_id",
-                    tmdb_id=str(resolved_id),
-                    external_id=external_id,
-                    source=source,
-                )
-                return str(resolved_id)
+    # Show-level only: episodes find their TMDB id through
+    # find_episode_by_tvdb, which reads tv_episode_results.
+    results = data.get(results_key) or []
+    resolved_id = results[0].get("id") if results else None
+    if resolved_id is not None:
+        log.info(
+            "Resolved TMDB ID",
+            event="tmdb.resolve_id",
+            tmdb_id=str(resolved_id),
+            external_id=external_id,
+            source=source,
+        )
+        return str(resolved_id)
 
     log.debug(
         "Could not resolve TMDB ID",
