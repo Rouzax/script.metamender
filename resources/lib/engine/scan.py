@@ -221,7 +221,10 @@ def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
     return item.get("title", "")
 
 
-_IMDB_ID = re.compile(r"tt\d+")
+# ASCII only: \d and str.isdigit also accept other scripts' digits, which
+# no provider uses in an id ("²" would even make int() raise).
+_IMDB_ID = re.compile(r"tt[0-9]+")
+_NUMERIC_ID = re.compile(r"[0-9]+")
 
 
 def _clean_id(raw: Any, imdb: bool = False) -> Optional[str]:
@@ -237,7 +240,7 @@ def _clean_id(raw: Any, imdb: bool = False) -> Optional[str]:
     value = str(raw).strip()
     if imdb:
         return value if _IMDB_ID.fullmatch(value) else None
-    return value if value.isdigit() and int(value) > 0 else None
+    return value if _NUMERIC_ID.fullmatch(value) and int(value) > 0 else None
 
 
 def _extract_ids(

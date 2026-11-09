@@ -4383,12 +4383,17 @@ class TestExtractIds:
         }}
         assert _extract_ids(item) == ("123", "tt0012345", "80767", "42")
 
-    @pytest.mark.parametrize("bogus", ["", "None", "0", "none", "abc", "12a", " ", "-1"])
+    @pytest.mark.parametrize("bogus", [
+        "", "None", "0", "none", "abc", "12a", " ", "-1", "00",
+        # Non-ASCII digits: str.isdigit accepts them, int() raises on "²"
+        # and reads "١٢" as 12; neither is an id.
+        "²", "١٢", "①",
+    ])
     def test_bogus_numeric_ids_dropped(self, bogus):
         item = {"uniqueid": {"tmdb": bogus, "tvdb": bogus, "unknown": bogus}}
         assert _extract_ids(item) == (None, None, None, None)
 
-    @pytest.mark.parametrize("bogus", ["", "None", "0", "12345", "nm0000001", "tt", "ttabc"])
+    @pytest.mark.parametrize("bogus", ["", "None", "0", "12345", "nm0000001", "tt", "ttabc", "tt١٢"])
     def test_bogus_imdb_ids_dropped(self, bogus):
         assert _extract_ids({"uniqueid": {"imdb": bogus}})[1] is None
 
