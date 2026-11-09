@@ -26,13 +26,43 @@ def test_independent_providers():
     cb.record_failure("tmdb"); cb.record_failure("tmdb")
     assert cb.is_disabled("tmdb") is True
     assert cb.is_disabled("imdb") is False
-    assert cb.both_disabled() is False
+    assert cb.all_disabled(("tmdb", "imdb")) is False
 
 
-def test_both_disabled():
+def test_unknown_provider_counts_failures():
+    cb = CircuitBreaker(threshold=5)
+    for _ in range(4):
+        assert cb.record_failure("tvdb") is False
+    assert cb.is_disabled("tvdb") is False
+    assert cb.record_failure("tvdb") is True
+    assert cb.is_disabled("tvdb") is True
+
+
+def test_success_on_unseen_provider_is_harmless():
+    cb = CircuitBreaker(threshold=2)
+    cb.record_success("tvdb")
+    assert cb.is_disabled("tvdb") is False
+
+
+def test_disable_returns_true_once():
+    cb = CircuitBreaker(threshold=5)
+    assert cb.disable("tvdb") is True
+    assert cb.is_disabled("tvdb") is True
+    assert cb.disable("tvdb") is False
+
+
+def test_all_disabled_requires_every_named_provider():
     cb = CircuitBreaker(threshold=1)
-    cb.record_failure("tmdb"); cb.record_failure("imdb")
-    assert cb.both_disabled() is True
+    cb.record_failure("tmdb")
+    assert cb.all_disabled(("tmdb",)) is True
+    assert cb.all_disabled(("tmdb", "tvdb")) is False
+    cb.disable("tvdb")
+    assert cb.all_disabled(("tmdb", "tvdb")) is True
+
+
+def test_all_disabled_empty_is_false():
+    cb = CircuitBreaker(threshold=1)
+    assert cb.all_disabled(()) is False
 
 
 def test_trip_reported_once():

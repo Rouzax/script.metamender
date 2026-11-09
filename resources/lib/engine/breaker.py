@@ -9,7 +9,7 @@ Logging:
 """
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Iterable, Set
 
 from resources.lib.constants import PROVIDER_CIRCUIT_BREAKER_THRESHOLD
 
@@ -19,14 +19,24 @@ class CircuitBreaker:
 
     def __init__(self, threshold: int = PROVIDER_CIRCUIT_BREAKER_THRESHOLD) -> None:
         self._threshold = threshold
-        self._failures: Dict[str, int] = {"tmdb": 0, "imdb": 0}
-        self._disabled: Dict[str, bool] = {"tmdb": False, "imdb": False}
+        self._failures: Dict[str, int] = {}
+        self._disabled: Set[str] = set()
 
     def is_disabled(self, provider: str) -> bool:
-        return self._disabled.get(provider, False)
+        return provider in self._disabled
 
-    def both_disabled(self) -> bool:
-        return self._disabled["tmdb"] and self._disabled["imdb"]
+    def all_disabled(self, providers: Iterable[str]) -> bool:
+        """True when every named provider is disabled; False for none named."""
+        names = list(providers)
+        return bool(names) and all(p in self._disabled for p in names)
+
+    def disable(self, provider: str) -> bool:
+        """Disable a provider outright (e.g. rejected credentials). Return
+        True only on the transition, so callers log once."""
+        if provider in self._disabled:
+            return False
+        self._disabled.add(provider)
+        return True
 
     def record_success(self, provider: str) -> None:
         self._failures[provider] = 0
@@ -34,10 +44,9 @@ class CircuitBreaker:
     def record_failure(self, provider: str) -> bool:
         """Increment the provider's failure count. Return True only on the
         transition that newly disables the provider (so callers log once)."""
-        if self._disabled.get(provider, False):
+        if provider in self._disabled:
             return False
-        self._failures[provider] += 1
+        self._failures[provider] = self._failures.get(provider, 0) + 1
         if self._failures[provider] >= self._threshold:
-            self._disabled[provider] = True
-            return True
+            return self.disable(provider)
         return False

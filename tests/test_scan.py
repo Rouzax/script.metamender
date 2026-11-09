@@ -1562,7 +1562,7 @@ class TestRunScanCircuitBreaker:
 
     @patch("resources.lib.engine.scan.get_all_items")
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_both_disabled_stops_pass(
+    def test_tmdb_disabled_stops_pass(
         self, mock_fetch, mock_get_all, tmp_path, kodi_stubs
     ):
         from resources.lib.engine.breaker import CircuitBreaker
@@ -1575,9 +1575,8 @@ class TestRunScanCircuitBreaker:
 
         tracker = _make_tracker(tmp_path)
         breaker = CircuitBreaker(threshold=1)
-        # Pre-disable both providers: the pass must stop before any fetch.
+        # Pre-disable TMDB: the pass must stop before any fetch.
         breaker.record_failure("tmdb")
-        breaker.record_failure("imdb")
 
         run_scan(
             MOVIE, tracker, _make_source_config(),

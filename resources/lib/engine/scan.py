@@ -13,7 +13,7 @@ Logging:
         - scan.abort (INFO): Scan interrupted by Kodi shutdown
         - scan.processing (DEBUG): Starting to process a single item
         - scan.updated (INFO): Item metadata written to Kodi
-        - scan.breaker (WARNING): A provider tripped, or both providers down (scope="both")
+        - scan.breaker (WARNING): A provider tripped, or TMDB down so the pass stops (scope="tmdb")
         - scan.apikey (ERROR): A provider rejected the API key (terminal)
 """
 from __future__ import annotations
@@ -402,7 +402,7 @@ def _fetch_movie_or_show(
     language: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
     """Fetch movie/TV show data from TMDB then IMDb. Returns
-    (tmdb_data, imdb_data, imdb_id). Caller has checked both_disabled().
+    (tmdb_data, imdb_data, imdb_id). Caller has checked the breaker.
 
     A provider this item needs but cannot reach (breaker open, or the TMDB ID
     lookup failed transiently) yields ``_TRANSIENT``, never None: None means the
@@ -539,7 +539,7 @@ def _fetch_episode(
     language: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
     """Fetch episode data by ID. Returns (tmdb_data, imdb_data, imdb_id). Caller
-    has checked both_disabled() and that at least one ID is present.
+    has checked the breaker and that at least one ID is present.
 
     As in _fetch_movie_or_show, a needed provider whose breaker is open yields
     ``_TRANSIENT`` rather than None.
@@ -889,10 +889,10 @@ def run_scan(
             decisions=decisions,
         )
 
-        if breaker.both_disabled():
+        if breaker.all_disabled(("tmdb",)):
             log.warning(
-                "Both providers disabled, stopping scan",
-                event="scan.breaker", scope="both",
+                "TMDB disabled, stopping scan",
+                event="scan.breaker", scope="tmdb",
                 media_type=media_type.name, processed=stats["processed"],
             )
             stats["aborted"] = True
@@ -994,8 +994,7 @@ def run_scan(
         skipped=stats["skipped"],
         updated=stats["updated"],
         errors=stats["errors"],
-        tmdb_disabled=breaker.is_disabled("tmdb"),
-        imdb_disabled=breaker.is_disabled("imdb"),
+        disabled=sorted(p for p in ("tmdb", "imdb") if breaker.is_disabled(p)),
         duration_ms=int((time.perf_counter() - scan_start) * 1000),
     )
 
