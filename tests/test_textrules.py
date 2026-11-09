@@ -48,3 +48,23 @@ def test_empty_text(text):
 @pytest.mark.parametrize("text", ["Pilot", "1984", "A - B"])
 def test_non_empty_text(text):
     assert not is_empty_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Del 2", "Osa 1", "Rész 3", "Diel 2", "Díl 2", "Phần 2", "Pjesa 2",
+    "Sehemu 2", "भाग 2", "Бөлім 2", "Бөлүм 2", "Beş 2", "Qism 2",
+    "Qaybta 2", "Atala 2", "Rann 2",
+])
+def test_part_numbers_are_real_titles(text):
+    """A word meaning "part" numbers the parts of a multi-part episode, so a
+    native title made of one is a value, never a placeholder."""
+    assert not is_placeholder_title(text)
+    assert not is_empty_text(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Avsnitt 2", "Jakso 1", "Episode 3", "Afsnit 4", "Epizód 5", "Bölüm 6",
+    "Capítulo 7", "Puntata 8",
+])
+def test_episode_numbers_are_placeholders(text):
+    assert is_placeholder_title(text)
