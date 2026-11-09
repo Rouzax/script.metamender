@@ -9,9 +9,11 @@ import pytest
 
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
 from resources.lib.engine.scan import (
     _extract_fields,
     _item_title,
+    _plan_writes,
     run_scan,
 )
 
@@ -19,9 +21,11 @@ from resources.lib.engine.scan import (
 @pytest.fixture(autouse=True)
 def _mock_secondary_providers():
     """Keep TVDB, the IMDb ratings store and the TMDB id lookups off the
-    network: each answers "nothing" unless a test patches it.
+    network: each answers "nothing" unless a test patches it. NFO detection
+    reports a reachable item without an NFO.
     """
     with patch("resources.lib.engine.scan.imdb_rating_lookup", return_value=None), \
+         patch("resources.lib.engine.scan.nfo_state", return_value=NO_NFO), \
          patch("resources.lib.engine.scan.tvdb_fetch_series", return_value=None), \
          patch("resources.lib.engine.scan.tvdb_fetch_series_episodes", return_value=None), \
          patch("resources.lib.engine.scan.tmdb_fetch_episode_ids", return_value=None), \
@@ -247,7 +251,7 @@ class TestItemTitle:
 class TestExtractFields:
     def test_extracts_requested_fields(self):
         tmdb_data = _tmdb_movie_response()
-        fields = _extract_fields(tmdb_data, ["rating", "plot"], MOVIE, {})
+        fields = _extract_fields(tmdb_data, ["rating", "plot"])
         # rating is no longer emitted by _extract_fields; it goes through the
         # named-slot ratings path (build_ratings) instead.
         assert "rating" not in fields
@@ -256,140 +260,109 @@ class TestExtractFields:
 
     def test_skips_empty_string(self):
         tmdb_data = _tmdb_movie_response(tagline="")
-        fields = _extract_fields(tmdb_data, ["tagline"], MOVIE, {})
+        fields = _extract_fields(tmdb_data, ["tagline"])
         assert "tagline" not in fields
 
     def test_skips_empty_list(self):
         tmdb_data = _tmdb_movie_response(directors=[])
-        fields = _extract_fields(tmdb_data, ["director"], MOVIE, {})
+        fields = _extract_fields(tmdb_data, ["director"])
         assert "director" not in fields
 
     def test_skips_none(self):
         tmdb_data = _tmdb_movie_response(trailer=None)
-        fields = _extract_fields(tmdb_data, ["trailer"], MOVIE, {})
+        fields = _extract_fields(tmdb_data, ["trailer"])
         assert "trailer" not in fields
 
     def test_skips_zero_runtime(self):
         tmdb_data = _tmdb_movie_response(runtime=0)
-        fields = _extract_fields(tmdb_data, ["runtime"], MOVIE, {})
+        fields = _extract_fields(tmdb_data, ["runtime"])
         assert "runtime" not in fields
 
     def test_does_not_emit_votes(self):
         # votes is no longer emitted by _extract_fields; it lives inside the
         # named-slot ratings map (build_ratings) instead.
         tmdb_data = _tmdb_movie_response(votes=1000)
-        fields = _extract_fields(tmdb_data, ["votes"], MOVIE, {})
+        fields = _extract_fields(tmdb_data, ["votes"])
         assert "votes" not in fields
-
-    def test_episode_title_replaces_placeholder(self):
-        tmdb_data = _tmdb_episode_data(title="Real Title")
-        item = {"title": "Episode 1"}
-        fields = _extract_fields(tmdb_data, ["title"], EPISODE, item)
-        assert fields["title"] == "Real Title"
-
-    def test_episode_title_overwrites_non_placeholder(self):
-        # Maturity model: episode titles just take the latest provider value;
-        # there is no placeholder gating any more.
-        tmdb_data = _tmdb_episode_data(title="Different Title")
-        item = {"title": "Call Tracking"}
-        fields = _extract_fields(tmdb_data, ["title"], EPISODE, item)
-        assert fields["title"] == "Different Title"
-
-    def test_episode_title_skips_same_as_current(self):
-        tmdb_data = _tmdb_episode_data(title="Episode 1")
-        item = {"title": "Episode 1"}
-        fields = _extract_fields(tmdb_data, ["title"], EPISODE, item)
-        assert "title" not in fields
 
     def test_does_not_include_mpaa(self):
         # mpaa is not in _TMDB_TO_KODI, so even if requested it is not extracted
         tmdb_data = _tmdb_movie_response()
-        fields = _extract_fields(tmdb_data, ["mpaa"], MOVIE, {})
+        fields = _extract_fields(tmdb_data, ["mpaa"])
         assert "mpaa" not in fields
 
 
 def test_extract_fields_converts_runtime_minutes_to_seconds():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields({"runtime": 114}, ["runtime"], MOVIE, {"runtime": 0})
+    out = _extract_fields({"runtime": 114}, ["runtime"])
     assert out["runtime"] == 114 * 60
 
 
-def test_extract_fields_runtime_same_value_skipped():
-    from resources.lib.engine.scan import _extract_fields
-    # Kodi already has 114 min stored as 6840 s; provider says 114 min
-    out = _extract_fields({"runtime": 114}, ["runtime"], MOVIE, {"runtime": 6840})
-    assert "runtime" not in out
-
-
-def test_extract_fields_overwrites_nonempty_plot_on_diff():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields(
-        {"plot": "English plot"}, ["plot"], MOVIE, {"plot": "Bestaande NL plot"}
-    )
-    # Maturity model: a differing provider value overwrites a non-empty value.
-    assert out["plot"] == "English plot"
-
-
-def test_extract_fields_fills_empty_plot():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields({"plot": "New plot"}, ["plot"], MOVIE, {"plot": ""})
-    assert out["plot"] == "New plot"
-
-
-def test_extract_fields_overwrites_nonempty_list_field_on_diff():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields(
-        {"directors": ["TMDB Director"]}, ["director"], MOVIE,
-        {"director": ["Curated Director"]},
-    )
-    assert out["director"] == ["TMDB Director"]
-
-
 def test_extract_fields_skips_rating_and_votes():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields(
-        {"rating": 7.5, "votes": 100}, ["rating", "votes"], MOVIE,
-        {"rating": 0, "votes": "0"},
-    )
+    out = _extract_fields({"rating": 7.5, "votes": 100}, ["rating", "votes"])
     assert "rating" not in out and "votes" not in out  # handled by ratings path
 
 
-def test_extract_fields_episode_title_placeholder_still_overwritten():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields(
-        {"title": "Real Title"}, ["title"], EPISODE, {"title": "Episode 1"}
-    )
-    assert out["title"] == "Real Title"
-
-
 def test_extract_fields_skips_bare_year_firstaired():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields({"firstaired": "2019"}, ["firstaired"], EPISODE, {"firstaired": ""})
+    out = _extract_fields({"firstaired": "2019"}, ["firstaired"])
     assert "firstaired" not in out
 
 
 def test_extract_fields_writes_full_firstaired():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields({"firstaired": "2019-06-04"}, ["firstaired"], EPISODE, {"firstaired": ""})
+    out = _extract_fields({"firstaired": "2019-06-04"}, ["firstaired"])
     assert out["firstaired"] == "2019-06-04"
 
 
-def test_extract_fields_still_skips_same_value():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields(
-        {"plot": "Same plot"}, ["plot"], MOVIE,
-        {"plot": "Same plot"},
-    )
-    assert "plot" not in out  # identical value is never rewritten
+# ---------------------------------------------------------------------------
+# Unit tests: _plan_writes (overwrite-on-diff, NFO protection)
+# ---------------------------------------------------------------------------
 
 
-def test_extract_fields_overwrites_nonplaceholder_episode_title():
-    from resources.lib.engine.scan import _extract_fields
-    out = _extract_fields(
-        {"title": "Real Title"}, ["title"], EPISODE,
-        {"title": "Curated Episode Title"},
-    )
-    assert out["title"] == "Real Title"
+def _plan(values, item, nfo_managed=False, fs_map=None):
+    # type: (Dict[str, Any], Dict[str, Any], bool, Any) -> Any
+    return _plan_writes(values, item, nfo_managed, fs_map or {}, "id")
+
+
+class TestPlanWrites:
+    def test_episode_title_replaces_placeholder(self):
+        to_write, _ = _plan({"title": "Real Title"}, {"title": "Episode 1"})
+        assert to_write["title"] == "Real Title"
+
+    def test_episode_title_overwrites_non_placeholder(self):
+        # Maturity model: episode titles just take the latest provider value;
+        # there is no placeholder gating any more.
+        to_write, _ = _plan({"title": "Different Title"}, {"title": "Call Tracking"})
+        assert to_write["title"] == "Different Title"
+
+    def test_same_value_is_held_not_rewritten(self):
+        to_write, held = _plan({"plot": "Same plot"}, {"plot": "Same plot"})
+        assert to_write == {} and held == {"plot"}
+
+    def test_runtime_same_value_skipped(self):
+        # Kodi already has 114 min stored as 6840 s
+        to_write, held = _plan({"runtime": 6840}, {"runtime": 6840})
+        assert to_write == {} and held == {"runtime"}
+
+    def test_overwrites_nonempty_plot_on_diff(self):
+        to_write, _ = _plan({"plot": "English plot"}, {"plot": "Bestaande NL plot"})
+        assert to_write["plot"] == "English plot"
+
+    def test_overwrites_nonempty_list_field_on_diff(self):
+        to_write, _ = _plan(
+            {"director": ["TMDB Director"]}, {"director": ["Curated Director"]},
+        )
+        assert to_write["director"] == ["TMDB Director"]
+
+    def test_nfo_value_is_neither_written_nor_held(self):
+        to_write, held = _plan(
+            {"plot": "English plot"}, {"plot": "NFO plot"}, nfo_managed=True,
+        )
+        assert to_write == {} and held == set()
+
+    def test_nfo_placeholder_title_is_filled(self):
+        to_write, _ = _plan(
+            {"title": "Real Title"}, {"title": "Aflevering 3"}, nfo_managed=True,
+        )
+        assert to_write == {"title": "Real Title"}
 
 
 @patch("resources.lib.engine.scan.update_item")
@@ -3315,3 +3288,377 @@ class TestShowYearVerification:
         tracker.close()
 
         assert (row["tvdb_id"] == "80767") is accepted
+
+
+# ---------------------------------------------------------------------------
+# NFO protection: NFO values are never changed; metamender fills empty fields
+# and keeps refreshing what it wrote itself.
+# ---------------------------------------------------------------------------
+
+
+def _young_movie(**overrides):
+    # type: (...) -> Dict[str, Any]
+    item = _make_movie_item(**overrides)
+    item["premiered"] = date.today().isoformat()  # volatile: re-sampled when due
+    return item
+
+
+def _seed_field(tracker, field, written_value, media_type=MOVIE, identity=_MOVIE_IDENTITY):
+    """A field sampled once before, now due again, with the given provenance."""
+    tracker.upsert_item(media_type.name, identity, kodi_id=1, tmdb_id="12345")
+    tracker.record_field_fetch(
+        media_type.name, identity, field, next_retry="2020-01-01",
+        written_value=written_value,
+    )
+    tracker.commit()
+
+
+class TestNfoProtection:
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_nfo_title_never_overwritten(
+        self, mock_season, mock_update, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        item = _make_episode_item(title="De Eerste Aflevering")
+        mock_season.return_value = [_tmdb_episode_data(title="Pilot")]
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        fs = _fs(tracker, EPISODE, item)
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        # Answered and protected for good: the clock advances, no provenance.
+        assert _count(fs, "title") == 1
+        assert fs["title"]["written_value"] is None
+        assert fs["title"]["source"] is None
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_nfo_empty_plot_filled(
+        self, mock_fetch, mock_update, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+
+        mock_fetch.return_value = _tmdb_movie_response(plot="Een mooie film")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_make_movie_item(plot="")],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Een mooie film"
+        assert row["written_value"] == fingerprint("Een mooie film")
+        assert row["source"] == "tmdb"
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_nfo_field_we_wrote_is_refreshed(
+        self, mock_fetch, mock_update, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+
+        mock_fetch.return_value = _tmdb_movie_response(plot="Fresh plot")
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "plot", fingerprint("Old plot"))
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_young_movie(plot="Old plot")],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Fresh plot"
+        assert row["written_value"] == fingerprint("Fresh plot")
+        assert row["fetch_count"] == 2
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_nfo_field_changed_after_our_write_is_left(
+        self, mock_fetch, mock_update, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+
+        mock_fetch.return_value = _tmdb_movie_response(plot="Fresh plot")
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "plot", fingerprint("Old plot"))
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_young_movie(plot="Edited by the user")],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert _written(mock_update, "plot") is None
+        assert not mock_update.called
+        assert row["fetch_count"] == 2
+        assert row["written_value"] == fingerprint("Old plot")
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.imdb_rating_lookup", return_value=(7.0, 80))
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_nfo_ratings_imdb_slot_refreshed_default_kept(
+        self, mock_fetch, mock_update, _mock_imdb, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        import json
+
+        from resources.lib.engine.resolve import slot_fingerprint
+
+        nfo_slot = {"rating": 7.2, "votes": 300, "default": True}
+        our_slot = {"rating": 6.5, "votes": 50, "default": False}
+        item = _young_movie()
+        item["ratings"] = {"themoviedb": nfo_slot, "imdb": our_slot}
+        mock_fetch.return_value = _tmdb_movie_response(rating=7.5, votes=1000)
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "rating", json.dumps({"imdb": slot_fingerprint(our_slot)}))
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+            "k", _make_settings(), items=[item],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        tracker.close()
+
+        ratings = _written(mock_update, "ratings")
+        assert ratings["imdb"] == {"rating": 7.0, "votes": 80, "default": False}
+        assert ratings["themoviedb"] == nfo_slot
+        owned = json.loads(row["written_value"])
+        assert owned == {"imdb": slot_fingerprint({"rating": 7.0, "votes": 80})}
+        assert row["fetch_count"] == 2
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=UNREACHABLE)
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_unreachable_media_skips_item_without_clock_advance(
+        self, mock_fetch, mock_update, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        item = _make_movie_item()
+        del item["uniqueid"]["tmdb"]  # would trigger an id lookup if processed
+        mock_fetch.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        with patch("resources.lib.engine.scan.resolve_id") as mock_resolve:
+            stats = run_scan(
+                MOVIE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+                "k", _make_settings(), items=[item],
+            )
+        fs = _fs(tracker, MOVIE, item)
+        row = _row(tracker, MOVIE, item)
+        tracker.close()
+
+        assert not mock_fetch.called and not mock_resolve.called
+        assert not mock_update.called
+        assert fs == {}
+        assert row["ids_checked"] is None
+        assert not row["cycle_processed"]
+        assert stats["unreachable"] == 1 and stats["skipped"] == 1
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_nfo_detection_cached_per_scan(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        due_a = _make_movie_item(tmdb_id="1", movie_id=1)
+        due_b = _make_movie_item(tmdb_id="2", movie_id=2)
+        due_b["file"] = "smb://server/movies/b.mkv"
+        final = _make_movie_item(tmdb_id="3", movie_id=3)
+        final["premiered"] = "2000-01-01"
+        mock_fetch.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        fields = frozenset({"plot", "rating", "genre"})
+        run_scan(
+            MOVIE, tracker, _make_source_config(), fields,
+            "k", _make_settings(), items=[final],
+        )
+        tracker.start_new_cycle()
+        with patch("resources.lib.engine.scan.nfo_state", return_value=NO_NFO) as mock_nfo:
+            run_scan(
+                MOVIE, tracker, _make_source_config(), fields,
+                "k", _make_settings(), items=[due_a, due_b, final],
+            )
+        tracker.close()
+
+        # One check per item with work to do; the fully final item is not
+        # looked at, so a sleeping share is not woken for it.
+        assert sorted(c.args for c in mock_nfo.call_args_list) == [
+            ("movie", "smb://server/movies/b.mkv"),
+            ("movie", "smb://server/movies/test.mkv"),
+        ]
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_written_value_recorded_without_nfo_as_written_to_kodi(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Provenance exists for every write, so an NFO added later still
+        lets metamender refresh its own values. Runtime is fingerprinted in
+        the seconds Kodi stores, not the provider's minutes."""
+        import json
+
+        from resources.lib.engine.protect import fingerprint
+        from resources.lib.engine.resolve import slot_fingerprint
+
+        mock_fetch.return_value = _tmdb_movie_response(runtime=120, rating=7.5, votes=1000)
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(),
+            frozenset({"runtime", "rating", "votes"}),
+            "k", _make_settings(), items=[_make_movie_item()],
+        )
+        fs = _fs(tracker, MOVIE, _make_movie_item())
+        tracker.close()
+
+        assert _written(mock_update, "runtime") == 7200
+        assert fs["runtime"]["written_value"] == fingerprint(7200)
+        expected = {"themoviedb": slot_fingerprint({"rating": 7.5, "votes": 1000})}
+        assert json.loads(fs["rating"]["written_value"]) == expected
+        assert json.loads(fs["votes"]["written_value"]) == expected
+
+    @patch("resources.lib.engine.scan.update_item", return_value=False)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_rejected_write_records_no_provenance(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="A plot")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_young_movie()],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert mock_update.called
+        assert row is None
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.imdb_rating_lookup", return_value=(7.0, 80))
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_nfo_ratings_unreadable_provenance_protects_slot(
+        self, mock_fetch, mock_update, _mock_imdb, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        item = _young_movie()
+        item["ratings"] = {"imdb": {"rating": 6.5, "votes": 50, "default": True}}
+        mock_fetch.return_value = _tmdb_movie_response(rating=0, votes=0)
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "rating", "not json")
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+            "k", _make_settings(), items=[item],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        tracker.close()
+
+        assert _written(mock_update, "ratings") is None
+        assert row["fetch_count"] == 2
+        assert row["written_value"] == "not json"
+
+    @patch("resources.lib.engine.scan.imdb_rating_lookup", return_value=(7.0, 80))
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_rating_provenance_keeps_slots_not_written_this_scan(
+        self, mock_fetch, mock_update, _mock_imdb, tmp_path, kodi_stubs
+    ):
+        """A slot metamender owns stays owned when only another slot changed."""
+        import json
+
+        from resources.lib.engine.resolve import slot_fingerprint
+
+        tmdb_slot = {"rating": 7.5, "votes": 1000, "default": True}
+        item = _young_movie()
+        item["ratings"] = {
+            "themoviedb": tmdb_slot,
+            "imdb": {"rating": 6.5, "votes": 50, "default": False},
+        }
+        mock_fetch.return_value = _tmdb_movie_response(rating=7.5, votes=1000)
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "rating", json.dumps({
+            "themoviedb": slot_fingerprint(tmdb_slot),
+            "imdb": slot_fingerprint({"rating": 6.5, "votes": 50}),
+        }))
+        settings = _make_settings()
+        settings["rating_source"] = 3  # IMDb only: the TMDB slot is not written
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+            "k", settings, items=[item],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        tracker.close()
+
+        assert _written(mock_update, "ratings")["imdb"]["rating"] == 7.0
+        assert json.loads(row["written_value"]) == {
+            "themoviedb": slot_fingerprint(tmdb_slot),
+            "imdb": slot_fingerprint({"rating": 7.0, "votes": 80}),
+        }
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_update_now_keeps_nfo_protection_and_records_provenance(
+        self, mock_fetch, mock_update, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+
+        item = _young_movie(plot="")
+        item["tagline"] = "Van het NFO"
+        mock_fetch.return_value = _tmdb_movie_response(plot="A plot", tagline="From TMDB")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot", "tagline"}),
+            "k", _make_settings(), items=[item], reset=True,
+        )
+        fs = _fs(tracker, MOVIE, item)
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "A plot"
+        assert _written(mock_update, "tagline") is None
+        assert fs["plot"]["written_value"] == fingerprint("A plot")
+        assert fs["tagline"]["written_value"] is None
+
+
+class TestSourceFromWrittenValue:
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_bare_year_firstaired_records_no_source(
+        self, mock_season, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_episode_item()
+        mock_season.return_value = [_tmdb_episode_data(firstaired="2025")]
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"firstaired"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        fs = _fs(tracker, EPISODE, item)
+        tracker.close()
+
+        assert _written(mock_update, "firstaired") is None
+        assert _count(fs, "firstaired") == 1
+        assert fs["firstaired"]["source"] is None
+        assert fs["firstaired"]["written_value"] is None
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_value_already_in_kodi_records_source_not_provenance(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="Same plot")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_make_movie_item(plot="Same plot")],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert not mock_update.called
+        assert row["source"] == "tmdb"
+        assert row["written_value"] is None

@@ -436,6 +436,7 @@ class TrackerDB:
         field: str,
         next_retry: Optional[str],
         settings_fp: Optional[str] = None,
+        written_value: Optional[str] = None,
     ) -> None:
         """Re-baseline a field to its first sample (manual 'Update now').
 
@@ -443,7 +444,8 @@ class TrackerDB:
         the normal schedule after a manual update, rather than being skipped
         forever because NULL next_retry is treated as "not due" by decide_field.
         settings_fp is stored as given so the re-baselined row matches the
-        settings in force.
+        settings in force. written_value is the provenance of a value written
+        during the reset; None keeps the stored one, as in record_field_fetch.
         """
         item_id = self._get_item_id(media_type, identity)
         if item_id is None:
@@ -452,12 +454,14 @@ class TrackerDB:
         try:
             self._conn.execute(
                 "INSERT INTO field_status "
-                "(item_id, field, fetch_count, fetched_at, next_retry, settings_fp) "
-                "VALUES (?, ?, 1, ?, ?, ?) "
+                "(item_id, field, fetch_count, fetched_at, next_retry, settings_fp, "
+                "written_value) "
+                "VALUES (?, ?, 1, ?, ?, ?, ?) "
                 "ON CONFLICT(item_id, field) DO UPDATE SET "
                 "fetch_count = 1, fetched_at = excluded.fetched_at, "
-                "next_retry = excluded.next_retry, settings_fp = excluded.settings_fp",
-                (item_id, field, today, next_retry, settings_fp),
+                "next_retry = excluded.next_retry, settings_fp = excluded.settings_fp, "
+                "written_value = COALESCE(excluded.written_value, field_status.written_value)",
+                (item_id, field, today, next_retry, settings_fp, written_value),
             )
         except sqlite3.Error:
             log.exception(

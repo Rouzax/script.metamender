@@ -17,7 +17,12 @@ Logging:
         - scan.start (INFO): Scan cycle starting for a media type
         - scan.complete (INFO): Scan cycle finished with stats and the
           providers disabled this cycle
-        - scan.skip (DEBUG): Item skipped (disabled source, not due, no candidates)
+        - scan.skip (DEBUG): Item skipped (disabled source, not due, no
+          candidates, or reason="unreachable": the media could not be found,
+          so NFO state is unknown; scan.complete counts these)
+        - scan.protected (DEBUG): An answered value was not written because
+          the item is NFO-managed and the field holds a value metamender did
+          not write
         - scan.abort (INFO): Scan interrupted by Kodi shutdown
         - scan.processing (DEBUG): Starting to process a single item
         - scan.updated (INFO): Item metadata written to Kodi
@@ -36,6 +41,7 @@ Logging:
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from datetime import date
@@ -52,6 +58,7 @@ from resources.lib.constants import (
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.kodi import get_all_items, update_item
 from resources.lib.data.media_types import MediaType
+from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
@@ -63,7 +70,7 @@ from resources.lib.engine.maturity import (
     compute_next_due,
     decide_field,
 )
-from resources.lib.engine.protect import may_write
+from resources.lib.engine.protect import fingerprint, may_write
 from resources.lib.engine.resolve import build_ratings, rating_sources
 from resources.lib.providers.imdb_ratings import lookup as imdb_rating_lookup
 from resources.lib.providers.languages import tmdb_language, tvdb_language
@@ -131,6 +138,10 @@ def _make_stats() -> Dict[str, Any]:
         "skipped": 0,
         "updated": 0,
         "errors": 0,
+        # Items skipped because their media could not be reached, and answered
+        # field values not written because an NFO supplied the field.
+        "unreachable": 0,
+        "protected": 0,
         "fields": {},
         # True when the pass stopped before reaching the end of the library
         # (shutdown, or every provider disabled). The caller must not treat
@@ -218,23 +229,18 @@ def _find_episode_by_tmdb_id(
 def _extract_fields(
     provider_data: Dict[str, Any],
     gap_fields: List[str],
-    media_type: MediaType,
-    item: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Extract writable Kodi fields from provider data for the requested fields.
+    """Provider values for the requested fields, in the form Kodi stores.
 
-    Under the maturity model a non-final field is refreshed overwrite-on-diff:
-    a differing, non-empty provider value overwrites the current Kodi value
-    (even when that value is already non-empty). Skips "mpaa" (Phase 8) and the
-    named-slot rating/votes (handled by build_ratings).
+    Skips "mpaa" (Phase 8) and the named-slot rating/votes (handled by
+    build_ratings). Empty provider values are dropped, runtime is converted
+    minutes -> seconds, and firstaired is kept only as a full ISO date (bare
+    years are dropped). Title and plot arrive from the provider chain, which
+    never yields a placeholder title, so no placeholder check is needed here.
 
-    Title and plot arrive from the provider chain, which never yields a
-    placeholder title, so no placeholder check is needed here.
-
-    Guards that remain: empty provider values are skipped, identical values are
-    never rewritten (same-value skip), runtime is converted minutes -> seconds,
-    and firstaired is only written when it is a full ISO date (bare years are
-    skipped).
+    The result is what would be written, so it is also what the write's
+    provenance fingerprint is taken of. Whether a value is written at all is
+    _plan_writes' decision.
     """
     fields = {}  # type: Dict[str, Any]
 
@@ -272,15 +278,60 @@ def _extract_fields(
         ):
             continue
 
-        current = item.get(kodi_key)
-
-        # Same-value skip: never rewrite identical data.
-        if current is not None and current == value:
-            continue
-
         fields[kodi_key] = value
 
     return fields
+
+
+def _plan_writes(
+    values: Dict[str, Any],
+    item: Dict[str, Any],
+    nfo_managed: bool,
+    fs_map: Dict[str, Dict[str, Any]],
+    identity: str,
+) -> Tuple[Dict[str, Any], Set[str]]:
+    """Split extracted values into (fields to write, fields Kodi already holds).
+
+    Under the maturity model a non-final field is refreshed overwrite-on-diff:
+    a differing value overwrites the current one, an identical value is never
+    rewritten. On an NFO-managed item may_write decides with the field's
+    stored provenance; a field it forbids is in neither result, so it gets
+    no write and no source.
+    """
+    to_write = {}  # type: Dict[str, Any]
+    held = set()  # type: Set[str]
+    for f, value in values.items():
+        current = item.get(f)
+        if current is not None and current == value:
+            held.add(f)
+            continue
+        if not may_write(nfo_managed, current, fs_map.get(f, {}).get("written_value")):
+            log.debug(
+                "Field protected, value left as it is",
+                event="scan.protected", identity=identity, field=f,
+            )
+            continue
+        to_write[f] = value
+    return to_write, held
+
+
+def _owned_slots(fs_map: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+    """Rating slots metamender wrote, from the JSON provenance on the rating
+    rows. Unreadable provenance owns nothing, which protects every slot."""
+    for f in ("rating", "votes"):
+        raw = fs_map.get(f, {}).get("written_value")
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except ValueError:
+            return {}
+        if isinstance(parsed, dict) and all(
+            isinstance(k, str) and isinstance(v, str) for k, v in parsed.items()
+        ):
+            return parsed
+        return {}
+    return {}
 
 
 class _Pacer:
@@ -1140,9 +1191,11 @@ def _resolve_ratings(
     item: Dict[str, Any],
     primary: _Primary,
     identity: str,
-) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str], Optional[int]]:
+    nfo_managed: bool,
+    owned_slots: Dict[str, str],
+) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str], Optional[int], Dict[str, str]]:
     """Ratings verdict and map. Returns (transient, new_ratings_map,
-    default_source, default_votes).
+    default_source, default_votes, slot_fingerprints of the slots written).
 
     Transient when a source rating_source consults did not answer for this
     item; a source it does not consult cannot hold the rating back.
@@ -1150,13 +1203,13 @@ def _resolve_ratings(
     use_tmdb, use_imdb = rating_sources(ctx.rating_pref)
     imdb = _imdb_rating(ctx, primary, identity) if use_imdb else None
     if (use_tmdb and primary.tmdb is TRANSIENT) or imdb is TRANSIENT:
-        return True, None, None, None
+        return True, None, None, None, {}
     tmdb_data = primary.tmdb if primary.tmdb is not TRANSIENT else None
-    new_ratings, source, votes, _slot_fps = build_ratings(
+    new_ratings, source, votes, slot_fps = build_ratings(
         tmdb_data or {}, imdb, item.get("ratings") or {},
-        ctx.rating_pref, nfo_managed=False,
+        ctx.rating_pref, nfo_managed=nfo_managed, owned_slots=owned_slots,
     )
-    return False, new_ratings, source, votes
+    return False, new_ratings, source, votes, slot_fps
 
 
 def _resolve_fields(
@@ -1485,6 +1538,25 @@ def run_scan(
             )
 
         due = any(d == FETCH_NOW for d in decisions.values())
+
+        # NFO detection touches the share, so it runs once, and only for an
+        # item with a field to process. Unreachable media (a sleeping or
+        # offline share) says nothing about the NFO: the item is left exactly
+        # as it is, ids_checked and cycle flag included, and retried later.
+        nfo_managed = False
+        if due:
+            state = nfo_state(media_type.name, item.get("file", ""))
+            if state == UNREACHABLE:
+                log.debug(
+                    "Media unreachable, skipping item",
+                    event="scan.skip", reason="unreachable", title=title,
+                    identity=identity, media_type=media_type.name,
+                )
+                stats["skipped"] += 1
+                stats["unreachable"] += 1
+                continue
+            nfo_managed = state == NFO
+
         ids = _resolve_ids(
             ctx, item, identity, kodi_ids, stored, language,
             _lookup_allowed(
@@ -1544,18 +1616,21 @@ def run_scan(
             ctx, item, identity, primary, ids, language, nonfinal,
         )
         answered = [f for f in nonfinal if f in outcomes and not outcomes[f].transient]
-        fields_to_write = {
-            f: v
-            for f, v in _extract_fields(values, answered, media_type, item).items()
-            if may_write(False, item.get(f), None)
-        }
+        extracted = _extract_fields(values, answered)
+        fields_to_write, held = _plan_writes(
+            extracted, item, nfo_managed, fs_map, identity,
+        )
+        stats["protected"] += len(extracted) - len(fields_to_write) - len(held)
 
         ratings_source = None  # type: Optional[str]
         ratings_votes = None  # type: Optional[int]
+        owned_slots = _owned_slots(fs_map)
+        slot_fps = {}  # type: Dict[str, str]
         rating_due = [f for f in nonfinal if f in _RATING_FIELDS]
         if rating_due:
-            transient, new_ratings, ratings_source, ratings_votes = _resolve_ratings(
-                ctx, item, primary, identity,
+            (transient, new_ratings, ratings_source, ratings_votes,
+             slot_fps) = _resolve_ratings(
+                ctx, item, primary, identity, nfo_managed, owned_slots,
             )
             rating_outcome = FieldOutcome(
                 transient=transient, value=None, from_fallback=False,
@@ -1580,9 +1655,23 @@ def run_scan(
             attempted.update(_RATING_FIELDS)
         write_failed = attempted - written
 
+        # Provenance: the fingerprint of each value as written to Kodi. Rating
+        # rows hold the per-slot fingerprints as JSON, merged over the slots
+        # owned before so a slot not rewritten this scan stays owned.
+        provenance = {
+            f: fingerprint(fields_to_write[f])
+            for f in written if f in fields_to_write
+        }  # type: Dict[str, str]
+        if slot_fps and _RATING_FIELDS & written:
+            merged = dict(owned_slots)
+            merged.update(slot_fps)
+            for f in _RATING_FIELDS & written:
+                provenance[f] = json.dumps(merged, sort_keys=True)
+
         # Advance a field's clock ONLY when its own providers answered; a
         # transient field is retried next scan instead of being wrongly
-        # sampled/finalized. The reset path (Update now) re-baselines instead.
+        # sampled/finalized. A protected field is answered and advances. The
+        # reset path (Update now) re-baselines instead.
         premiered = item.get(media_type.date_field, "")
         for f in nonfinal:
             outcome = outcomes[f]
@@ -1590,7 +1679,10 @@ def run_scan(
                 continue
             if reset:
                 nd = compute_next_due(1, ctx.schedule, premiered, threshold, today)
-                tracker.reset_field_clock(media_type.name, identity, f, next_retry=nd)
+                tracker.reset_field_clock(
+                    media_type.name, identity, f, next_retry=nd,
+                    written_value=provenance.get(f),
+                )
                 continue
             new_count = int(fs_map.get(f, {}).get("fetch_count") or 0) + 1
             next_due = compute_next_due(
@@ -1602,15 +1694,19 @@ def run_scan(
                 tracker.record_field_fetch(
                     media_type.name, identity, f,
                     next_retry=next_due, source=ratings_source,
-                    vote_count=ratings_votes,
+                    vote_count=ratings_votes, written_value=provenance.get(f),
                 )
                 continue
+            # Source and fallback flag describe the value Kodi now holds, so
+            # they are recorded only when the answer is in Kodi (written now,
+            # or already equal); a dropped or protected answer keeps the old.
+            in_kodi = f in written or f in held
             tracker.record_field_fetch(
                 media_type.name, identity, f,
-                next_retry=next_due, source=providers.get(f),
-                from_fallback=(
-                    outcome.from_fallback if outcome.value is not None else None
-                ),
+                next_retry=next_due,
+                source=providers.get(f) if in_kodi else None,
+                written_value=provenance.get(f),
+                from_fallback=outcome.from_fallback if in_kodi else None,
             )
         _finish_lookups(ctx, identity, ids, today)
         tracker.commit()
@@ -1627,6 +1723,8 @@ def run_scan(
         skipped=stats["skipped"],
         updated=stats["updated"],
         errors=stats["errors"],
+        unreachable=stats["unreachable"],
+        protected=stats["protected"],
         disabled=breaker.disabled(),
         duration_ms=int((time.perf_counter() - scan_start) * 1000),
     )

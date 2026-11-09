@@ -403,6 +403,21 @@ def test_reset_field_clock(tmp_path, kodi_stubs):
     assert row["next_retry"] == "2026-09-15"
 
 
+def test_reset_field_clock_records_written_value_and_keeps_old(tmp_path, kodi_stubs):
+    from resources.lib.data.tracker import TrackerDB
+    t = TrackerDB(str(tmp_path / "t.db"))
+    t.upsert_item("movie", "Air", kodi_id=1, tmdb_id="1")
+    t.record_field_fetch("movie", "Air", "plot", next_retry="2026-07-01", written_value="a")
+    t.reset_field_clock("movie", "Air", "plot", "2026-09-15")
+    kept = t.get_field_status_map("movie", "Air")["plot"]["written_value"]
+    t.reset_field_clock("movie", "Air", "plot", "2026-09-15", written_value="b")
+    replaced = t.get_field_status_map("movie", "Air")["plot"]["written_value"]
+    t.reset_field_clock("movie", "Air", "tagline", "2026-09-15", written_value="c")
+    inserted = t.get_field_status_map("movie", "Air")["tagline"]["written_value"]
+    t.close()
+    assert (kept, replaced, inserted) == ("a", "b", "c")
+
+
 # --- Cycle lifecycle: begin_cycle / mark_cycle_complete ---
 
 def test_begin_cycle_starts_fresh_cycle_on_first_run(tmp_path):
