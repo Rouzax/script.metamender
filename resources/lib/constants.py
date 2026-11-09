@@ -75,6 +75,10 @@ SCHEMA_VERSION = 3
 # lookups answered they do not have.
 FALLBACK_RECHECK_DAYS = 30
 
+# Answered re-checks a fallback-language value gets before it is final like
+# any other value. With FALLBACK_RECHECK_DAYS between them, about a year.
+FALLBACK_RECHECKS = 12
+
 # Default refetch schedule in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
 DEFAULT_REFETCH_SCHEDULE = (7, 30, 90)  # type: Tuple[int, ...]
 

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from resources.lib.constants import FALLBACK_RECHECK_DAYS, FALLBACK_RECHECKS
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
@@ -95,6 +96,13 @@ def _make_movie_item(
 
 # Identity the scan computes for the default movie fixture (tmdb uniqueid wins).
 _MOVIE_IDENTITY = compute_identity(_make_movie_item(), MOVIE)
+
+
+def _fp(field, media_type=MOVIE, language="en-US", settings=None):
+    """Settings fingerprint of a field sampled under the test settings, for
+    rows seeded as if an earlier scan had recorded them."""
+    from resources.lib.engine.scan import settings_fingerprint
+    return settings_fingerprint(field, settings or _make_settings(), language, media_type.name)
 
 
 def _make_tvshow_item(title="Test Show", tmdb_id="99999"):
@@ -562,8 +570,12 @@ class TestRunScanMovies:
         tracker = _make_tracker(tmp_path)
         # Pre-record one sample for each field: fetch_count 1 + old content = final.
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "rating", next_retry=None)
-        tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "plot", next_retry=None)
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "rating", next_retry=None, settings_fp=_fp("rating"),
+        )
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry=None, settings_fp=_fp("plot"),
+        )
         tracker.commit()
 
         run_scan(
@@ -756,8 +768,12 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "rating", next_retry=None)
-        tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "plot", next_retry=None)
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "rating", next_retry=None, settings_fp=_fp("rating"),
+        )
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry=None, settings_fp=_fp("plot"),
+        )
         tracker.commit()
 
         run_scan(
@@ -1184,7 +1200,9 @@ class TestRunScanMaturity:
         mock_get_all.return_value = [item]
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "rating", next_retry=None)
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "rating", next_retry=None, settings_fp=_fp("rating"),
+        )
         tracker.commit()
 
         stats = run_scan(
@@ -1211,7 +1229,7 @@ class TestRunScanMaturity:
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
         # Already sampled once with a far-future due date.
         tracker.record_field_fetch(
-            "movie", _MOVIE_IDENTITY, "rating", next_retry="2099-01-01"
+            "movie", _MOVIE_IDENTITY, "rating", next_retry="2099-01-01", settings_fp=_fp("rating"),
         )
         tracker.commit()
 
@@ -1241,7 +1259,7 @@ class TestRunScanMaturity:
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
         tracker.record_field_fetch(
-            "movie", _MOVIE_IDENTITY, "rating", next_retry="2020-01-01"
+            "movie", _MOVIE_IDENTITY, "rating", next_retry="2020-01-01", settings_fp=_fp("rating"),
         )
         tracker.commit()
 
@@ -1300,7 +1318,7 @@ class TestRunScanMaturity:
 
         # Back-date the field's next_retry so the next scan resamples it.
         tracker.record_field_fetch(
-            "movie", _MOVIE_IDENTITY, "rating", next_retry="2020-01-01"
+            "movie", _MOVIE_IDENTITY, "rating", next_retry="2020-01-01", settings_fp=_fp("rating"),
         )
         tracker.commit()
 
@@ -1624,7 +1642,9 @@ class TestRunScanReset:
 
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "plot", next_retry=None)
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry=None, settings_fp=_fp("plot"),
+        )
         tracker.commit()
 
         stats = run_scan(
@@ -1654,7 +1674,9 @@ class TestRunScanReset:
 
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "plot", next_retry=None)
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry=None, settings_fp=_fp("plot"),
+        )
         tracker.commit()
 
         run_scan(
@@ -3303,12 +3325,14 @@ def _young_movie(**overrides):
     return item
 
 
-def _seed_field(tracker, field, written_value, media_type=MOVIE, identity=_MOVIE_IDENTITY):
+def _seed_field(
+    tracker, field, written_value, media_type=MOVIE, identity=_MOVIE_IDENTITY, settings=None,
+):
     """A field sampled once before, now due again, with the given provenance."""
     tracker.upsert_item(media_type.name, identity, kodi_id=1, tmdb_id="12345")
     tracker.record_field_fetch(
         media_type.name, identity, field, next_retry="2020-01-01",
-        written_value=written_value,
+        written_value=written_value, settings_fp=_fp(field, media_type, settings=settings),
     )
     tracker.commit()
 
@@ -3580,12 +3604,12 @@ class TestNfoProtection:
         }
         mock_fetch.return_value = _tmdb_movie_response(rating=7.5, votes=1000)
         tracker = _make_tracker(tmp_path)
+        settings = _make_settings()
+        settings["rating_source"] = 3  # IMDb only: the TMDB slot is not written
         _seed_field(tracker, "rating", json.dumps({
             "themoviedb": slot_fingerprint(tmdb_slot),
             "imdb": slot_fingerprint({"rating": 6.5, "votes": 50}),
-        }))
-        settings = _make_settings()
-        settings["rating_source"] = 3  # IMDb only: the TMDB slot is not written
+        }), settings=settings)
         run_scan(
             MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
             "k", settings, items=[item],
@@ -3799,29 +3823,548 @@ class TestRatingProvenanceRows:
         assert _written(mock_update, "ratings") is None
 
 
-class TestFallbackFlagOnlyOnWrite:
+# ---------------------------------------------------------------------------
+# Fallback recheck (spec section 8) and settings fingerprint (section 9)
+# ---------------------------------------------------------------------------
+
+_MOVIES = "smb://server/movies/"
+
+
+def _today_plus(days):
+    # type: (int) -> str
+    from datetime import timedelta
+    return (date.today() + timedelta(days=days)).isoformat()
+
+
+def _old_movie(plot="", **overrides):
+    # type: (str, Any) -> Dict[str, Any]
+    """Content past the stability age: final after one answered sample."""
+    item = _make_movie_item(plot=plot, **overrides)
+    item["premiered"] = "2000-01-01"
+    return item
+
+
+def _plot_by_lang(by_lang):
+    # type: (Dict[str, str]) -> Any
+    """tmdb_fetch_movie stand-in: the plot depends on the language."""
+    return lambda tid, key, language: _tmdb_movie_response(plot=by_lang.get(language, ""))
+
+
+def _seed_fallback_plot(tracker, value, checks=0, next_retry="2020-01-01", settings=None):
+    """A plot metamender wrote from the fallback language, sampled since
+    ``checks`` times, stamped with the current settings."""
+    from resources.lib.engine.protect import fingerprint
+    from resources.lib.engine.scan import settings_fingerprint
+
+    tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+    fp = settings_fingerprint("plot", settings or _make_settings(), "nl-NL", "movie")
+    tracker.record_field_fetch(
+        "movie", _MOVIE_IDENTITY, "plot", next_retry=next_retry, source="tmdb",
+        written_value=fingerprint(value), from_fallback=True, settings_fp=fp,
+    )
+    tracker._conn.execute("UPDATE field_status SET fallback_checks = ?", (checks,))
+    tracker.commit()
+
+
+def _plot_row(tracker):
+    return tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+
+
+class TestFallbackRecheck:
     @patch("resources.lib.engine.scan.update_item", return_value=True)
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_value_already_in_kodi_leaves_fallback_flag(
+    def test_fallback_write_schedules_monthly_recheck(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
-        """A matching answer metamender did not write says nothing about where
-        the stored value came from, so the flag is left as it is."""
-        mock_fetch.return_value = _tmdb_movie_response(plot="Nederlandse plot")
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
         tracker = _make_tracker(tmp_path)
-        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-        tracker.record_field_fetch(
-            "movie", _MOVIE_IDENTITY, "plot", next_retry="2020-01-01", from_fallback=True,
-        )
-        tracker.commit()
         run_scan(
             MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", _make_settings(), items=[_young_movie(plot="Nederlandse plot")],
+            "k", _make_settings(), items=[_old_movie()],
         )
-        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        row = _plot_row(tracker)
+        tracker.start_new_cycle()
+        mock_fetch.reset_mock()
+        # Old content would be final after one sample; a fallback value is not.
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "English plot"
+        assert (row["from_fallback"], row["fallback_checks"]) == (1, 0)
+        assert row["next_retry"] == _today_plus(FALLBACK_RECHECK_DAYS)
+        assert not mock_fetch.called  # not due yet: skipped, not final
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_due_recheck_without_native_value_counts_once(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", checks=3)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert not mock_update.called
+        # Fill-only: the fallback language is not asked for a filled field.
+        assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]
+        assert row["fetch_count"] == 2
+        assert (row["from_fallback"], row["fallback_checks"]) == (1, 4)
+        assert row["next_retry"] == _today_plus(FALLBACK_RECHECK_DAYS)
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_fallback_recheck_not_due_is_skipped(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", next_retry=_today_plus(5))
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert not mock_fetch.called
+        assert row["fetch_count"] == 1
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_fallback_after_limit_is_final_in_scan(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", checks=FALLBACK_RECHECKS)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
+        )
+        tracker.close()
+
+        assert not mock_fetch.called
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_native_value_replaces_fallback_and_clears_flag(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+
+        mock_fetch.side_effect = _plot_by_lang(
+            {"nl-NL": "Nederlandse plot", "en-US": "English plot"},
+        )
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", checks=4)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
+        )
+        row = _plot_row(tracker)
+        tracker.start_new_cycle()
+        mock_fetch.reset_mock()
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="Nederlandse plot")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Nederlandse plot"
+        assert (row["from_fallback"], row["fallback_checks"]) == (0, 0)
+        assert row["written_value"] == fingerprint("Nederlandse plot")
+        assert row["fetch_count"] == 2
+        # Normal maturity from here: old content is final.
+        assert not mock_fetch.called
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_native_value_equal_to_fallback_value_clears_flag(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """The folder language now has the same text: nothing to write, but
+        the value is no longer fallback-only, so the rechecks stop."""
+        mock_fetch.side_effect = _plot_by_lang({"nl-NL": "Same plot"})
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "Same plot", checks=2)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="Same plot")],
+        )
+        row = _plot_row(tracker)
         tracker.close()
 
         assert not mock_update.called
         assert row["fetch_count"] == 2
-        assert row["from_fallback"] == 1
+        assert (row["from_fallback"], row["fallback_checks"]) == (0, 0)
         assert row["source"] == "tmdb"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_transient_recheck_records_nothing(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.breaker import CircuitBreaker
+        from resources.lib.utils import TransientProviderError
+
+        mock_fetch.side_effect = TransientProviderError("boom")
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", checks=3)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
+            breaker=CircuitBreaker(threshold=5),
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert mock_fetch.called
+        assert row["fetch_count"] == 1
+        assert (row["from_fallback"], row["fallback_checks"]) == (1, 3)
+        assert row["next_retry"] == "2020-01-01"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=False)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_failed_write_of_fallback_value_records_nothing(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie()],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "English plot"
+        assert row is None
+
+    @patch("resources.lib.engine.scan.update_item", return_value=False)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_failed_write_of_native_value_keeps_fallback_flag(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"nl-NL": "Nederlandse plot"})
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", checks=3)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert row["fetch_count"] == 1
+        assert (row["from_fallback"], row["fallback_checks"]) == (1, 3)
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_update_now_restarts_recheck_count_and_keeps_provenance(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+        from resources.lib.engine.scan import settings_fingerprint
+
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", checks=7)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")], reset=True,
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert not mock_update.called
+        assert row["fetch_count"] == 1
+        assert (row["from_fallback"], row["fallback_checks"]) == (1, 0)
+        assert row["written_value"] == fingerprint("English plot")
+        assert row["settings_fp"] == settings_fingerprint(
+            "plot", _make_settings(), "nl-NL", "movie",
+        )
+        assert row["next_retry"] <= _today_plus(FALLBACK_RECHECK_DAYS)
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_update_now_fallback_write_is_flagged(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie()], reset=True,
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "English plot"
+        assert (row["from_fallback"], row["source"]) == (1, "tmdb")
+
+
+def _two_folder_config(lang_a, lang_b):
+    # type: (str, str) -> Dict[str, Any]
+    return {
+        "sources": [
+            {"path": _MOVIES + "a/", "language": lang_a, "enabled": True},
+            {"path": _MOVIES + "b/", "language": lang_b, "enabled": True},
+        ],
+        "default_language": "en-US",
+    }
+
+
+def _movie_in(folder, movie_id, tmdb_id):
+    item = _old_movie(plot="Plot", tmdb_id=tmdb_id, movie_id=movie_id)
+    item["file"] = _MOVIES + folder + "/film.mkv"
+    item["genre"] = ["Drama"]
+    item["uniqueid"] = {"tmdb": tmdb_id}
+    return item
+
+
+class TestSettingsFingerprint:
+    def test_inputs_per_field(self):
+        from resources.lib.engine.scan import settings_fingerprint as sfp
+
+        base = {"rating_source": 0, "text_source_order": 0, "fallback_order": 0,
+                "fallback_language": "en-US"}
+
+        def changed(field, media, key, value):
+            other = dict(base)
+            other[key] = value
+            return sfp(field, base, "nl-NL", media) != sfp(field, other, "nl-NL", media)
+
+        assert changed("rating", "movie", "rating_source", 1)
+        assert not changed("rating", "movie", "text_source_order", 1)
+        assert not changed("votes", "episode", "fallback_language", "de-DE")
+        assert sfp("rating", base, "nl-NL", "movie") == sfp("rating", base, "de-DE", "movie")
+        for media in ("tvshow", "episode"):
+            assert changed("plot", media, "text_source_order", 1)
+            assert changed("plot", media, "fallback_order", 1)
+            assert changed("title", media, "fallback_language", "de-DE")
+            assert sfp("plot", base, "nl-NL", media) != sfp("plot", base, "de-DE", media)
+        assert not changed("plot", "movie", "text_source_order", 1)
+        assert not changed("plot", "movie", "fallback_order", 1)
+        assert changed("plot", "movie", "fallback_language", "de-DE")
+        assert sfp("plot", base, "nl-NL", "movie") != sfp("plot", base, "de-DE", "movie")
+        # Single-step TMDB fields depend only on the folder language.
+        assert not changed("genre", "episode", "text_source_order", 1)
+        assert not changed("genre", "episode", "fallback_language", "de-DE")
+        assert sfp("genre", base, "nl-NL", "movie") != sfp("genre", base, "de-DE", "movie")
+
+    def test_missing_settings_use_scan_defaults(self):
+        from resources.lib.engine.scan import settings_fingerprint as sfp
+
+        explicit = {"rating_source": 0, "text_source_order": 0, "fallback_order": 0,
+                    "fallback_language": "en-US"}
+        for field in ("rating", "plot", "genre"):
+            assert sfp(field, {}, "nl-NL", "episode") == sfp(field, explicit, "nl-NL", "episode")
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_unchanged_settings_do_not_refetch(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="Plot")
+        tracker = _make_tracker(tmp_path)
+        fields = frozenset({"plot", "rating", "genre"})
+        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
+                 _make_settings(), items=[_old_movie(plot="Plot")])
+        assert mock_fetch.called
+        tracker.start_new_cycle()
+        mock_fetch.reset_mock()
+        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
+                 _make_settings(), items=[_old_movie(plot="Plot")])
+        tracker.close()
+
+        assert not mock_fetch.called
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_rating_source_change_refetches_ratings_only(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.scan import settings_fingerprint
+
+        mock_fetch.return_value = _tmdb_movie_response(plot="Plot")
+        tracker = _make_tracker(tmp_path)
+        fields = frozenset({"plot", "rating", "votes", "genre"})
+        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
+                 _make_settings(), items=[_old_movie(plot="Plot")])
+        before = _fs(tracker, MOVIE, _old_movie())
+        tracker.start_new_cycle()
+        mock_fetch.reset_mock()
+        settings = _make_settings()
+        settings["rating_source"] = 2  # TMDB only
+        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
+                 settings, items=[_old_movie(plot="Plot")])
+        after = _fs(tracker, MOVIE, _old_movie())
+        tracker.start_new_cycle()
+        mock_fetch.reset_mock()
+        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
+                 settings, items=[_old_movie(plot="Plot")])
+        tracker.close()
+
+        assert after["rating"]["settings_fp"] == settings_fingerprint(
+            "rating", settings, "nl-NL", "movie",
+        )
+        assert after["votes"]["settings_fp"] != before["votes"]["settings_fp"]
+        for f in ("rating", "votes"):
+            assert after[f]["fetched_at"] == date.today().isoformat()
+            assert after[f]["fetch_count"] == 1  # re-baselined
+        for f in ("plot", "genre"):
+            assert after[f] == before[f]
+        # Once re-checked, the new settings are the baseline.
+        assert not mock_fetch.called
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_folder_language_change_refetches_text_in_folder_only(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="Plot", genres=["Drama"])
+        tracker = _make_tracker(tmp_path)
+        fields = frozenset({"plot", "genre", "rating"})
+        movie_a = _movie_in("a", 1, "111")
+        movie_b = _movie_in("b", 2, "222")
+        run_scan(MOVIE, tracker, _two_folder_config("nl-NL", "en-US"), fields, "k",
+                 _make_settings(), items=[movie_a, movie_b])
+        before_b = _fs(tracker, MOVIE, movie_b)
+        rating_a = _fs(tracker, MOVIE, movie_a)["rating"]
+        tracker.start_new_cycle()
+        mock_fetch.reset_mock()
+        run_scan(MOVIE, tracker, _two_folder_config("de-DE", "en-US"), fields, "k",
+                 _make_settings(), items=[movie_a, movie_b])
+        after_a = _fs(tracker, MOVIE, movie_a)
+        after_b = _fs(tracker, MOVIE, movie_b)
+        tracker.close()
+
+        assert [(c.args[0], c.args[2]) for c in mock_fetch.call_args_list] == [
+            ("111", "de-DE"),
+        ]
+        assert after_a["plot"]["fetch_count"] == 1
+        assert after_a["genre"]["settings_fp"] != rating_a["settings_fp"]
+        assert after_a["rating"] == rating_a
+        assert after_b == before_b
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    def test_text_order_change_refetches_show_text_not_movies(
+        self, mock_show, mock_movie, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_show.return_value = _tmdb_tvshow_response(plot="Plot", genres=["Drama"])
+        mock_movie.return_value = _tmdb_movie_response(plot="Plot")
+        show = _make_tvshow_item()
+        show.update(plot="Plot", genre=["Drama"], premiered="2000-01-01")
+        movie = _old_movie(plot="Plot")
+        fields = frozenset({"plot", "genre"})
+        tracker = _make_tracker(tmp_path)
+
+        def scan_both(settings):
+            run_scan(TVSHOW, tracker, _make_source_config(), fields, "k",
+                     settings, items=[show])
+            run_scan(MOVIE, tracker, _make_source_config(), fields, "k",
+                     settings, items=[movie])
+
+        scan_both(_make_settings())
+        genre_before = _fs(tracker, TVSHOW, show)["genre"]
+        tracker.start_new_cycle()
+        mock_show.reset_mock()
+        mock_movie.reset_mock()
+        settings = _make_settings()
+        settings["text_source_order"] = 1
+        scan_both(settings)
+        after = _fs(tracker, TVSHOW, show)
+        tracker.close()
+
+        assert mock_show.called
+        assert not mock_movie.called
+        assert after["plot"]["fetch_count"] == 1
+        assert after["plot"]["fetched_at"] == date.today().isoformat()
+        assert after["genre"] == genre_before
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_settings_change_transient_keeps_old_fingerprint(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        fields = frozenset({"rating"})
+        run_scan(MOVIE, tracker, _make_source_config(), fields, "k",
+                 _make_settings(), items=[_old_movie()])
+        before = _fs(tracker, MOVIE, _old_movie())["rating"]
+        tracker.start_new_cycle()
+        settings = _make_settings()
+        settings["rating_source"] = 3  # IMDb only, store not loaded: transient
+        settings["imdb_ready"] = False
+        run_scan(MOVIE, tracker, _make_source_config(), fields, "k",
+                 settings, items=[_old_movie()])
+        held = _fs(tracker, MOVIE, _old_movie())["rating"]
+        tracker.start_new_cycle()
+        settings["imdb_ready"] = True
+        run_scan(MOVIE, tracker, _make_source_config(), fields, "k",
+                 settings, items=[_old_movie()])
+        after = _fs(tracker, MOVIE, _old_movie())["rating"]
+        tracker.close()
+
+        assert held == before
+        assert after["settings_fp"] != before["settings_fp"]
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_row_without_fingerprint_is_rechecked_once(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="Plot")
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "plot", next_retry=None)
+        tracker.commit()
+        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+                 _make_settings(), items=[_old_movie(plot="Plot")])
+        first = mock_fetch.called
+        row = _plot_row(tracker)
+        tracker.start_new_cycle()
+        mock_fetch.reset_mock()
+        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+                 _make_settings(), items=[_old_movie(plot="Plot")])
+        tracker.close()
+
+        assert first
+        assert row["settings_fp"] is not None
+        assert not mock_fetch.called
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_settings_change_restarts_young_field_schedule(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Re-baselined like Update now: the refetch schedule starts over
+        instead of continuing at the settle date."""
+        mock_fetch.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        for _ in range(3):
+            tracker.record_field_fetch(
+                "movie", _MOVIE_IDENTITY, "rating", next_retry="2099-01-01",
+                settings_fp=_fp("rating"),
+            )
+        tracker.commit()
+        settings = _make_settings()
+        settings["rating_source"] = 2
+        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"rating"}), "k",
+                 settings, items=[_young_movie()])
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
+        tracker.close()
+
+        assert row["fetch_count"] == 1
+        # First schedule step (7 days plus jitter), not the settle date.
+        assert row["next_retry"] in (_today_plus(7), _today_plus(8))

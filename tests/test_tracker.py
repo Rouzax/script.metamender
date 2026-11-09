@@ -626,3 +626,38 @@ def test_settings_fp_overwritten(tmp_path):
     t.close()
     assert row["settings_fp"] == "c"
     assert row["fetch_count"] == 1
+
+
+def test_reset_field_clock_restarts_fallback_checks_and_keeps_provenance(tmp_path):
+    """Update now re-baselines the recheck count; the value is still the
+    fallback value metamender wrote, so flag and fingerprint stay."""
+    t = _tracker_with_item(tmp_path)
+    t.record_field_fetch("movie", "Air", "plot", None, written_value="fp", from_fallback=True)
+    t.record_field_fetch("movie", "Air", "plot", None)
+    t.record_field_fetch("movie", "Air", "plot", None)
+    assert t.get_field_status("movie", "Air", "plot")["fallback_checks"] == 2
+    t.reset_field_clock("movie", "Air", "plot", "2026-09-15")
+    row = t.get_field_status("movie", "Air", "plot")
+    t.close()
+    assert (row["from_fallback"], row["fallback_checks"]) == (1, 0)
+    assert row["written_value"] == "fp"
+
+
+def test_reset_field_clock_records_source_votes_and_fallback(tmp_path):
+    t = _tracker_with_item(tmp_path)
+    t.record_field_fetch("movie", "Air", "plot", None, source="tmdb", vote_count=5)
+    t.reset_field_clock(
+        "movie", "Air", "plot", "2026-09-15", source="tvdb", from_fallback=True,
+    )
+    row = t.get_field_status("movie", "Air", "plot")
+    assert (row["source"], row["vote_count"], row["from_fallback"]) == ("tvdb", 5, 1)
+    t.reset_field_clock("movie", "Air", "plot", "2026-09-15", vote_count=9)
+    row = t.get_field_status("movie", "Air", "plot")
+    assert (row["source"], row["vote_count"], row["from_fallback"]) == ("tvdb", 9, 1)
+    t.reset_field_clock("movie", "Air", "plot", "2026-09-15", from_fallback=False)
+    row = t.get_field_status("movie", "Air", "plot")
+    t.reset_field_clock("movie", "Air", "tagline", "2026-09-15", from_fallback=True)
+    inserted = t.get_field_status("movie", "Air", "tagline")
+    t.close()
+    assert row["from_fallback"] == 0
+    assert (inserted["from_fallback"], inserted["fallback_checks"]) == (1, 0)

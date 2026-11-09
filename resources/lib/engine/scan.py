@@ -67,8 +67,10 @@ from resources.lib.engine.idverify import show_matches
 from resources.lib.engine.maturity import (
     FETCH_NOW,
     FINAL,
+    apply_fallback_recheck,
     compute_next_due,
     decide_field,
+    fallback_recheck_due,
 )
 from resources.lib.engine.protect import fingerprint, may_write
 from resources.lib.engine.resolve import build_ratings, rating_sources, slot_fingerprint
@@ -129,6 +131,36 @@ TEXT_TMDB_FIRST = 0
 TEXT_TVDB_FIRST = 1
 FALLBACK_TVDB_FIRST = 0
 FALLBACK_TMDB_FIRST = 1
+DEFAULT_FALLBACK_LANGUAGE = "en-US"
+
+
+def settings_fingerprint(
+    field: str,
+    settings: Dict[str, Any],
+    folder_language: str,
+    media_type: str,
+) -> str:
+    """The settings a field's answer depends on, as a stable string.
+
+    A field whose stored fingerprint differs is re-checked as if never
+    sampled, so the inputs are exactly what changes the answer: rating_source
+    for ratings; for title and plot the folder and fallback languages, plus
+    the provider and fallback orders on shows and episodes (movies ask TMDB
+    only); for every other field, one TMDB step, the folder language.
+    """
+    if field in _RATING_FIELDS:
+        inputs = {"rating_source": settings.get("rating_source", 0)}  # type: Dict[str, Any]
+    elif field in _CHAIN_FIELDS:
+        inputs = {
+            "folder_language": folder_language,
+            "fallback_language": settings.get("fallback_language", DEFAULT_FALLBACK_LANGUAGE),
+        }
+        if media_type != "movie":
+            inputs["text_source_order"] = settings.get("text_source_order", TEXT_TMDB_FIRST)
+            inputs["fallback_order"] = settings.get("fallback_order", FALLBACK_TVDB_FIRST)
+    else:
+        inputs = {"folder_language": folder_language}
+    return json.dumps(inputs, sort_keys=True)
 
 
 def _make_stats() -> Dict[str, Any]:
@@ -1474,7 +1506,7 @@ def run_scan(
         rating_pref=settings.get("rating_source", 0),
         text_order=settings.get("text_source_order", TEXT_TMDB_FIRST),
         fallback_order=settings.get("fallback_order", FALLBACK_TVDB_FIRST),
-        fallback_language=settings.get("fallback_language", "en-US"),
+        fallback_language=settings.get("fallback_language", DEFAULT_FALLBACK_LANGUAGE),
         imdb_ready=bool(settings.get("imdb_ready", False)),
     )
     candidates = _candidate_fields(media_type, enabled_fields)
@@ -1571,20 +1603,38 @@ def run_scan(
         fs_map = tracker.get_field_status_map(media_type.name, identity)
         threshold = settings.get("stale_threshold_days", 365)
 
+        # A field sampled under other settings (or before fingerprints were
+        # stored) is re-checked as if never sampled, and re-baselined once it
+        # answers. A transient keeps the old fingerprint, so it stays due.
+        fps = {
+            f: settings_fingerprint(f, settings, language, media_type.name)
+            for f in candidates
+        }
+        rebaseline = {
+            f for f in candidates
+            if reset or (f in fs_map and fs_map[f].get("settings_fp") != fps[f])
+        }
+
         decisions = {}  # type: Dict[str, str]
         for f in candidates:
-            if reset:
-                # Reset path (Update now): every candidate field is due
-                # regardless of its recorded maturity so the clock re-baselines.
+            if f in rebaseline:
+                # Update now, or changed settings: due regardless of the
+                # recorded maturity, so the clock re-baselines.
                 decisions[f] = FETCH_NOW
                 continue
             fs = fs_map.get(f, {})
-            decisions[f] = decide_field(
-                age,
-                int(fs.get("fetch_count") or 0),
+            decisions[f] = apply_fallback_recheck(
+                decide_field(
+                    age,
+                    int(fs.get("fetch_count") or 0),
+                    fs.get("next_retry"),
+                    today,
+                    threshold,
+                ),
+                bool(fs.get("from_fallback")),
+                int(fs.get("fallback_checks") or 0),
                 fs.get("next_retry"),
                 today,
-                threshold,
             )
 
         due = any(d == FETCH_NOW for d in decisions.values())
@@ -1643,6 +1693,7 @@ def run_scan(
             tmdb_id=ids.tmdb,
             tvdb_id=ids.tvdb,
             decisions=decisions,
+            rebaseline=sorted(rebaseline),
         )
 
         if breaker.all_disabled(needed):
@@ -1720,45 +1771,58 @@ def run_scan(
 
         # Advance a field's clock ONLY when its own providers answered; a
         # transient field is retried next scan instead of being wrongly
-        # sampled/finalized. A protected field is answered and advances. The
-        # reset path (Update now) re-baselines instead.
+        # sampled/finalized. A protected field is answered and advances.
+        # Update now and changed settings re-baseline instead.
         premiered = item.get(media_type.date_field, "")
         for f in nonfinal:
             outcome = outcomes[f]
             if outcome.transient or f in write_failed:
                 continue
-            if reset:
-                nd = compute_next_due(1, ctx.schedule, premiered, threshold, today)
-                tracker.reset_field_clock(
-                    media_type.name, identity, f, next_retry=nd,
-                    written_value=provenance.get(f),
-                )
-                continue
-            new_count = int(fs_map.get(f, {}).get("fetch_count") or 0) + 1
+            fs = fs_map.get(f, {})
+            new_count = 1 if f in rebaseline else int(fs.get("fetch_count") or 0) + 1
             next_due = compute_next_due(
                 new_count, ctx.schedule, premiered, threshold, today,
             )
             if f in _RATING_FIELDS:
                 # Rating/votes are sourced from the named-slot ratings map;
                 # record the chosen slot and its votes for staleness.
-                tracker.record_field_fetch(
-                    media_type.name, identity, f,
-                    next_retry=next_due, source=ratings_source,
-                    vote_count=ratings_votes, written_value=provenance.get(f),
-                )
-                continue
-            # Source describes the value Kodi now holds, so it is recorded
-            # only when the answer is in Kodi (written now, or already equal);
-            # a dropped or protected answer keeps the old one. The fallback
-            # flag marks a value metamender wrote from a fallback step, so only
-            # a write sets or clears it.
-            in_kodi = f in written or f in held
-            tracker.record_field_fetch(
+                source = ratings_source
+                vote_count = ratings_votes
+                from_fallback = None  # type: Optional[bool]
+            else:
+                # Source describes the value Kodi now holds, so it is recorded
+                # only when the answer is in Kodi (written now, or already
+                # equal); a dropped or protected answer keeps the old one. The
+                # fallback flag follows a write, and a folder-language answer
+                # equal to Kodi's value clears it: the value no longer depends
+                # on the fallback language.
+                source = providers.get(f) if f in written or f in held else None
+                vote_count = None
+                if f in written:
+                    from_fallback = outcome.from_fallback
+                elif f in held and not outcome.from_fallback:
+                    from_fallback = False
+                else:
+                    from_fallback = None
+            stays_fallback = (
+                from_fallback if from_fallback is not None
+                else bool(fs.get("from_fallback"))
+            )
+            if stays_fallback:
+                # Past the stability age the schedule no longer applies, so
+                # the recheck is a month out; younger content keeps an
+                # earlier schedule date.
+                mature = age is not None and age >= threshold
+                next_due = fallback_recheck_due(None if mature else next_due, today)
+            record = (
+                tracker.reset_field_clock if f in rebaseline
+                else tracker.record_field_fetch
+            )
+            record(
                 media_type.name, identity, f,
-                next_retry=next_due,
-                source=providers.get(f) if in_kodi else None,
-                written_value=provenance.get(f),
-                from_fallback=outcome.from_fallback if f in written else None,
+                next_retry=next_due, settings_fp=fps[f],
+                written_value=provenance.get(f), source=source,
+                vote_count=vote_count, from_fallback=from_fallback,
             )
         _finish_lookups(ctx, identity, ids, today)
         tracker.commit()

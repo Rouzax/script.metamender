@@ -437,31 +437,48 @@ class TrackerDB:
         next_retry: Optional[str],
         settings_fp: Optional[str] = None,
         written_value: Optional[str] = None,
+        source: Optional[str] = None,
+        vote_count: Optional[int] = None,
+        from_fallback: Optional[bool] = None,
     ) -> None:
-        """Re-baseline a field to its first sample (manual 'Update now').
+        """Re-baseline a field to its first sample ('Update now', or a change
+        in the settings the field depends on).
 
         Stores the supplied next_retry date so young content is re-sampled on
         the normal schedule after a manual update, rather than being skipped
         forever because NULL next_retry is treated as "not due" by decide_field.
         settings_fp is stored as given so the re-baselined row matches the
-        settings in force. written_value is the provenance of a value written
-        during the reset; None keeps the stored one, as in record_field_fetch.
+        settings in force. fallback_checks restarts at 0: a fallback value gets
+        its full run of re-checks again. source, vote_count, written_value and
+        from_fallback describe what the sample left in Kodi; None keeps the
+        stored value, as in record_field_fetch.
         """
         item_id = self._get_item_id(media_type, identity)
         if item_id is None:
             return
         today = date.today().isoformat()
+        fallback = None if from_fallback is None else int(from_fallback)
         try:
             self._conn.execute(
                 "INSERT INTO field_status "
                 "(item_id, field, fetch_count, fetched_at, next_retry, settings_fp, "
-                "written_value) "
-                "VALUES (?, ?, 1, ?, ?, ?, ?) "
+                "written_value, source, vote_count, from_fallback, fallback_checks) "
+                "VALUES (:item_id, :field, 1, :today, :next_retry, :settings_fp, "
+                ":written_value, :source, :vote_count, COALESCE(:fallback, 0), 0) "
                 "ON CONFLICT(item_id, field) DO UPDATE SET "
                 "fetch_count = 1, fetched_at = excluded.fetched_at, "
                 "next_retry = excluded.next_retry, settings_fp = excluded.settings_fp, "
-                "written_value = COALESCE(excluded.written_value, field_status.written_value)",
-                (item_id, field, today, next_retry, settings_fp, written_value),
+                "written_value = COALESCE(excluded.written_value, field_status.written_value), "
+                "source = COALESCE(excluded.source, field_status.source), "
+                "vote_count = COALESCE(excluded.vote_count, field_status.vote_count), "
+                "from_fallback = COALESCE(:fallback, field_status.from_fallback), "
+                "fallback_checks = 0",
+                {
+                    "item_id": item_id, "field": field, "today": today,
+                    "next_retry": next_retry, "settings_fp": settings_fp,
+                    "written_value": written_value, "source": source,
+                    "vote_count": vote_count, "fallback": fallback,
+                },
             )
         except sqlite3.Error:
             log.exception(
