@@ -502,9 +502,10 @@ def _fetch_episode_tmdb(
                     ),
                     ctx, identity, best_effort=True,
                 )
-                if enriched:
-                    _enrich_imdb_id(ctx, item, kodi_id, title, identity, enriched)
-                    imdb_id = enriched
+                enriched_imdb = enriched.get("imdb_id") if enriched else None
+                if enriched_imdb:
+                    _enrich_imdb_id(ctx, item, kodi_id, title, identity, enriched_imdb)
+                    imdb_id = enriched_imdb
         if is_cache_miss:
             ctx.pacer.arm()
         ctx.breaker.record_success("tmdb")

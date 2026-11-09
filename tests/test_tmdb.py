@@ -13,9 +13,12 @@ from resources.lib.providers.tmdb import (
     _parse_trailer,
     _parse_tv_certifications,
     _parse_writers,
+    fetch_episode_external_ids,
     fetch_movie,
     fetch_season,
     fetch_tvshow,
+    fetch_tvshow_external_ids,
+    find_episode_by_tvdb,
     resolve_id,
 )
 from resources.lib.utils import ApiKeyError, TransientProviderError
@@ -697,3 +700,70 @@ class TestResolveId:
         mock_get.return_value = _mock_response(200, raise_for_json=True)
         with pytest.raises(TransientProviderError):
             resolve_id("fake_key", tvdb_id="395557")
+
+
+class TestCrossReferences:
+    @patch("resources.lib.providers.http.requests.get")
+    def test_episode_external_ids_returns_both(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(
+            200, {"imdb_id": "tt123", "tvdb_id": 4567},
+        )
+        assert fetch_episode_external_ids("1", 1, 2, "k") == {
+            "imdb_id": "tt123", "tvdb_id": "4567",
+        }
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_episode_external_ids_omits_empty(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(
+            200, {"imdb_id": "", "tvdb_id": None},
+        )
+        assert fetch_episode_external_ids("1", 1, 2, "k") is None
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_find_episode_by_tvdb_maps_fields(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, {
+            "tv_episode_results": [
+                {"id": 99, "show_id": 12, "season_number": 3, "episode_number": 4},
+            ],
+        })
+        assert find_episode_by_tvdb("k", "340249") == {
+            "tmdb_id": "99", "show_tmdb_id": "12", "season": 3, "episode": 4,
+        }
+        assert mock_get.call_args[1]["params"]["external_source"] == "tvdb_id"
+        assert mock_get.call_args[0][0].endswith("/find/340249")
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_find_episode_by_tvdb_empty_is_none(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, {"tv_episode_results": []})
+        assert find_episode_by_tvdb("k", "1") is None
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_find_episode_by_tvdb_404_is_none(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(404)
+        assert find_episode_by_tvdb("k", "1") is None
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_tvshow_external_ids(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(
+            200, {"imdb_id": "tt9", "tvdb_id": 80767},
+        )
+        assert fetch_tvshow_external_ids("k", "55") == {
+            "imdb_id": "tt9", "tvdb_id": "80767",
+        }
+        assert mock_get.call_args[0][0].endswith("/tv/55/external_ids")
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_tvshow_external_ids_empty_is_none(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, {"imdb_id": None})
+        assert fetch_tvshow_external_ids("k", "55") is None
+
+    @pytest.mark.parametrize("call", [
+        lambda: fetch_episode_external_ids("1", 1, 2, "k"),
+        lambda: find_episode_by_tvdb("k", "1"),
+        lambda: fetch_tvshow_external_ids("k", "1"),
+    ])
+    @patch("resources.lib.providers.http.requests.get")
+    def test_transient_propagates(self, mock_get: MagicMock, call: Any) -> None:
+        mock_get.return_value = _mock_response(503)
+        with pytest.raises(TransientProviderError):
+            call()

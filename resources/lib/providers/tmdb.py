@@ -17,7 +17,7 @@ Logging:
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from resources.lib.constants import TMDB_BASE_URL
 from resources.lib.providers.http import provider_get
@@ -358,16 +358,30 @@ def fetch_tvshow(
     return result
 
 
+def _clean_ids(data: Dict[str, Any]) -> Dict[str, str]:
+    """Pick imdb_id and tvdb_id from an external_ids payload as strings.
+
+    TMDB returns tvdb_id as an int; keys with empty values are left out.
+    """
+    ids = {}  # type: Dict[str, str]
+    for key in ("imdb_id", "tvdb_id"):
+        value = data.get(key)
+        if value:
+            ids[key] = str(value)
+    return ids
+
+
 def fetch_episode_external_ids(
     show_tmdb_id: str,
     season_number: int,
     episode_number: int,
     api_key: str,
-) -> Optional[str]:
-    """Fetch the IMDB ID for a specific episode from TMDB.
+) -> Optional[Dict[str, str]]:
+    """Fetch the IMDb and TVDB IDs for a specific episode from TMDB.
 
-    Returns the IMDB ID string (e.g., "tt1234567") or None if not
-    available or on failure.
+    Returns a dict with "imdb_id" and/or "tvdb_id" (only non-empty ones), or
+    None when TMDB has neither. Raises TransientProviderError when TMDB could
+    not be reached.
     """
     url = "{}/tv/{}/season/{}/episode/{}/external_ids".format(
         TMDB_BASE_URL, show_tmdb_id, season_number, episode_number,
@@ -384,15 +398,82 @@ def fetch_episode_external_ids(
     if data is None:
         return None
 
-    imdb_id = data.get("imdb_id")
+    ids = _clean_ids(data)
     log.info(
         "Episode external IDs fetched",
         event="tmdb.episode_ids",
         tmdb_id=show_tmdb_id,
         season=season_number,
         episode=episode_number,
-        has_imdb=bool(imdb_id),
+        has_imdb="imdb_id" in ids,
+        has_tvdb="tvdb_id" in ids,
     )
-    if imdb_id:
-        return str(imdb_id)
+    return ids or None
+
+
+def find_episode_by_tvdb(
+    api_key: str,
+    tvdb_episode_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Find a TMDB episode from its TVDB episode ID via /find.
+
+    Returns {"tmdb_id", "show_tmdb_id", "season", "episode"} or None when TMDB
+    has no match. Raises TransientProviderError when TMDB could not be reached.
+    """
+    url = "{}/find/{}".format(TMDB_BASE_URL, tvdb_episode_id)
+    with log_timing(log, "tmdb.find_episode", tvdb_id=tvdb_episode_id):
+        data = provider_get(
+            url, logger=log, label="tmdb.find_episode",
+            params={"api_key": api_key, "external_source": "tvdb_id"},
+            provider="tmdb",
+        )
+    if data is None:
+        return None
+
+    for result in data.get("tv_episode_results") or []:
+        if result.get("id") is None or result.get("show_id") is None:
+            continue
+        found = {
+            "tmdb_id": str(result["id"]),
+            "show_tmdb_id": str(result["show_id"]),
+            "season": int(result.get("season_number") or 0),
+            "episode": int(result.get("episode_number") or 0),
+        }
+        log.info(
+            "Episode found by TVDB ID",
+            event="tmdb.find_episode",
+            tvdb_id=tvdb_episode_id,
+            tmdb_id=found["tmdb_id"],
+        )
+        return found
     return None
+
+
+def fetch_tvshow_external_ids(
+    api_key: str,
+    tmdb_id: str,
+) -> Optional[Dict[str, str]]:
+    """Fetch the IMDb and TVDB IDs of a show from TMDB.
+
+    Returns a dict with "imdb_id" and/or "tvdb_id" (only non-empty ones), or
+    None when TMDB has neither. Raises TransientProviderError when TMDB could
+    not be reached.
+    """
+    url = "{}/tv/{}/external_ids".format(TMDB_BASE_URL, tmdb_id)
+    with log_timing(log, "tmdb.tvshow_ids", tmdb_id=tmdb_id):
+        data = provider_get(
+            url, logger=log, label="tmdb.tvshow_ids",
+            params={"api_key": api_key}, provider="tmdb",
+        )
+    if data is None:
+        return None
+
+    ids = _clean_ids(data)
+    log.info(
+        "Show external IDs fetched",
+        event="tmdb.tvshow_ids",
+        tmdb_id=tmdb_id,
+        has_imdb="imdb_id" in ids,
+        has_tvdb="tvdb_id" in ids,
+    )
+    return ids or None
