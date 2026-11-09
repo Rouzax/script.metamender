@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Any, Dict, Optional
+from typing import Any, Dict, FrozenSet, Optional
 
 from resources.lib.constants import SCHEMA_VERSION
 from resources.lib.utils import get_logger
@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS items (
     attempt_count INTEGER DEFAULT 0,
     status TEXT DEFAULT 'pending',
     cycle_processed INTEGER DEFAULT 0,
+    ids_checked TEXT,
     UNIQUE(media_type, identity)
 );
 
@@ -81,7 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_field_status ON field_status(item_id, field);
 # Columns that callers can set via upsert_item kwargs
 _UPSERT_KWARGS = frozenset((
     "kodi_id", "tmdb_id", "imdb_id", "tvdb_id",
-    "source_path", "premiered", "date_added",
+    "source_path", "premiered", "date_added", "ids_checked",
 ))
 
 _ID_KWARGS = frozenset(("tmdb_id", "imdb_id", "tvdb_id"))
@@ -507,6 +508,20 @@ class TrackerDB:
             "AND kodi_id IS NOT NULL"
         )
         return {row["kodi_id"]: row["tvdb_id"] for row in cursor.fetchall()}
+
+    def get_checked_show_ids(self) -> FrozenSet[int]:
+        """Kodi ids of the TV shows whose id cross-reference lookups have
+        answered at least once.
+
+        For a show in this set a missing TMDB or TVDB id is an answer (the
+        provider has no such show); for any other show it is not known yet.
+        """
+        cursor = self._conn.execute(
+            "SELECT kodi_id FROM items "
+            "WHERE media_type = 'tvshow' AND ids_checked IS NOT NULL "
+            "AND kodi_id IS NOT NULL"
+        )
+        return frozenset(row["kodi_id"] for row in cursor.fetchall())
 
     # ------------------------------------------------------------------
     # Cycle tracking and scan state (Task 2.4)

@@ -27,19 +27,25 @@ Logging:
         - scan.tvdb_auth (ERROR): TVDB rejected the add-on's credentials;
           TVDB is disabled for the cycle, the scan continues
         - scan.imdb_lookup_failed (ERROR): The IMDb ratings store raised
-          unexpectedly; the rating is transient for that item
+          unexpectedly; the rating is transient for that item. Logged with
+          the traceback once per scan, at DEBUG after that
+        - scan.unknown_id_accepted (INFO): An `unknown`-type uniqueid was
+          verified as the item's TVDB id
+        - scan.unknown_id_rejected (INFO): An `unknown`-type uniqueid names a
+          different TVDB series, or an episode outside the show's TVDB list
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
 import xbmc
 
 from resources.lib.constants import (
     DEFAULT_REFETCH_SCHEDULE,
+    FALLBACK_RECHECK_DAYS,
     PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
     parse_refetch_schedule,
 )
@@ -50,6 +56,7 @@ from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome, Step, run_chain
+from resources.lib.engine.idverify import show_matches
 from resources.lib.engine.maturity import (
     FETCH_NOW,
     FINAL,
@@ -65,6 +72,8 @@ from resources.lib.providers.tmdb import (
     fetch_movie as tmdb_fetch_movie,
     fetch_season as tmdb_fetch_season,
     fetch_tvshow as tmdb_fetch_tvshow,
+    fetch_tvshow_external_ids as tmdb_fetch_tvshow_ids,
+    find_episode_by_tvdb as tmdb_find_episode,
     resolve_id,
 )
 from resources.lib.providers.tvdb import (
@@ -162,19 +171,19 @@ def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
     return item.get("title", "")
 
 
-def _extract_ids(item: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Extract (tmdb_id, imdb_id, tvdb_id) from a Kodi item's uniqueid dict."""
-    uid = item.get("uniqueid", {})
+def _extract_ids(
+    item: Dict[str, Any],
+) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Extract (tmdb_id, imdb_id, tvdb_id, unknown_id) from a Kodi item's
+    uniqueid dict. ``unknown_id`` is an id of type `unknown`, a TVDB id
+    candidate that is only used once verified."""
+    uid = item.get("uniqueid") or {}
     return (
         uid.get("tmdb") or uid.get("themoviedb"),
         uid.get("imdb"),
         uid.get("tvdb") or uid.get("thetvdb"),
+        uid.get("unknown"),
     )
-
-
-def _has_any_id(tmdb_id: Optional[str], imdb_id: Optional[str], tvdb_id: Optional[str]) -> bool:
-    """Return True if at least one external ID is available."""
-    return bool(tmdb_id or imdb_id or tvdb_id)
 
 
 def _get_season_data(
@@ -315,11 +324,16 @@ class _ScanCtx:
     enabled_fields: FrozenSet[str]
     show_id_map: Dict[int, str]
     show_tvdb_map: Dict[int, str]
+    # Kodi ids of the shows whose id lookups have answered (see
+    # TrackerDB.get_checked_show_ids); episode passes only.
+    checked_shows: FrozenSet[int]
     season_cache: Dict[str, Optional[List[Dict[str, Any]]]]
     # (kind, tvdb_id, tvdb_lang) -> fetched record. Only real answers are
     # cached, so a transient failure is retried by the next item.
     tvdb_cache: Dict[Tuple[str, str, str], Any]
-    settings: Dict[str, Any]
+    # Events already logged in full this scan, so a persistent failure does
+    # not repeat its traceback for every item.
+    logged_once: Set[str]
     schedule: Tuple[int, ...]
     rating_pref: int
     text_order: int
@@ -404,13 +418,301 @@ def _enrich_imdb_id(
     )
 
 
+class _Ids:
+    """An item's external ids for this scan: Kodi's, those the tracker kept
+    from earlier scans, and those the lookups below add.
+
+    A ``*_transient`` flag means the id is missing and a lookup that could
+    have found it did not answer, so every field that depends on it is
+    transient. A missing id without the flag is an answer: the provider has
+    no such item.
+    """
+
+    def __init__(
+        self,
+        tmdb: Optional[str],
+        imdb: Optional[str],
+        tvdb: Optional[str],
+        may_look_up: bool,
+    ) -> None:
+        self.tmdb = tmdb
+        self.imdb = imdb
+        self.tvdb = tvdb
+        self.tmdb_transient = False
+        self.tvdb_transient = False
+        # Cross-reference lookups (and unknown-id verification) may run for
+        # this item now; see _lookup_allowed.
+        self.may_look_up = may_look_up
+        # A lookup ran and answered / a lookup ran and did not answer.
+        self.looked_up = False
+        self.lookup_failed = False
+
+    def any(self) -> bool:
+        return bool(self.tmdb or self.imdb or self.tvdb)
+
+
+def _lookup_allowed(
+    checked: Optional[str], today: str, due: bool, is_show: bool,
+) -> bool:
+    """Whether an item's id lookups may run this scan.
+
+    Lookups serve due fields, so they run only when a field is due, and an
+    answer that left an id missing is asked again only after
+    FALLBACK_RECHECK_DAYS. A show that has never been looked up is resolved
+    even when none of its own fields is due: its episodes depend on its ids,
+    and they can only tell "the show is not on TMDB" from "not resolved yet"
+    once the show's lookups have answered.
+    """
+    if not checked:
+        return due or is_show
+    if not due:
+        return False
+    try:
+        age = (date.fromisoformat(today) - date.fromisoformat(checked)).days
+    except ValueError:
+        return True
+    return age >= FALLBACK_RECHECK_DAYS
+
+
+def _show_kodi_id(item: Dict[str, Any]) -> int:
+    """The episode's show Kodi id, the key of the per-show maps."""
+    value = item.get("tvshowid")
+    return value if isinstance(value, int) else -1
+
+
+def _show_checked(ctx: _ScanCtx, item: Dict[str, Any]) -> bool:
+    """True when the episode's show has answered its id lookups, so a show id
+    it lacks is an answer rather than not known yet."""
+    return _show_kodi_id(item) in ctx.checked_shows
+
+
+def _lookup(provider: str, fn: Any, ctx: _ScanCtx, identity: str) -> Any:
+    """_call_provider, or ``TRANSIENT`` without a call while the provider's
+    breaker is open."""
+    if ctx.breaker.is_disabled(provider):
+        return TRANSIENT
+    return _call_provider(provider, fn, ctx, identity)
+
+
+def _tvdb_cached(
+    ctx: _ScanCtx,
+    kind: str,
+    tvdb_id: str,
+    lang: str,
+    fetch: Callable[[str, str], Any],
+    identity: str,
+) -> Any:
+    """A TVDB record through the per-scan cache. Only real answers are cached,
+    so a transient failure is retried by the next item."""
+    key = (kind, tvdb_id, lang)
+    if key in ctx.tvdb_cache:
+        return ctx.tvdb_cache[key]
+    result = _lookup("tvdb", lambda: fetch(tvdb_id, lang), ctx, identity)
+    if result is not TRANSIENT:
+        ctx.tvdb_cache[key] = result
+    return result
+
+
+def _verification_lang(folder_lang: str) -> str:
+    """TVDB language for the verification fetch: the folder language, so the
+    record is the one the text chain asks for anyway, else English."""
+    return tvdb_language(folder_lang) or "eng"
+
+
+def _unknown_verdict(
+    ctx: _ScanCtx, ids: _Ids, identity: str, unknown_id: str,
+    accepted: Any, reason: str,
+) -> None:
+    """Apply a verification result (True, False or TRANSIENT) to ``ids``."""
+    if accepted is TRANSIENT:
+        ids.tvdb_transient = True
+        ids.lookup_failed = True
+        return
+    ids.looked_up = True
+    if accepted:
+        ids.tvdb = unknown_id
+        ctx.tracker.upsert_item(ctx.media_type.name, identity, tvdb_id=unknown_id)
+        log.info(
+            "Unknown-type id verified as TVDB id",
+            event="scan.unknown_id_accepted", identity=identity,
+            media_type=ctx.media_type.name, tvdb_id=unknown_id,
+        )
+    else:
+        log.info(
+            "Unknown-type id rejected, not used as TVDB id",
+            event="scan.unknown_id_rejected", identity=identity,
+            media_type=ctx.media_type.name, unknown_id=unknown_id, reason=reason,
+        )
+
+
+def _verify_unknown_show(
+    ctx: _ScanCtx, item: Dict[str, Any], identity: str, ids: _Ids,
+    unknown_id: str, folder_lang: str,
+) -> None:
+    """Accept the show's unknown id when the TVDB series it names carries the
+    Kodi title among its names, translations or aliases."""
+    series = _tvdb_cached(
+        ctx, "series", unknown_id, _verification_lang(folder_lang),
+        tvdb_fetch_series, identity,
+    )
+    if series is TRANSIENT:
+        _unknown_verdict(ctx, ids, identity, unknown_id, TRANSIENT, "")
+        return
+    if series is None:
+        _unknown_verdict(ctx, ids, identity, unknown_id, False, "no_such_series")
+        return
+    matched = show_matches(item.get("title", ""), series.get("names") or [])
+    _unknown_verdict(ctx, ids, identity, unknown_id, matched, "name_mismatch")
+
+
+def _verify_unknown_episode(
+    ctx: _ScanCtx, item: Dict[str, Any], identity: str, ids: _Ids,
+    unknown_id: str, folder_lang: str,
+) -> None:
+    """Accept the episode's unknown id when it is in the show's TVDB episode
+    list (one cached fetch per show, no per-episode call)."""
+    show_tvdb_id = ctx.show_tvdb_map.get(_show_kodi_id(item))
+    if not show_tvdb_id:
+        if not _show_checked(ctx, item):
+            ids.tvdb_transient = True
+        # The show has no TVDB id, so no episode list can confirm this one.
+        # Derived without a call, so it is not recorded as a lookup.
+        return
+    episodes = _tvdb_cached(
+        ctx, "episodes", show_tvdb_id, _verification_lang(folder_lang),
+        tvdb_fetch_series_episodes, identity,
+    )
+    if episodes is TRANSIENT:
+        _unknown_verdict(ctx, ids, identity, unknown_id, TRANSIENT, "")
+        return
+    listed = bool(episodes) and str(unknown_id) in episodes
+    _unknown_verdict(ctx, ids, identity, unknown_id, listed, "not_in_series_list")
+
+
+def _resolve_tmdb_by_external(ctx: _ScanCtx, identity: str, ids: _Ids) -> None:
+    """Movie/show TMDB id from its TVDB or IMDb id via TMDB /find."""
+    resolved = _lookup(
+        "tmdb",
+        lambda: resolve_id(ctx.tmdb_api_key, tvdb_id=ids.tvdb, imdb_id=ids.imdb),
+        ctx, identity,
+    )
+    if resolved is TRANSIENT:
+        ids.tmdb_transient = True
+        ids.lookup_failed = True
+        return
+    ids.looked_up = True
+    if resolved:
+        ids.tmdb = resolved
+        ctx.tracker.upsert_item(ctx.media_type.name, identity, tmdb_id=resolved)
+
+
+def _show_tvdb_from_tmdb(ctx: _ScanCtx, identity: str, ids: _Ids) -> None:
+    """Show TVDB id from TMDB's curated external ids."""
+    tmdb_id = ids.tmdb or ""
+    found = _lookup(
+        "tmdb", lambda: tmdb_fetch_tvshow_ids(ctx.tmdb_api_key, tmdb_id),
+        ctx, identity,
+    )
+    if found is TRANSIENT:
+        ids.tvdb_transient = True
+        ids.lookup_failed = True
+        return
+    ids.looked_up = True
+    ids.tvdb_transient = False
+    if found and found.get("tvdb_id"):
+        ids.tvdb = found["tvdb_id"]
+        ctx.tracker.upsert_item(ctx.media_type.name, identity, tvdb_id=ids.tvdb)
+
+
+def _episode_tmdb_from_tvdb(
+    ctx: _ScanCtx, item: Dict[str, Any], identity: str, ids: _Ids,
+) -> None:
+    """Episode TMDB id from its TVDB id via TMDB /find.
+
+    Without the show's TMDB id there is nothing to fetch the episode through,
+    so no /find is made: when the show's lookups answered that TMDB does not
+    have the show, TMDB has no answer for its episodes either; when they have
+    not answered yet, the episode's TMDB fields wait for them.
+    """
+    if not ctx.show_id_map.get(_show_kodi_id(item)):
+        ids.tmdb_transient = not _show_checked(ctx, item)
+        return
+    if not ids.may_look_up:
+        return
+    tvdb_id = ids.tvdb or ""
+    found = _lookup(
+        "tmdb", lambda: tmdb_find_episode(ctx.tmdb_api_key, tvdb_id),
+        ctx, identity,
+    )
+    if found is TRANSIENT:
+        ids.tmdb_transient = True
+        ids.lookup_failed = True
+        return
+    ids.looked_up = True
+    if found:
+        ids.tmdb = found["tmdb_id"]
+        ctx.tracker.upsert_item(ctx.media_type.name, identity, tmdb_id=ids.tmdb)
+
+
+def _resolve_ids(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    identity: str,
+    kodi_ids: Tuple[Optional[str], Optional[str], Optional[str], Optional[str]],
+    stored: Dict[str, Any],
+    folder_lang: str,
+    may_look_up: bool,
+) -> _Ids:
+    """Settle the item's ids before any field is fetched.
+
+    Kodi's typed ids win; ids found by earlier scans come from the tracker.
+    Then, while lookups are allowed: an `unknown` id is verified as a TVDB id
+    (shows and episodes), a missing TMDB id is found from the TVDB or IMDb id,
+    and a show's missing TVDB id comes from TMDB's external ids. An episode's
+    missing TVDB and IMDb ids come from TMDB's episode external ids in
+    _fetch_episode_tmdb, which has the TMDB episode numbers. Found ids go to
+    the tracker only, never to Kodi.
+    """
+    kodi_tmdb, kodi_imdb, kodi_tvdb, unknown_id = kodi_ids
+    kind = ctx.media_type.name
+    ids = _Ids(
+        tmdb=kodi_tmdb or stored.get("tmdb_id"),
+        imdb=kodi_imdb or stored.get("imdb_id"),
+        tvdb=kodi_tvdb or stored.get("tvdb_id"),
+        may_look_up=may_look_up,
+    )
+
+    if kind != "movie" and not ids.tvdb and unknown_id and may_look_up:
+        verify = _verify_unknown_show if kind == "tvshow" else _verify_unknown_episode
+        verify(ctx, item, identity, ids, unknown_id, folder_lang)
+
+    if kind == "episode":
+        if not ids.tmdb and ids.tvdb:
+            _episode_tmdb_from_tvdb(ctx, item, identity, ids)
+        return ids
+
+    if not ids.tmdb and (ids.tvdb or ids.imdb) and may_look_up:
+        _resolve_tmdb_by_external(ctx, identity, ids)
+    if kind == "tvshow" and ids.tmdb and not ids.tvdb and may_look_up:
+        _show_tvdb_from_tmdb(ctx, identity, ids)
+    return ids
+
+
+def _finish_lookups(ctx: _ScanCtx, identity: str, ids: _Ids, today: str) -> None:
+    """Record that the item's lookups answered, so an id they left missing is
+    not asked for again before FALLBACK_RECHECK_DAYS. Nothing is recorded
+    when any lookup failed, so the next scan retries."""
+    if ids.looked_up and not ids.lookup_failed:
+        ctx.tracker.upsert_item(ctx.media_type.name, identity, ids_checked=today)
+
+
 @dataclass(frozen=True)
 class _Primary:
     """The item's folder-language TMDB answer and what it settled about IDs."""
 
     # TMDB record, None (TMDB answered "nothing", or no TMDB id), or TRANSIENT.
     tmdb: Any
-    # Movie/show TMDB id (after resolve_id) or the episode's own TMDB id.
+    # Movie/show TMDB id or the episode's own TMDB id.
     tmdb_id: Optional[str]
     # The episode's show TMDB id; None for movies and shows.
     show_tmdb_id: Optional[str]
@@ -426,43 +728,27 @@ def _fetch_movie_or_show(
     kodi_id: Any,
     title: str,
     identity: str,
-    tmdb_id: Optional[str],
-    imdb_id: Optional[str],
-    tvdb_id: Optional[str],
+    ids: _Ids,
     language: str,
 ) -> _Primary:
-    """Fetch movie/TV show data from TMDB, resolving the TMDB id first when
-    missing, and write back an IMDb id TMDB reports.
+    """Fetch movie/TV show data from TMDB and write back an IMDb id TMDB
+    reports.
 
     A TMDB call this item needs but cannot make or complete (breaker open, or
     the id lookup failed transiently) yields ``TRANSIENT``, never None: None
     means TMDB answered "nothing", which would advance the maturity clock.
     """
     tmdb_data = None  # type: Any
+    tmdb_id = ids.tmdb
+    imdb_id = ids.imdb
 
-    if not tmdb_id:
-        if ctx.breaker.is_disabled("tmdb"):
-            tmdb_data = TRANSIENT
-        else:
-            resolved = _call_provider(
-                "tmdb",
-                lambda: resolve_id(ctx.tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id),
-                ctx, identity,
-            )
-            if resolved is TRANSIENT:
-                tmdb_data = TRANSIENT
-            elif resolved:
-                tmdb_id = resolved
-                ctx.tracker.upsert_item(ctx.media_type.name, identity, tmdb_id=tmdb_id)
-
-    if tmdb_id and ctx.breaker.is_disabled("tmdb"):
+    if ids.tmdb_transient or (tmdb_id and ctx.breaker.is_disabled("tmdb")):
         tmdb_data = TRANSIENT
     elif tmdb_id:
         fetch = tmdb_fetch_movie if ctx.media_type.name == "movie" else tmdb_fetch_tvshow
-        found_id = tmdb_id
         tmdb_data = _call_provider(
             "tmdb",
-            lambda: fetch(found_id, ctx.tmdb_api_key, language),
+            lambda: fetch(tmdb_id, ctx.tmdb_api_key, language),
             ctx, identity,
         )
 
@@ -480,20 +766,61 @@ def _fetch_movie_or_show(
     )
 
 
+def _episode_cross_ids(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    kodi_id: Any,
+    title: str,
+    identity: str,
+    ids: _Ids,
+    ep_show_tmdb_id: str,
+    season_number: int,
+    episode_number: int,
+) -> bool:
+    """Fill the episode's missing IMDb and TVDB ids from TMDB's episode
+    external ids. Returns True when the IMDb id stays unknown because the
+    lookup did not answer.
+
+    Best effort: a failure does not count against the TMDB breaker. A found
+    IMDb id is written back to Kodi (_enrich_imdb_id); a TVDB id goes to the
+    tracker only.
+    """
+    found = _call_provider(
+        "tmdb",
+        lambda: tmdb_fetch_episode_ids(
+            ep_show_tmdb_id, season_number, episode_number, ctx.tmdb_api_key,
+        ),
+        ctx, identity, best_effort=True,
+    )
+    if found is TRANSIENT:
+        ids.lookup_failed = True
+        if not ids.tvdb:
+            ids.tvdb_transient = True
+        return not ids.imdb
+    ids.looked_up = True
+    found = found or {}
+    if not ids.imdb and found.get("imdb_id"):
+        ids.imdb = found["imdb_id"]
+        _enrich_imdb_id(ctx, item, kodi_id, title, identity, ids.imdb)
+    if not ids.tvdb and found.get("tvdb_id"):
+        ids.tvdb = found["tvdb_id"]
+        ctx.tracker.upsert_item(ctx.media_type.name, identity, tvdb_id=ids.tvdb)
+    return False
+
+
 def _fetch_episode_tmdb(
     ctx: _ScanCtx,
     item: Dict[str, Any],
     kodi_id: Any,
     title: str,
     identity: str,
+    ids: _Ids,
     ep_show_tmdb_id: str,
     season_number: int,
-    tmdb_id: str,
-    imdb_id: Optional[str],
     language: str,
-) -> Tuple[Any, Optional[str], bool]:
-    """TMDB episode path: look up the season (cached), match by episode ID, and
-    enrich the IMDB ID. Returns (tmdb_episode_data, imdb_id,
+) -> Tuple[Any, bool]:
+    """TMDB episode path: look up the season (cached), match by episode ID,
+    and fill missing IMDb/TVDB ids. Returns (tmdb_episode_data,
     imdb_id_transient).
 
     The (cached) season fetch is not preceded by a pacing sleep and only arms
@@ -509,21 +836,14 @@ def _fetch_episode_tmdb(
             ep_show_tmdb_id, season_number, ctx.tmdb_api_key, language, ctx.season_cache
         )
         if season_data is not None:
-            tmdb_data = _find_episode_by_tmdb_id(season_data, tmdb_id)
-            if not imdb_id and tmdb_data is not None:
-                ep_num = tmdb_data.get("episode_number", 0)
-                enriched = _call_provider(
-                    "tmdb",
-                    lambda: tmdb_fetch_episode_ids(
-                        ep_show_tmdb_id, season_number, ep_num, ctx.tmdb_api_key,
-                    ),
-                    ctx, identity, best_effort=True,
+            tmdb_data = _find_episode_by_tmdb_id(season_data, ids.tmdb or "")
+            if (tmdb_data is not None and ids.may_look_up
+                    and not (ids.imdb and ids.tvdb)):
+                imdb_id_transient = _episode_cross_ids(
+                    ctx, item, kodi_id, title, identity, ids,
+                    ep_show_tmdb_id, season_number,
+                    tmdb_data.get("episode_number", 0),
                 )
-                if enriched is TRANSIENT:
-                    imdb_id_transient = True
-                elif enriched and enriched.get("imdb_id"):
-                    imdb_id = enriched["imdb_id"]
-                    _enrich_imdb_id(ctx, item, kodi_id, title, identity, imdb_id)
         if is_cache_miss:
             ctx.pacer.arm()
         ctx.breaker.record_success("tmdb")
@@ -541,7 +861,7 @@ def _fetch_episode_tmdb(
                 event="scan.breaker", provider="tmdb",
                 threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD, identity=identity,
             )
-    return tmdb_data, imdb_id, imdb_id_transient
+    return tmdb_data, imdb_id_transient
 
 
 def _fetch_episode(
@@ -550,40 +870,47 @@ def _fetch_episode(
     kodi_id: Any,
     title: str,
     identity: str,
-    tmdb_id: Optional[str],
-    imdb_id: Optional[str],
+    ids: _Ids,
     language: str,
 ) -> _Primary:
     """Fetch the episode's TMDB record by its TMDB id via the show's season.
 
     As in _fetch_movie_or_show, a needed TMDB call that cannot be made (breaker
-    open, show id unknown) yields ``TRANSIENT`` rather than None.
+    open, show not resolved yet) yields ``TRANSIENT`` rather than None. A show
+    whose lookups answered that TMDB does not have it yields None.
     """
     tmdb_data = None  # type: Any
     imdb_id_transient = False
-    ep_show_tmdb_id = (ctx.show_id_map or {}).get(item.get("tvshowid"))
+    tmdb_id = ids.tmdb
+    ep_show_tmdb_id = ctx.show_id_map.get(_show_kodi_id(item))
 
-    if tmdb_id and ctx.breaker.is_disabled("tmdb"):
+    if ids.tmdb_transient or (tmdb_id and ctx.breaker.is_disabled("tmdb")):
         tmdb_data = TRANSIENT
     elif tmdb_id and not ep_show_tmdb_id:
-        # Not knowing the show is not an answer from TMDB: hold the clock.
-        log.debug(
-            "No show TMDB ID for episode, TMDB path transient",
-            event="scan.skip", title=title, tvshowid=item.get("tvshowid"),
-        )
-        tmdb_data = TRANSIENT
+        if not _show_checked(ctx, item):
+            # Not knowing the show is not an answer from TMDB: hold the clock.
+            log.debug(
+                "No show TMDB ID for episode, TMDB path transient",
+                event="scan.skip", title=title, tvshowid=item.get("tvshowid"),
+            )
+            tmdb_data = TRANSIENT
     elif tmdb_id and ep_show_tmdb_id:
-        tmdb_data, imdb_id, imdb_id_transient = _fetch_episode_tmdb(
-            ctx, item, kodi_id, title, identity,
-            ep_show_tmdb_id, item.get("season", 0), tmdb_id, imdb_id, language,
+        tmdb_data, imdb_id_transient = _fetch_episode_tmdb(
+            ctx, item, kodi_id, title, identity, ids,
+            ep_show_tmdb_id, item.get("season", 0), language,
         )
+
+    if (tmdb_data is TRANSIENT and ids.may_look_up
+            and tmdb_id and not ids.tvdb):
+        # TMDB's external ids are where a missing episode TVDB id comes from.
+        ids.tvdb_transient = True
 
     return _Primary(
         tmdb=tmdb_data,
         tmdb_id=tmdb_id,
         show_tmdb_id=ep_show_tmdb_id,
-        imdb_id=imdb_id,
-        imdb_id_transient=imdb_id_transient or (not imdb_id and tmdb_data is TRANSIENT),
+        imdb_id=ids.imdb,
+        imdb_id_transient=imdb_id_transient or (not ids.imdb and tmdb_data is TRANSIENT),
     )
 
 
@@ -606,13 +933,13 @@ class _TextSources:
         item: Dict[str, Any],
         identity: str,
         primary: _Primary,
-        tvdb_id: Optional[str],
+        ids: _Ids,
     ) -> None:
         self._ctx = ctx
         self._item = item
         self._identity = identity
         self._primary = primary
-        self._tvdb_id = tvdb_id
+        self._ids = ids
         self._tmdb_fallback = _UNFETCHED  # type: Any
 
     def tmdb(self, field: str, fallback: bool) -> Any:
@@ -630,17 +957,20 @@ class _TextSources:
         ctx = self._ctx
         p = self._primary
         lang = tmdb_language(ctx.fallback_language)
-        if not p.tmdb_id:
+        if p.tmdb is TRANSIENT:
+            return TRANSIENT
+        tmdb_id = p.tmdb_id
+        if not tmdb_id:
             return None
         if ctx.media_type.name == "episode" and not p.show_tmdb_id:
-            return TRANSIENT
+            return None if _show_checked(ctx, self._item) else TRANSIENT
         if ctx.breaker.is_disabled("tmdb"):
             return TRANSIENT
         if ctx.media_type.name != "episode":
             fetch = tmdb_fetch_movie if ctx.media_type.name == "movie" else tmdb_fetch_tvshow
             return _call_provider(
                 "tmdb",
-                lambda: fetch(p.tmdb_id, ctx.tmdb_api_key, lang),
+                lambda: fetch(tmdb_id, ctx.tmdb_api_key, lang),
                 ctx, self._identity,
             )
         season_number = self._item.get("season", 0)
@@ -658,46 +988,38 @@ class _TextSources:
             )
         if season is TRANSIENT or season is None:
             return season
-        return _find_episode_by_tmdb_id(season, p.tmdb_id)
+        return _find_episode_by_tmdb_id(season, tmdb_id)
 
     def tvdb(self, field: str, kodi_lang: str) -> Any:
         ctx = self._ctx
         lang = tvdb_language(kodi_lang)
-        if lang is None or not self._tvdb_id:
+        if lang is None:
+            return None
+        if self._ids.tvdb_transient:
+            return TRANSIENT
+        tvdb_id = self._ids.tvdb
+        if not tvdb_id:
             return None
         if ctx.media_type.name == "tvshow":
-            series = self._tvdb_record("series", self._tvdb_id, lang, tvdb_fetch_series)
+            series = _tvdb_cached(
+                ctx, "series", tvdb_id, lang, tvdb_fetch_series, self._identity,
+            )
             if series is TRANSIENT or series is None:
                 return series
             return series.get(_TVDB_SERIES_KEYS[field])
         if ctx.media_type.name == "episode":
-            show_tvdb_id = ctx.show_tvdb_map.get(self._item.get("tvshowid"))
+            show_tvdb_id = ctx.show_tvdb_map.get(_show_kodi_id(self._item))
             if not show_tvdb_id:
-                return None
-            episodes = self._tvdb_record(
-                "episodes", show_tvdb_id, lang, tvdb_fetch_series_episodes,
+                return None if _show_checked(ctx, self._item) else TRANSIENT
+            episodes = _tvdb_cached(
+                ctx, "episodes", show_tvdb_id, lang, tvdb_fetch_series_episodes,
+                self._identity,
             )
             if episodes is TRANSIENT or episodes is None:
                 return episodes
-            episode = episodes.get(str(self._tvdb_id))
+            episode = episodes.get(str(tvdb_id))
             return episode.get(field) if episode else None
         return None
-
-    def _tvdb_record(
-        self, kind: str, tvdb_id: str, lang: str, fetch: Callable[[str, str], Any],
-    ) -> Any:
-        ctx = self._ctx
-        key = (kind, tvdb_id, lang)
-        if key in ctx.tvdb_cache:
-            return ctx.tvdb_cache[key]
-        if ctx.breaker.is_disabled("tvdb"):
-            return TRANSIENT
-        result = _call_provider(
-            "tvdb", lambda: fetch(tvdb_id, lang), ctx, self._identity,
-        )
-        if result is not TRANSIENT:
-            ctx.tvdb_cache[key] = result
-        return result
 
 
 def _fallback_applies(ctx: _ScanCtx, folder_lang: str) -> bool:
@@ -768,10 +1090,12 @@ def _imdb_rating(ctx: _ScanCtx, primary: _Primary, identity: str) -> Any:
     except TransientProviderError:
         return TRANSIENT
     except Exception:
-        log.exception(
-            "IMDb rating lookup failed",
-            event="scan.imdb_lookup_failed", identity=identity,
-        )
+        event = "scan.imdb_lookup_failed"
+        if event in ctx.logged_once:
+            log.debug("IMDb rating lookup failed again", event=event, identity=identity)
+        else:
+            ctx.logged_once.add(event)
+            log.exception("IMDb rating lookup failed", event=event, identity=identity)
         return TRANSIENT
 
 
@@ -804,7 +1128,7 @@ def _resolve_fields(
     item: Dict[str, Any],
     identity: str,
     primary: _Primary,
-    tvdb_id: Optional[str],
+    ids: _Ids,
     folder_lang: str,
     fields: List[str],
 ) -> Tuple[Dict[str, FieldOutcome], Dict[str, Any], Dict[str, Optional[str]]]:
@@ -816,7 +1140,7 @@ def _resolve_fields(
     outcomes = {}  # type: Dict[str, FieldOutcome]
     values = {}  # type: Dict[str, Any]
     providers = {}  # type: Dict[str, Optional[str]]
-    text = _TextSources(ctx, item, identity, primary, tvdb_id)
+    text = _TextSources(ctx, item, identity, primary, ids)
     tmdb_transient = primary.tmdb is TRANSIENT
     tmdb_data = {} if tmdb_transient or not primary.tmdb else primary.tmdb
 
@@ -1000,9 +1324,13 @@ def run_scan(
         show_tvdb_map=(
             tracker.get_show_tvdb_map() if media_type.name == "episode" else {}
         ),
+        checked_shows=(
+            tracker.get_checked_show_ids()
+            if media_type.name == "episode" else frozenset()
+        ),
         season_cache={},
         tvdb_cache={},
-        settings=settings,
+        logged_once=set(),
         schedule=schedule,
         rating_pref=settings.get("rating_source", 0),
         text_order=settings.get("text_source_order", TEXT_TMDB_FIRST),
@@ -1070,8 +1398,8 @@ def run_scan(
         language = source.get("language", ctx.default_language)
 
         # Extract external IDs
-        tmdb_id, imdb_id, tvdb_id = _extract_ids(item)
-        if not _has_any_id(tmdb_id, imdb_id, tvdb_id):
+        kodi_ids = _extract_ids(item)
+        if not any(kodi_ids):
             log.debug(
                 "Skipping item without external IDs",
                 event="scan.skip",
@@ -1079,8 +1407,10 @@ def run_scan(
             )
             stats["skipped"] += 1
             continue
+        tmdb_id, imdb_id, tvdb_id, _unknown = kodi_ids
 
-        # Sync to tracker
+        # Sync to tracker. None ids are not written, so ids found by earlier
+        # scans survive and are read back below.
         tracker.upsert_item(
             media_type.name,
             identity,
@@ -1094,6 +1424,7 @@ def run_scan(
             date_added=item.get("dateadded", ""),
         )
         tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
+        stored = tracker.get_item(media_type.name, identity) or {}
 
         # --- Per-field maturity decisions (see maturity.decide_field) ---
         today = date.today().isoformat()
@@ -1117,8 +1448,30 @@ def run_scan(
                 threshold,
             )
 
+        due = any(d == FETCH_NOW for d in decisions.values())
+        ids = _resolve_ids(
+            ctx, item, identity, kodi_ids, stored, language,
+            _lookup_allowed(
+                stored.get("ids_checked"), today, due, media_type.name == "tvshow",
+            ),
+        )
+
         # Nothing is due this scan: mark processed and move on without a fetch.
-        if not any(d == FETCH_NOW for d in decisions.values()):
+        if not due:
+            _finish_lookups(ctx, identity, ids, today)
+            tracker.mark_cycle_processed(media_type.name, identity)
+            stats["skipped"] += 1
+            continue
+
+        # Only an unverified (rejected, or not yet answered) unknown id: no
+        # provider can be asked, and no field is sampled.
+        if not ids.any():
+            log.debug(
+                "Item has no usable ID, skipping",
+                event="scan.skip", title=title, media_type=media_type.name,
+                tvdb_transient=ids.tvdb_transient,
+            )
+            _finish_lookups(ctx, identity, ids, today)
             tracker.mark_cycle_processed(media_type.name, identity)
             stats["skipped"] += 1
             continue
@@ -1129,7 +1482,8 @@ def run_scan(
             title=title,
             identity=identity,
             media_type=media_type.name,
-            tmdb_id=tmdb_id,
+            tmdb_id=ids.tmdb,
+            tvdb_id=ids.tvdb,
             decisions=decisions,
         )
 
@@ -1142,30 +1496,16 @@ def run_scan(
             stats["aborted"] = True
             break
 
-        if media_type.name == "episode" and not imdb_id and not tmdb_id:
-            log.debug(
-                "Episode has no usable ID, skipping (re-checked each scan)",
-                event="scan.skip", title=title, media_type=media_type.name,
-            )
-            tracker.mark_cycle_processed(media_type.name, identity)
-            stats["skipped"] += 1
-            continue
-
         tmdb_lang = tmdb_language(language)
-        if media_type.name == "episode":
-            primary = _fetch_episode(
-                ctx, item, kodi_id, title, identity, tmdb_id, imdb_id, tmdb_lang,
-            )
-        else:
-            primary = _fetch_movie_or_show(
-                ctx, item, kodi_id, title, identity,
-                tmdb_id, imdb_id, tvdb_id, tmdb_lang,
-            )
+        fetch_primary = (
+            _fetch_episode if media_type.name == "episode" else _fetch_movie_or_show
+        )
+        primary = fetch_primary(ctx, item, kodi_id, title, identity, ids, tmdb_lang)
 
         # Non-final fields are refreshed (overwrite-on-diff); final ones are not.
         nonfinal = [f for f, d in decisions.items() if d != FINAL]
         outcomes, values, providers = _resolve_fields(
-            ctx, item, identity, primary, tvdb_id, language, nonfinal,
+            ctx, item, identity, primary, ids, language, nonfinal,
         )
         answered = [f for f in nonfinal if f in outcomes and not outcomes[f].transient]
         fields_to_write = {
@@ -1236,6 +1576,7 @@ def run_scan(
                     outcome.from_fallback if outcome.value is not None else None
                 ),
             )
+        _finish_lookups(ctx, identity, ids, today)
         tracker.commit()
 
         tracker.mark_cycle_processed(media_type.name, identity)

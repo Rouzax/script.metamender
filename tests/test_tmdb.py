@@ -1,7 +1,7 @@
 """Tests for the TMDB provider module."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -736,6 +736,21 @@ class TestCrossReferences:
     def test_find_episode_by_tvdb_empty_is_none(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {"tv_episode_results": []})
         assert find_episode_by_tvdb("k", "1") is None
+
+    @pytest.mark.parametrize("numbers", [
+        {"season_number": None, "episode_number": 4},
+        {"season_number": 3},
+        {"episode_number": 4},
+    ])
+    @patch("resources.lib.providers.http.requests.get")
+    def test_find_episode_by_tvdb_without_numbers_is_none(
+        self, mock_get: MagicMock, numbers: Dict[str, Any],
+    ) -> None:
+        # A missing number read as 0 would match a Specials episode.
+        result = {"id": 99, "show_id": 12}
+        result.update(numbers)
+        mock_get.return_value = _mock_response(200, {"tv_episode_results": [result]})
+        assert find_episode_by_tvdb("k", "340249") is None
 
     @patch("resources.lib.providers.http.requests.get")
     def test_find_episode_by_tvdb_404_is_none(self, mock_get: MagicMock) -> None:

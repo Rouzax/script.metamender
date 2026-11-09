@@ -70,6 +70,11 @@ SOURCES_CONFIG_FILENAME = "sources.json"
 # migrations have a marker to branch on. Stored in scan_state on init.
 SCHEMA_VERSION = 3
 
+# Days before an answer that left something unfilled is asked again: a value
+# that only the fallback language supplied, or an id that the cross-reference
+# lookups answered they do not have.
+FALLBACK_RECHECK_DAYS = 30
+
 # Default refetch schedule in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
 DEFAULT_REFETCH_SCHEDULE = (7, 30, 90)  # type: Tuple[int, ...]
 

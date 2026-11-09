@@ -418,7 +418,7 @@ def find_episode_by_tvdb(
     """Find a TMDB episode from its TVDB episode ID via /find.
 
     Returns {"tmdb_id", "show_tmdb_id", "season", "episode"} or None when TMDB
-    has no match. Raises TransientProviderError when TMDB could not be reached.
+    has no match, or only matches lacking any of those fields. Raises TransientProviderError when TMDB could not be reached.
     """
     url = "{}/find/{}".format(TMDB_BASE_URL, tvdb_episode_id)
     with log_timing(log, "tmdb.find_episode", tvdb_id=tvdb_episode_id):
@@ -431,13 +431,17 @@ def find_episode_by_tvdb(
         return None
 
     for result in data.get("tv_episode_results") or []:
-        if result.get("id") is None or result.get("show_id") is None:
+        # Every field is required: a missing season number read as 0 would
+        # address the show's Specials.
+        if any(result.get(k) is None for k in (
+            "id", "show_id", "season_number", "episode_number",
+        )):
             continue
         found = {
             "tmdb_id": str(result["id"]),
             "show_tmdb_id": str(result["show_id"]),
-            "season": int(result.get("season_number") or 0),
-            "episode": int(result.get("episode_number") or 0),
+            "season": int(result["season_number"]),
+            "episode": int(result["episode_number"]),
         }
         log.info(
             "Episode found by TVDB ID",

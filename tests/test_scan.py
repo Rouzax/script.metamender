@@ -18,13 +18,16 @@ from resources.lib.engine.scan import (
 
 @pytest.fixture(autouse=True)
 def _mock_secondary_providers():
-    """Keep TVDB, the IMDb ratings store and TMDB episode-ID enrichment off the
+    """Keep TVDB, the IMDb ratings store and the TMDB id lookups off the
     network: each answers "nothing" unless a test patches it.
     """
     with patch("resources.lib.engine.scan.imdb_rating_lookup", return_value=None), \
          patch("resources.lib.engine.scan.tvdb_fetch_series", return_value=None), \
          patch("resources.lib.engine.scan.tvdb_fetch_series_episodes", return_value=None), \
-         patch("resources.lib.engine.scan.tmdb_fetch_episode_ids", return_value=None):
+         patch("resources.lib.engine.scan.tmdb_fetch_episode_ids", return_value=None), \
+         patch("resources.lib.engine.scan.tmdb_fetch_tvshow_ids", return_value=None), \
+         patch("resources.lib.engine.scan.tmdb_find_episode", return_value=None), \
+         patch("resources.lib.engine.scan.resolve_id", return_value=None):
         yield
 
 
@@ -1044,13 +1047,13 @@ class TestRunScanEpisodes:
         tracker.close()
 
     @patch("resources.lib.engine.scan.get_all_items")
-    def test_no_id_episode_skipped_not_attempted(
+    def test_tvdb_only_episode_processed_not_skipped(
         self, mock_get_all, tmp_path, kodi_stubs
     ):
-        """Episode with no tmdb/imdb id (tvdb only): skipped cleanly.
+        """Episode with no tmdb/imdb id (tvdb only) is processed: its TMDB id
+        is looked up by TVDB id, and a "not found" is an answer.
 
-        No attempt recorded, no error, not exhausted; re-checked for free
-        on the next scan (D4/A11).
+        No attempt recorded, no error, not exhausted.
         """
         ep = _make_episode_item(tmdb_id=None)
         ep["uniqueid"] = {"tvdb": "12345"}
@@ -1064,7 +1067,7 @@ class TestRunScanEpisodes:
             show_id_map={10: "55555"},
         )
 
-        assert stats["skipped"] >= 1
+        assert stats["processed"] == 1
         assert stats["errors"] == 0
 
         # The item is upserted (it has a tvdb id) but no attempt was recorded
@@ -2628,7 +2631,9 @@ class TestTextChainIds:
         item = _make_episode_item(title="")
         item["uniqueid"] = {"tmdb": "99999", "tvdb": "888"}
         mock_season.return_value = [_tmdb_episode_data(title="")]
-        tracker = _make_tracker(tmp_path)  # show not registered: no TVDB id
+        tracker = _make_tracker(tmp_path)
+        # The show's lookups answered and found no TVDB id.
+        _register_checked_show(tracker, tvdb_id=None, tmdb_id="55555")
 
         run_scan(
             EPISODE, tracker, _make_source_config(), frozenset({"title"}),
@@ -2697,3 +2702,473 @@ class TestTextChainIds:
         mock_tvdb_eps.assert_called_once_with("777", "eng")
         titles = [c.kwargs.get("title") for c in mock_update.call_args_list]
         assert titles == ["One", "Two"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 7d: unknown-type TVDB ids and TMDB cross-references
+# ---------------------------------------------------------------------------
+
+_BUURMAN_NAMES = ["Pat a Mat", "Buurman en Buurman"]
+
+
+def _today_minus(days):
+    # type: (int) -> str
+    from datetime import timedelta
+    return (date.today() - timedelta(days=days)).isoformat()
+
+
+def _nl_show(title="Buurman en Buurman", uniqueid=None):
+    # type: (str, Any) -> Dict[str, Any]
+    item = _make_tvshow_item(title=title)
+    item["uniqueid"] = uniqueid if uniqueid is not None else {"unknown": "80767"}
+    return item
+
+
+def _register_checked_show(tracker, tvdb_id="80767", tmdb_id=None, checked=True):
+    tracker.upsert_item(
+        "tvshow", "show-10", kodi_id=10, tmdb_id=tmdb_id, tvdb_id=tvdb_id,
+        ids_checked=date.today().isoformat() if checked else None,
+    )
+    tracker.commit()
+
+
+def _episode(ep_id, uniqueid, season=1, episode=1, title=""):
+    # type: (int, Dict[str, str], int, int, str) -> Dict[str, Any]
+    item = _make_episode_item(season=season, episode=episode, title=title)
+    item["episodeid"] = ep_id
+    item["uniqueid"] = uniqueid
+    return item
+
+
+def _row(tracker, media_type, item):
+    return tracker.get_item(media_type.name, compute_identity(item, media_type))
+
+
+class TestUnknownIds:
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.resolve_id", return_value=None)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    def test_unknown_show_id_accepted_and_stored_as_tvdb(
+        self, mock_tvdb, mock_resolve, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _nl_show()
+        mock_tvdb.return_value = {
+            "name": "Buurman en Buurman", "overview": "Twee buren klussen.",
+            "names": _BUURMAN_NAMES,
+        }
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        row = _row(tracker, TVSHOW, item)
+        fs_map = _fs(tracker, TVSHOW, item)
+        tracker.close()
+
+        assert row["tvdb_id"] == "80767"
+        assert row["ids_checked"] == date.today().isoformat()
+        assert mock_resolve.call_args.kwargs["tvdb_id"] == "80767"
+        assert _written(mock_update, "plot") == "Twee buren klussen."
+        assert fs_map["plot"]["source"] == "tvdb"
+        assert fs_map["plot"]["fetch_count"] == 1
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.resolve_id", return_value=None)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    def test_unknown_show_id_rejected_when_name_differs(
+        self, mock_tvdb, mock_resolve, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _nl_show()
+        mock_tvdb.return_value = {
+            "name": "", "overview": "Something else.", "names": ["Pat a Mat", "Pat & Mat"],
+        }
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        row = _row(tracker, TVSHOW, item)
+        fs_map = _fs(tracker, TVSHOW, item)
+        tracker.close()
+
+        assert row["tvdb_id"] is None
+        mock_resolve.assert_not_called()
+        mock_update.assert_not_called()
+        assert stats["skipped"] == 1 and stats["processed"] == 0
+        assert _count(fs_map, "plot") == 0
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    def test_unknown_show_verification_transient_skips_without_answer(
+        self, mock_tvdb, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        item = _nl_show()
+        mock_tvdb.side_effect = TransientProviderError("503")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        row = _row(tracker, TVSHOW, item)
+        fs_map = _fs(tracker, TVSHOW, item)
+        tracker.close()
+
+        assert row["ids_checked"] is None
+        assert _count(fs_map, "plot") == 0
+        mock_update.assert_not_called()
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_find_episode")
+    @patch("resources.lib.engine.scan.tvdb_fetch_series_episodes")
+    def test_unknown_episode_accepted_only_if_in_series_list(
+        self, mock_eps, mock_find, mock_update, tmp_path, kodi_stubs
+    ):
+        listed = _episode(100, {"unknown": "340249"}, episode=1)
+        unlisted = _episode(101, {"unknown": "999"}, episode=2)
+        mock_eps.return_value = {"340249": {"title": "Het schilderij", "plot": ""}}
+        tracker = _make_tracker(tmp_path)
+        _register_checked_show(tracker)
+
+        stats = run_scan(
+            EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
+            "k", _make_settings(), items=[listed, unlisted], show_id_map={},
+        )
+        listed_row = _row(tracker, EPISODE, listed)
+        unlisted_row = _row(tracker, EPISODE, unlisted)
+        tracker.close()
+
+        assert listed_row["tvdb_id"] == "340249"
+        assert unlisted_row["tvdb_id"] is None
+        assert [c.args[0] for c in mock_update.call_args_list] == [100]
+        assert _written(mock_update, "title") == "Het schilderij"
+        assert stats["processed"] == 1 and stats["skipped"] == 1
+        # One episode list for the show serves both verifications.
+        assert mock_eps.call_count == 1
+        # The show answered "not on TMDB": no per-episode /find.
+        mock_find.assert_not_called()
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_episode_ids")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    @patch("resources.lib.engine.scan.tmdb_find_episode")
+    def test_tvdb_only_episode_gets_tmdb_and_imdb_via_find(
+        self, mock_find, mock_season, mock_ep_ids, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tvdb": "888"})
+        mock_find.return_value = {
+            "tmdb_id": "99999", "show_tmdb_id": "55555", "season": 1, "episode": 1,
+        }
+        mock_season.return_value = [_tmdb_episode_data()]
+        mock_ep_ids.return_value = {"imdb_id": "tt0777", "tvdb_id": "888"}
+        tracker = _make_tracker(tmp_path)
+        _register_show(tracker)
+
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        row = _row(tracker, EPISODE, item)
+        tracker.close()
+
+        mock_find.assert_called_once_with("k", "888")
+        assert mock_ep_ids.call_args.args[:3] == ("55555", 1, 1)
+        assert row["tmdb_id"] == "99999"
+        assert row["imdb_id"] == "tt0777"
+        assert row["ids_checked"] == date.today().isoformat()
+        assert _written(mock_update, "title") == "Pilot"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow_ids")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    def test_tmdb_only_show_gets_tvdb_via_external_ids(
+        self, mock_tmdb, mock_ids, mock_tvdb, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_tvshow_item()
+        mock_tmdb.return_value = _tmdb_tvshow_response(plot="")
+        mock_ids.return_value = {"tvdb_id": "777"}
+        mock_tvdb.return_value = {"name": "Show", "overview": "TVDB plot", "names": []}
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        row = _row(tracker, TVSHOW, item)
+        tracker.close()
+
+        mock_ids.assert_called_once_with("k", "99999")
+        assert row["tvdb_id"] == "777"
+        mock_tvdb.assert_called_once_with("777", "eng")
+        assert _written(mock_update, "plot") == "TVDB plot"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series_episodes")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    @patch("resources.lib.engine.scan.tmdb_find_episode")
+    def test_cross_reference_transient_holds_dependent_fields(
+        self, mock_find, mock_season, mock_eps, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        item = _episode(100, {"tvdb": "888"})
+        mock_find.side_effect = TransientProviderError("503")
+        mock_eps.return_value = {"888": {"title": "", "plot": "TVDB plot"}}
+        tracker = _make_tracker(tmp_path)
+        _register_show(tracker)
+
+        run_scan(
+            EPISODE, tracker, _make_source_config(),
+            frozenset({"title", "plot", "runtime"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        fs_map = _fs(tracker, EPISODE, item)
+        row = _row(tracker, EPISODE, item)
+        tracker.close()
+
+        mock_season.assert_not_called()
+        mock_update.assert_not_called()
+        assert _count(fs_map, "title") == 0
+        assert _count(fs_map, "plot") == 0
+        assert _count(fs_map, "runtime") == 0
+        assert row["ids_checked"] is None
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow_ids")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    @patch("resources.lib.engine.scan.resolve_id", return_value="99999")
+    def test_verified_ids_not_written_to_kodi(
+        self, mock_resolve, mock_tmdb, mock_ids, mock_tvdb, mock_update,
+        tmp_path, kodi_stubs
+    ):
+        accepted = _nl_show()
+        accepted["tvshowid"] = 10
+        crossref = _make_tvshow_item(title="Other", tmdb_id="12")
+        crossref["tvshowid"] = 11
+        mock_tvdb.return_value = {
+            "name": "Buurman en Buurman", "overview": "", "names": _BUURMAN_NAMES,
+        }
+        mock_tmdb.return_value = _tmdb_tvshow_response(imdb_id="tt0009")
+        mock_ids.return_value = {"tvdb_id": "777"}
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _nl_source_config(), frozenset({"plot", "genre"}),
+            "k", _make_settings(), items=[accepted, crossref],
+        )
+        tracker.close()
+
+        uids = [c.kwargs["uniqueid"] for c in mock_update.call_args_list if "uniqueid" in c.kwargs]
+        assert uids, "the IMDb id write-back still happens"
+        for uid in uids:
+            assert "tvdb" not in uid and "thetvdb" not in uid
+            assert "777" not in uid.values()
+        assert {"unknown": "80767", "imdb": "tt0009"} in uids
+        assert {"tmdb": "12", "imdb": "tt0009"} in uids
+
+
+class TestIdResolutionOrder:
+    """Episodes depend on their show's ids; the rulings that keep a show that
+    is not on TMDB from blocking TVDB text forever."""
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_find_episode")
+    @patch("resources.lib.engine.scan.tvdb_fetch_series_episodes")
+    def test_show_answered_no_tmdb_id_episode_falls_through_to_tvdb(
+        self, mock_eps, mock_find, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tvdb": "340249"})
+        mock_eps.return_value = {"340249": {"title": "Het schilderij", "plot": ""}}
+        tracker = _make_tracker(tmp_path)
+        _register_checked_show(tracker)
+
+        run_scan(
+            EPISODE, tracker, _nl_source_config(), frozenset({"title", "runtime"}),
+            "k", _make_settings(), items=[item], show_id_map={},
+        )
+        fs_map = _fs(tracker, EPISODE, item)
+        tracker.close()
+
+        mock_find.assert_not_called()
+        assert _written(mock_update, "title") == "Het schilderij"
+        assert fs_map["title"]["source"] == "tvdb"
+        assert _count(fs_map, "title") == 1
+        assert _count(fs_map, "runtime") == 1
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_find_episode")
+    @patch("resources.lib.engine.scan.tvdb_fetch_series_episodes")
+    def test_show_not_resolved_holds_episode_tmdb_steps(
+        self, mock_eps, mock_find, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tvdb": "340249"})
+        mock_eps.return_value = {"340249": {"title": "Het schilderij", "plot": ""}}
+        tracker = _make_tracker(tmp_path)
+        _register_checked_show(tracker, checked=False)
+
+        run_scan(
+            EPISODE, tracker, _nl_source_config(), frozenset({"title", "runtime"}),
+            "k", _make_settings(), items=[item], show_id_map={},
+        )
+        fs_map = _fs(tracker, EPISODE, item)
+        tracker.close()
+
+        mock_find.assert_not_called()
+        mock_update.assert_not_called()
+        assert _count(fs_map, "title") == 0
+        assert _count(fs_map, "runtime") == 0
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_show_without_tvdb_not_resolved_holds_episode_tvdb_step(
+        self, mock_season, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tmdb": "99999", "tvdb": "888"})
+        mock_season.return_value = [_tmdb_episode_data(title="")]
+        tracker = _make_tracker(tmp_path)
+        _register_checked_show(tracker, tvdb_id=None, tmdb_id="55555", checked=False)
+
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        fs_map = _fs(tracker, EPISODE, item)
+        tracker.close()
+
+        assert _count(fs_map, "title") == 0
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow_ids")
+    @patch("resources.lib.engine.scan.resolve_id", return_value=None)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    def test_show_ids_resolved_even_when_no_field_due(
+        self, mock_tvdb, mock_resolve, mock_ids, mock_tmdb, mock_update,
+        tmp_path, kodi_stubs
+    ):
+        unknown = _nl_show()
+        tmdb_only = _make_tvshow_item(title="Other", tmdb_id="12")
+        tmdb_only["tvshowid"] = 11
+        mock_tvdb.return_value = {"name": "", "overview": "", "names": _BUURMAN_NAMES}
+        mock_ids.return_value = None
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _nl_source_config(), frozenset(),
+            "k", _make_settings(), items=[unknown, tmdb_only],
+        )
+        unknown_row = _row(tracker, TVSHOW, unknown)
+        tmdb_row = _row(tracker, TVSHOW, tmdb_only)
+        checked = tracker.get_checked_show_ids()
+        tracker.close()
+
+        assert unknown_row["tvdb_id"] == "80767"
+        mock_resolve.assert_called_once()
+        mock_ids.assert_called_once_with("k", "12")
+        assert tmdb_row["tvdb_id"] is None
+        assert checked == frozenset({10, 11})
+        mock_tmdb.assert_not_called()
+        mock_update.assert_not_called()
+
+
+class TestCrossReferenceRecheck:
+    @pytest.mark.parametrize("age_days,expect_call", [(10, False), (29, False), (30, True)])
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_find_episode", return_value=None)
+    def test_answered_empty_find_rechecked_after_30_days(
+        self, mock_find, mock_update, age_days, expect_call, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tvdb": "888"})
+        tracker = _make_tracker(tmp_path)
+        _register_show(tracker)
+        tracker.upsert_item(
+            "episode", compute_identity(item, EPISODE), kodi_id=100,
+            ids_checked=_today_minus(age_days),
+        )
+        tracker.commit()
+
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"runtime"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        fs_map = _fs(tracker, EPISODE, item)
+        row = _row(tracker, EPISODE, item)
+        tracker.close()
+
+        assert mock_find.called is expect_call
+        # Either way TMDB has answered "no such episode": the field advances.
+        assert _count(fs_map, "runtime") == 1
+        expected = date.today().isoformat() if expect_call else _today_minus(age_days)
+        assert row["ids_checked"] == expected
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_find_episode", return_value=None)
+    def test_answered_empty_find_not_repeated_next_scan(
+        self, mock_find, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tvdb": "888"})
+        tracker = _make_tracker(tmp_path)
+        _register_show(tracker)
+        for _ in range(2):
+            tracker.start_new_cycle()
+            run_scan(
+                EPISODE, tracker, _make_source_config(), frozenset({"runtime"}),
+                "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+                reset=True,
+            )
+        tracker.close()
+
+        assert mock_find.call_count == 1
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow", return_value=None)
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow_ids")
+    def test_recently_checked_show_not_looked_up(
+        self, mock_ids, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_tvshow_item()
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item(
+            "tvshow", compute_identity(item, TVSHOW), kodi_id=10,
+            ids_checked=_today_minus(3),
+        )
+        tracker.commit()
+        run_scan(
+            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        tracker.close()
+
+        mock_ids.assert_not_called()
+
+
+class TestImdbStoreErrorLogging:
+    @patch("resources.lib.engine.scan.log")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    @patch("resources.lib.engine.scan.imdb_rating_lookup")
+    def test_store_error_logged_once_per_scan(
+        self, mock_lookup, mock_tmdb, mock_update, mock_log, tmp_path, kodi_stubs
+    ):
+        mock_lookup.side_effect = RuntimeError("store broken")
+        mock_tmdb.return_value = _tmdb_movie_response()
+        items = []
+        for n in range(3):
+            movie = _make_movie_item(tmdb_id=str(100 + n), movie_id=n + 1)
+            items.append(movie)
+        settings = _make_settings()
+        settings["rating_source"] = 3  # IMDb only
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+            "k", settings, items=items,
+        )
+        tracker.close()
+
+        failures = [
+            c for c in mock_log.exception.call_args_list
+            if c.kwargs.get("event") == "scan.imdb_lookup_failed"
+        ]
+        assert len(failures) == 1
+        assert mock_lookup.call_count == 3

@@ -475,6 +475,26 @@ def test_show_tvdb_map_keyed_by_kodi_id(tmp_path):
     assert result == {1: "71663"}
 
 
+def test_ids_checked_stored_and_kept(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    tracker.upsert_item("tvshow", "a", title="A", kodi_id=1, ids_checked="2026-11-01")
+    tracker.upsert_item("tvshow", "a", title="A", kodi_id=1, tmdb_id="5")
+    row = tracker.get_item("tvshow", "a")
+    tracker.close()
+    assert row["ids_checked"] == "2026-11-01"
+    assert row["tmdb_id"] == "5"
+
+
+def test_checked_show_ids_keyed_by_kodi_id(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    tracker.upsert_item("tvshow", "a", title="A", kodi_id=1, ids_checked="2026-11-01")
+    tracker.upsert_item("tvshow", "b", title="B", kodi_id=2, tmdb_id="2996")
+    tracker.upsert_item("episode", "c", title="C", kodi_id=3, ids_checked="2026-11-01")
+    result = tracker.get_checked_show_ids()
+    tracker.close()
+    assert result == frozenset({1})
+
+
 # --- Schema v3: provenance columns and settings fingerprint ---
 
 _V2_SCHEMA_SQL = """\
