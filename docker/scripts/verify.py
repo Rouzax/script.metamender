@@ -153,9 +153,8 @@ def cmd_apikey() -> int:
         print("provider raised ApiKeyError on bad key?  YES")
 
     tracker = TrackerDB(os.path.join(_TMP, "tracker.db"))
-    settings = {"rate_limit": 0, "max_retries": 4, "rating_source": 0,
-                "plot_source": 0, "min_votes_movie": 50,
-                "min_votes_episode": 20, "stale_threshold_days": 365}
+    settings = {"rate_limit": 0, "rating_source": 0,
+                "text_source_order": 0, "stale_threshold_days": 365}
     raised = None
     stats = None
     try:

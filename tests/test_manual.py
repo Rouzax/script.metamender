@@ -14,12 +14,9 @@ def _settings(**overrides: Any) -> Dict[str, Any]:
     base: Dict[str, Any] = {
         "tmdb_api_key": "k",
         "rating_source": 0,
-        "plot_source": 0,
+        "text_source_order": 0,
         "enabled_fields": frozenset({"plot"}),
-        "min_votes_movie": 50,
-        "min_votes_episode": 20,
         "stale_threshold_days": 365,
-        "max_retries": 3,
         "rate_limit": 0.25,
         "scan_interval": 24,
         "show_notifications": False,

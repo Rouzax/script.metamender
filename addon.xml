@@ -21,7 +21,7 @@
     </extension>
     <extension point="xbmc.addon.metadata">
         <summary lang="en_GB">Backfills the metadata Kodi missed.</summary>
-        <description lang="en_GB">Automatically fills missing and stale metadata for movies, TV shows, and episodes using TMDB and IMDb ratings. Backfills ratings, plots, episode titles, age certifications, credits, trailers, taglines, and more. Runs in the background with configurable field groups, staleness-aware retries, and per-source language settings.</description>
+        <description lang="en_GB">Automatically fills missing and stale metadata for movies, TV shows, and episodes from TMDB, TheTVDB and IMDb ratings. Backfills ratings, plots, episode titles, credits, trailers, taglines, and more, in each source folder's own language with a configurable fallback language. Values that come from an NFO file are never changed. Runs in the background with configurable field groups and staleness-aware refreshes.</description>
         <platform>all</platform>
         <license>MIT</license>
     </extension>

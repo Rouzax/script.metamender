@@ -11,12 +11,22 @@ Usage:
     python3 tests/live_integration_test.py 1        # run test 1 only
 
 Requires:
-    - Kodi running at localhost:8101
-    - TMDB API key
+    - Kodi running at localhost:8101 (KODI_URL to change it)
+    - TMDB_API_KEY in the environment (TheTVDB uses the add-on's own key)
+    - the media share mounted read-only at MEDIA_ROOT (default
+      /mnt/media/Data/), the target of the rig's smb://NAS/Data/ path
+      substitution, so NFO detection sees the real files
+    - IMDBRATINGS_LIB pointing at script.module.imdbratings/lib for the IMDb
+      rating scenarios (16, 17)
+
+Scenarios write to the library and restore what they change; bracket a run
+with the rig's backup-db.sh / restore-db.sh all the same.
 """
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 from datetime import date, timedelta
@@ -54,11 +64,55 @@ _xbmc_stub.LOGWARNING = 3
 _xbmc_stub.LOGERROR = 4
 _xbmc_stub.log = MagicMock()
 _xbmc_stub.getCondVisibility = MagicMock(return_value=False)
+_xbmc_stub.Monitor.return_value.abortRequested.return_value = False
+
+# The library stores smb:// paths; the host reaches the same share through its
+# read-only mount, so NFO detection sees the real files the way Kodi's own
+# path substitution would.
+MEDIA_FROM = "smb://NAS/Data/"
+MEDIA_TO = os.environ.get("MEDIA_ROOT", "/mnt/media/Data/")
+# Trackers and the IMDb ratings store of one run live here and go with it.
+_SCRATCH = tempfile.mkdtemp(prefix="mm_live_")
+atexit.register(shutil.rmtree, _SCRATCH, True)
+
+
+def _local(path):
+    # type: (str) -> str
+    if path.startswith(MEDIA_FROM):
+        return MEDIA_TO + path[len(MEDIA_FROM):]
+    if path.startswith("special://"):
+        local = os.path.join(_SCRATCH, path[len("special://"):])
+        os.makedirs(os.path.dirname(local), exist_ok=True)
+        return local
+    return path
+
+
+def _listdir(path):
+    # type: (str) -> Any
+    local = _local(path)
+    names = os.listdir(local)
+    dirs = [n for n in names if os.path.isdir(os.path.join(local, n))]
+    return dirs, [n for n in names if n not in dirs]
+
+
+_xbmcvfs_stub = MagicMock()
+_xbmcvfs_stub.exists = lambda p: os.path.exists(_local(p))
+_xbmcvfs_stub.listdir = _listdir
+_xbmcvfs_stub.translatePath = _local
 
 sys.modules.setdefault("xbmc", _xbmc_stub)
-for mod in ("xbmcaddon", "xbmcgui", "xbmcvfs"):
+sys.modules.setdefault("xbmcvfs", _xbmcvfs_stub)
+for mod in ("xbmcaddon", "xbmcgui"):
     if mod not in sys.modules:
         sys.modules[mod] = MagicMock()
+
+# script.module.imdbratings is a Kodi add-on, not a pip package: point
+# IMDBRATINGS_LIB at its lib/ folder (for example inside a Kodi profile's
+# addons/script.module.imdbratings/lib). Its store is created in the scratch
+# folder, so the first IMDb test downloads IMDb's ratings dataset.
+_IMDBRATINGS_LIB = os.environ.get("IMDBRATINGS_LIB", "")
+if _IMDBRATINGS_LIB:
+    sys.path.insert(0, _IMDBRATINGS_LIB)
 
 from resources.lib.data.identity import compute_identity  # noqa: E402
 
@@ -92,7 +146,7 @@ def get_episode(episode_id: int) -> Dict[str, Any]:
         "episodeid": episode_id,
         "properties": [
             "title", "rating", "votes", "plot", "showtitle", "season",
-            "episode", "uniqueid", "firstaired", "director", "writer",
+            "episode", "tvshowid", "uniqueid", "firstaired", "director", "writer",
             "runtime", "dateadded", "file",
         ],
     })
@@ -137,21 +191,37 @@ def make_tracker(tmp_dir: str) -> Any:
     return TrackerDB(os.path.join(tmp_dir, "test.db"))
 
 
+_IMDB_STATE = {}  # type: Dict[str, bool]
+
+
+def _imdb_ready():
+    # type: () -> bool
+    """Load the IMDb ratings store once per run; False without the module."""
+    if "ready" not in _IMDB_STATE:
+        from resources.lib.providers import imdb_ratings
+        _IMDB_STATE["ready"] = bool(_IMDBRATINGS_LIB) and imdb_ratings.prepare(lambda: False)
+    return _IMDB_STATE["ready"]
+
+
 def _default_settings(**overrides: Any) -> Dict[str, Any]:
-    """Return a baseline settings dict that run_scan accepts under Phase 7c.
+    """Return a baseline settings dict for run_scan.
 
     Keys:
-        default_source:      integer (0=PREFER_TMDB, 1=PREFER_IMDB, 2=TMDB_ONLY, 3=IMDB_ONLY)
-        rating_source:       integer (same scale)
-        plot_source:         integer (same scale)
+        rating_source:       0=prefer TMDB, 1=prefer IMDb, 2=TMDB only, 3=IMDb only
+        text_source_order:   0=TMDB then TVDB, 1=TVDB then TMDB
+        fallback_order:      0=TVDB then TMDB, 1=TMDB then TVDB
+        fallback_language:   TMDB-style code of the fallback language
+        imdb_ready:          whether the IMDb ratings store is loaded this cycle
         refetch_schedule:    comma-separated string (e.g. "7,30,90")
         stale_threshold_days: integer; content older than this is treated as stable
         rate_limit:          seconds between external API calls (0.0 in tests)
     """
     base = {
-        "default_source": 0,
         "rating_source": 0,
-        "plot_source": 0,
+        "text_source_order": 0,
+        "fallback_order": 0,
+        "fallback_language": "en-US",
+        "imdb_ready": _imdb_ready(),
         "refetch_schedule": "7,30,90",
         "stale_threshold_days": 365,
         "rate_limit": 0.0,
@@ -190,8 +260,9 @@ def run_scan_with_settings(
     media_type, items, tracker,
     show_id_map=None,
     rating_source=0,
-    plot_source=0,
-    default_source=0,
+    text_source_order=0,
+    imdb_ready=None,
+    language="en-US",
     rate_limit=0.0,
     refetch_schedule="7,30,90",
     stale_threshold_days=365,
@@ -203,13 +274,13 @@ def run_scan_with_settings(
     return run_scan(
         media_type=media_type,
         tracker=tracker,
-        source_config={"sources": [], "default_language": "en-US"},
+        source_config={"sources": [], "default_language": language},
         enabled_fields=_ALL_FIELDS if enabled_fields is None else enabled_fields,
         tmdb_api_key=TMDB_KEY,
         settings=_default_settings(
             rating_source=rating_source,
-            plot_source=plot_source,
-            default_source=default_source,
+            text_source_order=text_source_order,
+            imdb_ready=_imdb_ready() if imdb_ready is None else imdb_ready,
             rate_limit=rate_limit,
             refetch_schedule=refetch_schedule,
             stale_threshold_days=stale_threshold_days,
@@ -218,6 +289,17 @@ def run_scan_with_settings(
         show_id_map=show_id_map,
         reset=reset,
     )
+
+
+def find_by_title(method, key, title, props):
+    # type: (str, str, str, List[str]) -> Optional[Dict[str, Any]]
+    """First library item of `method` whose title is `title`, or None."""
+    result = rpc(method, {
+        "properties": props,
+        "filter": {"field": "title", "operator": "is", "value": title},
+    })
+    found = result.get(key) or []
+    return found[0] if found else None
 
 
 class LogCapture:
@@ -323,7 +405,7 @@ def test_1_movie_rating_backfill(t):
             "got '{}'".format(whale.get("title")))
     t.check("Whale found with rating", whale["rating"] is not None)
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_movie(353)
     stats = run_targeted_scan(MOVIE, [item], tracker)
@@ -356,7 +438,7 @@ def test_2_movie_tagline_no_tmdb_data(t):
     t.check("movie found", "All Quiet" in movie.get("title", ""))
     t.check("tagline already empty", movie.get("tagline", "") == "")
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_movie(8)
     stats = run_targeted_scan(MOVIE, [item], tracker)
@@ -393,10 +475,10 @@ def test_3_episode_title_replacement(t):
     t.check("title set to placeholder", cleared["title"] == "Episode 2")
 
     # Scan with show_id_map
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_episode(2)
-    show_map = {"1923": "157744"}
+    show_map = {item["tvshowid"]: "157744"}
     stats = run_targeted_scan(EPISODE, [item], tracker, show_id_map=show_map)
     t.check("processed", stats["processed"] >= 1)
     t.check("updated", stats["updated"] >= 1)
@@ -431,10 +513,10 @@ def test_4_episode_title_not_replaced(t):
     t.check("title is placeholder", ep["title"] == "Episode 1",
             "got '{}'".format(ep["title"]))
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_episode(1723)
-    show_map = {"Marcella": "66023"}
+    show_map = {item["tvshowid"]: "66023"}
     run_targeted_scan(EPISODE, [item], tracker, show_id_map=show_map)
 
     after = get_episode(1723)
@@ -465,7 +547,7 @@ def test_5_old_content_final_after_one_fetch(t):
     item = get_movie(50)
     item["premiered"] = "2000-01-01"
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
 
     # Scan 1: first encounter, fetch_count goes to 1
@@ -533,7 +615,7 @@ def test_6_young_content_scheduled(t):
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     item["premiered"] = yesterday
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     identity_stranger = compute_identity(item, MOVIE)
 
@@ -578,18 +660,13 @@ def test_7_transient_failure_no_advance(t):
 
     import resources.lib.engine.scan as scan_mod
     orig_tmdb = scan_mod.tmdb_fetch_movie
-    orig_imdb = scan_mod.imdb_fetch_movie
 
     def raising_tmdb(*a, **kw):
         raise TransientProviderError("simulated transient")
 
-    def raising_imdb(*a, **kw):
-        raise TransientProviderError("simulated transient")
-
     scan_mod.tmdb_fetch_movie = raising_tmdb
-    scan_mod.imdb_fetch_movie = raising_imdb
     try:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
         stats = run_targeted_scan(MOVIE, [item], tracker)
 
@@ -607,7 +684,6 @@ def test_7_transient_failure_no_advance(t):
         tracker.close()
     finally:
         scan_mod.tmdb_fetch_movie = orig_tmdb
-        scan_mod.imdb_fetch_movie = orig_imdb
 
 
 # ---------------------------------------------------------------------------
@@ -628,7 +704,7 @@ def test_8_tvdb_only_resolve_id(t):
     t.check("has tvdb", "tvdb" in ids)
     t.check("no tmdb", "tmdb" not in ids or not ids.get("tmdb"))
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_tvshow(410)
     stats = run_targeted_scan(TVSHOW, [item], tracker)
@@ -664,7 +740,7 @@ def test_9_bogus_ids_graceful_skip(t):
     ids = show.get("uniqueid", {})
     t.check("has None string IDs", ids.get("imdb") == "None" or ids.get("tvdb") == "None")
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_tvshow(421)
     stats = run_targeted_scan(TVSHOW, [item], tracker)
@@ -694,7 +770,7 @@ def test_10_logging_completeness(t):
 
     xbmc.log = capture_log
     try:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
         # Use Whale (zero rating) to force a TMDB call
         item = get_movie(353)
@@ -733,304 +809,266 @@ def test_10_logging_completeness(t):
 
 
 # ===========================================================================
-# Group A: IMDb Provider (tests 11-14)
+# Group A: Providers (tests 11-14)
+# ===========================================================================
+
+_BUURMAN_TVDB = "80767"
+
+
+# ---------------------------------------------------------------------------
+# Test 11: TVDB series verification (Buurman en Buurman)
+# ---------------------------------------------------------------------------
+
+def test_11_tvdb_series_verification(t):
+    # type: (TestResult) -> None
+    """TVDB's "Pat a Mat" carries the Dutch title the library uses.
+
+    The library holds this show's TVDB id as an untyped "unknown" uniqueid;
+    the scan accepts it only when one of the series' names matches.
+    """
+    from resources.lib.engine.idverify import show_matches
+    from resources.lib.providers.tvdb import fetch_series
+
+    print("\n--- Test 11: TVDB series verification (tvdb:{}) ---".format(_BUURMAN_TVDB))
+
+    series = fetch_series(_BUURMAN_TVDB, "nld")
+    t.check("fetch returned data", series is not None)
+    if series is None:
+        return
+    t.check("Dutch name is Buurman en Buurman",
+            series["name"] == "Buurman en Buurman", "got {!r}".format(series["name"]))
+    t.check("Kodi title matches a series name",
+            show_matches("Buurman en Buurman", series["names"], 1976, series["year"]),
+            "names={} year={}".format(series["names"], series["year"]))
+    t.check("an unrelated title does not match",
+            not show_matches("Bluey", series["names"]))
+
+
+# ---------------------------------------------------------------------------
+# Test 12: TVDB Dutch episode list covers the library's unknown ids
+# ---------------------------------------------------------------------------
+
+def test_12_tvdb_episode_list(t):
+    # type: (TestResult) -> None
+    """Every untyped episode id of Buurman en Buurman is a TVDB episode id."""
+    from resources.lib.engine.textrules import is_placeholder_title
+    from resources.lib.providers.tvdb import fetch_series_episodes
+
+    print("\n--- Test 12: TVDB episode list (tvdb:{}, nld) ---".format(_BUURMAN_TVDB))
+
+    show = find_by_title("VideoLibrary.GetTVShows", "tvshows", "Buurman en Buurman",
+                         ["title", "uniqueid"])
+    t.check("show in library", show is not None)
+    if show is None:
+        return
+    eps = rpc("VideoLibrary.GetEpisodes", {
+        "tvshowid": show["tvshowid"], "properties": ["uniqueid", "title"],
+    }).get("episodes") or []
+    unknown = [e["uniqueid"]["unknown"] for e in eps if (e.get("uniqueid") or {}).get("unknown")]
+    t.check("library episodes carry unknown ids", len(unknown) > 0,
+            "{} episodes, {} unknown ids".format(len(eps), len(unknown)))
+
+    listed = fetch_series_episodes(_BUURMAN_TVDB, "nld")
+    t.check("episode list returned", bool(listed))
+    if not listed:
+        return
+    missing = [u for u in unknown if u not in listed]
+    t.check("nearly every unknown id is in the TVDB list", len(missing) * 10 <= len(unknown),
+            "{} of {} missing, e.g. {}".format(len(missing), len(unknown), missing[:5]))
+    if missing:
+        print("    INFO: ids not in the list (the scan does not use them): {}".format(missing[:10]))
+    placeholders = [v["title"] for v in listed.values() if is_placeholder_title(v["title"])]
+    t.check("TVDB Dutch titles are not placeholders", not placeholders,
+            "e.g. {}".format(placeholders[:5]))
+
+
+# ---------------------------------------------------------------------------
+# Test 13: TMDB placeholder titles are recognised
+# ---------------------------------------------------------------------------
+
+def test_13_tmdb_placeholder_titles(t):
+    # type: (TestResult) -> None
+    """TMDB answers "Aflevering N" for an untranslated Dutch episode title."""
+    from resources.lib.engine.textrules import is_placeholder_title
+    from resources.lib.providers.tmdb import fetch_season
+
+    print("\n--- Test 13: TMDB placeholder titles (Dutch shows, nl-NL) ---")
+
+    shows = rpc("VideoLibrary.GetTVShows", {"properties": ["title", "uniqueid", "file"]}).get("tvshows") or []
+    dutch = [s for s in shows
+             if ("/TVSeries/NL/" in s.get("file", "") or "/Kids/TV/" in s.get("file", ""))
+             and (s.get("uniqueid") or {}).get("tmdb")]
+    t.check("Dutch shows with a tmdb id in library", bool(dutch))
+    generic, checked = [], 0
+    for show in dutch[:15]:
+        season = fetch_season(show["uniqueid"]["tmdb"], 1, TMDB_KEY, "nl-NL") or []
+        checked += len(season)
+        generic += [e.get("title") or "" for e in season
+                    if (e.get("title") or "").lower().startswith(("aflevering", "episode"))]
+    t.check("every generic title is a placeholder",
+            all(is_placeholder_title(x) for x in generic), "titles={}".format(generic[:5]))
+    t.check("real titles are not placeholders",
+            not is_placeholder_title("Aflevering met de buren") and not is_placeholder_title("Episode Seven Revisited"))
+    print("    INFO: {} of {} nl-NL season-1 titles are generic".format(len(generic), checked))
+
+
+# ---------------------------------------------------------------------------
+# Test 14: TMDB cross-reference from a TVDB episode id
+# ---------------------------------------------------------------------------
+
+def test_14_tmdb_find_by_tvdb(t):
+    # type: (TestResult) -> None
+    """/find with a TVDB episode id returns the same TMDB episode Kodi has."""
+    from resources.lib.providers.tmdb import find_episode_by_tvdb
+
+    print("\n--- Test 14: TMDB /find by TVDB episode id ---")
+
+    eps = rpc("VideoLibrary.GetEpisodes", {
+        "properties": ["uniqueid", "season", "episode", "showtitle"],
+        "limits": {"start": 0, "end": 400},
+    }).get("episodes") or []
+    both = [e for e in eps
+            if (e.get("uniqueid") or {}).get("tvdb") and (e.get("uniqueid") or {}).get("tmdb")]
+    t.check("library has an episode with tvdb and tmdb ids", bool(both))
+    if not both:
+        return
+    ep = both[0]
+    found = find_episode_by_tvdb(TMDB_KEY, ep["uniqueid"]["tvdb"])
+    t.check("TMDB found the episode", found is not None,
+            "{} S{}E{} tvdb={}".format(ep["showtitle"], ep["season"], ep["episode"],
+                                      ep["uniqueid"]["tvdb"]))
+    if found is None:
+        return
+    t.check("same TMDB episode id", found["tmdb_id"] == ep["uniqueid"]["tmdb"],
+            "found {} kodi {}".format(found["tmdb_id"], ep["uniqueid"]["tmdb"]))
+    t.check("same season/episode numbers",
+            (found["season"], found["episode"]) == (ep["season"], ep["episode"]),
+            "found {}".format(found))
+
+
+# ===========================================================================
+# Group B: Ratings and text sources (tests 15-17)
 # ===========================================================================
 
 
 # ---------------------------------------------------------------------------
-# Test 11: IMDb movie fetch (The Matrix)
+# Test 15: Movie plot from TMDB
 # ---------------------------------------------------------------------------
 
-def test_11_imdb_movie_fetch(t):
+def test_15_movie_plot_from_tmdb(t):
     # type: (TestResult) -> None
-    """Fetch The Matrix from imdbapi.dev, verify all fields parsed."""
-    from resources.lib.providers.imdbapi import fetch_movie
-
-    print("\n--- Test 11: IMDb movie fetch (The Matrix, tt0133093) ---")
-
-    result = fetch_movie("tt0133093")
-    t.check("fetch returned data", result is not None)
-    if result is None:
-        return
-
-    t.check("rating ~8.7", 8.0 <= result["rating"] <= 9.5,
-            "got {}".format(result["rating"]))
-    t.check("votes > 2M", result["votes"] > 2000000,
-            "got {}".format(result["votes"]))
-    t.check("plot non-empty", len(result.get("plot", "")) > 20)
-    t.check("directors has Lana Wachowski",
-            "Lana Wachowski" in result.get("directors", []),
-            "got {}".format(result.get("directors")))
-    t.check("directors has Lilly Wachowski",
-            "Lilly Wachowski" in result.get("directors", []))
-    t.check("writers has Lilly Wachowski",
-            "Lilly Wachowski" in result.get("writers", []),
-            "got {}".format(result.get("writers")))
-    t.check("genres has Action", "Action" in result.get("genres", []),
-            "got {}".format(result.get("genres")))
-    t.check("genres has Sci-Fi", "Sci-Fi" in result.get("genres", []))
-    t.check("countries has United States",
-            "United States" in result.get("countries", []),
-            "got {}".format(result.get("countries")))
-    t.check("runtime is 136", result.get("runtime") == 136,
-            "got {}".format(result.get("runtime")))
-    # Note: metacritic field is not yet written to Kodi (no supported slot)
-    # so we only verify the provider returns a numeric value if present at all.
-
-
-# ---------------------------------------------------------------------------
-# Test 12: IMDb episode direct fetch (Bluey S01E01)
-# ---------------------------------------------------------------------------
-
-def test_12_imdb_episode_fetch(t):
-    # type: (TestResult) -> None
-    """Fetch Bluey S01E01 directly by IMDB ID."""
-    from resources.lib.providers.imdbapi import fetch_episode
-
-    print("\n--- Test 12: IMDb episode fetch (Bluey S01E01, tt8865002) ---")
-
-    result = fetch_episode("tt8865002")
-    t.check("fetch returned data", result is not None)
-    if result is None:
-        return
-
-    t.check("title is Magic Xylophone", result.get("title") == "Magic Xylophone",
-            "got '{}'".format(result.get("title")))
-    t.check("rating > 0", result.get("rating", 0) > 0,
-            "got {}".format(result.get("rating")))
-    t.check("plot non-empty", len(result.get("plot", "")) > 10)
-    t.check("directors non-empty", len(result.get("directors", [])) > 0,
-            "got {}".format(result.get("directors")))
-    t.check("runtime > 0", (result.get("runtime") or 0) > 0,
-            "got {}".format(result.get("runtime")))
-    t.check("no firstaired key", "firstaired" not in result)
-
-
-# ---------------------------------------------------------------------------
-# Test 13: IMDb season fetch with pagination (Bluey S01, 52 eps)
-# ---------------------------------------------------------------------------
-
-def test_13_imdb_season_pagination(t):
-    # type: (TestResult) -> None
-    """Fetch Bluey S01 (52 episodes), verify auto-pagination."""
-    from resources.lib.providers.imdbapi import fetch_season
-
-    print("\n--- Test 13: IMDb season pagination (Bluey S01, tt7678620) ---")
-
-    result = fetch_season("tt7678620", 1)
-    t.check("fetch returned data", result is not None)
-    if result is None:
-        return
-
-    t.check("got 52 episodes", len(result) == 52,
-            "got {}".format(len(result)))
-    t.check("first ep is tt8865002", result[0].get("imdb_id") == "tt8865002",
-            "got {}".format(result[0].get("imdb_id")))
-
-    missing_fields = []
-    for i, ep in enumerate(result):
-        for field in ("imdb_id", "title", "rating", "votes", "plot", "episode_number"):
-            if field not in ep:
-                missing_fields.append("ep{}: {}".format(i + 1, field))
-    t.check("all episodes have required fields", len(missing_fields) == 0,
-            "missing: {}".format(missing_fields[:5]))
-
-    ep_nums = [ep.get("episode_number", 0) for ep in result]
-    expected = list(range(1, 53))
-    t.check("episode numbers 1-52", ep_nums == expected,
-            "got {}".format(ep_nums[:5]))
-
-
-# ---------------------------------------------------------------------------
-# Test 14: IMDb certificates fetch (The Matrix)
-# ---------------------------------------------------------------------------
-
-def test_14_imdb_certificates(t):
-    # type: (TestResult) -> None
-    """Fetch certificates for The Matrix, verify multi-entry grouping."""
-    from resources.lib.providers.imdbapi import fetch_certificates
-
-    print("\n--- Test 14: IMDb certificates (The Matrix, tt0133093) ---")
-
-    result = fetch_certificates("tt0133093")
-    t.check("fetch returned data", result is not None)
-    if result is None:
-        return
-
-    t.check("NL present", "NL" in result, "countries: {}".format(list(result.keys())[:10]))
-    t.check("US present", "US" in result)
-    t.check("GB present", "GB" in result)
-
-    if "NL" in result:
-        nl = result["NL"]
-        t.check("NL has >= 2 entries", len(nl) >= 2,
-                "got {} entries".format(len(nl)))
-        ratings = [e.get("rating") for e in nl]
-        t.check("NL has 16", "16" in ratings, "got {}".format(ratings))
-        t.check("NL has 12", "12" in ratings, "got {}".format(ratings))
-
-    if "US" in result:
-        us = result["US"]
-        t.check("US has multiple entries", len(us) >= 2,
-                "got {} entries".format(len(us)))
-        for entry in us:
-            t.check("US entry has rating", isinstance(entry.get("rating"), str))
-            t.check("US entry has attributes list",
-                    isinstance(entry.get("attributes"), list))
-            break
-
-
-# ===========================================================================
-# Group B: Source Priority Resolution (tests 15-17)
-# ===========================================================================
-
-
-# ---------------------------------------------------------------------------
-# Test 15: Source priority: Prefer TMDB (default)
-# ---------------------------------------------------------------------------
-
-def test_15_prefer_tmdb(t):
-    # type: (TestResult) -> None
-    """Scan movie with Prefer TMDB for plot, verify TMDB plot written."""
+    """An emptied movie plot is refilled from TMDB and recorded as such."""
     from resources.lib.data.media_types import MOVIE
-    from resources.lib.providers.imdbapi import fetch_movie as imdb_fetch
     from resources.lib.providers.tmdb import fetch_movie as tmdb_fetch
 
-    print("\n--- Test 15: Prefer TMDB (Air, id:6, tmdb:964980, imdb:tt16419074) ---")
+    print("\n--- Test 15: Movie plot from TMDB (Air) ---")
 
-    air = get_movie(6)
+    found = find_by_title("VideoLibrary.GetMovies", "movies", "Air", ["title"])
+    t.check("movie in library", found is not None)
+    if found is None:
+        return
+    movie_id = found["movieid"]
+    air = get_movie(movie_id)
     orig_plot = air["plot"]
-
-    tmdb_data = tmdb_fetch("964980", TMDB_KEY)
-    imdb_data = imdb_fetch("tt16419074")
+    tmdb_id = (air.get("uniqueid") or {}).get("tmdb")
+    tmdb_data = tmdb_fetch(tmdb_id, TMDB_KEY) if tmdb_id else None
     t.check("TMDB has data", tmdb_data is not None)
-    t.check("IMDb has data", imdb_data is not None)
-    if not tmdb_data or not imdb_data:
+    if not tmdb_data:
         return
 
-    tmdb_plot = tmdb_data["plot"]
-    imdb_plot = imdb_data["plot"]
-    t.check("plots differ", tmdb_plot != imdb_plot,
-            "tmdb='{}...', imdb='{}...'".format(tmdb_plot[:40], imdb_plot[:40]))
-
-    set_movie(6, plot="")
+    set_movie(movie_id, plot="")
     try:
-        tmp = tempfile.mkdtemp()
-        tracker = make_tracker(tmp)
-        item = get_movie(6)
-        run_scan_with_settings(MOVIE, [item], tracker, plot_source=0)
+        tracker = make_tracker(tempfile.mkdtemp(dir=_SCRATCH))
+        item = get_movie(movie_id)
+        run_scan_with_settings(MOVIE, [item], tracker)
 
-        after = get_movie(6)
-        t.check("plot matches TMDB",
-                after["plot"] == tmdb_plot,
-                "written='{}...', tmdb='{}...'".format(
-                    after["plot"][:40], tmdb_plot[:40]))
-
+        after = get_movie(movie_id)
+        t.check("plot matches TMDB (as Kodi stores it)",
+                after["plot"] == tmdb_data["plot"].strip(),
+                "written='{}...', tmdb='{}...'".format(after["plot"][:40], tmdb_data["plot"][:40]))
         field = tracker.get_field_status("movie", compute_identity(item, MOVIE), "plot")
         t.check("tracker source is tmdb",
                 field is not None and field.get("source") == "tmdb",
                 "got {}".format(field.get("source") if field else "None"))
-
         tracker.close()
     finally:
-        set_movie(6, plot=orig_plot)
+        set_movie(movie_id, plot=orig_plot)
 
 
 # ---------------------------------------------------------------------------
-# Test 16: Source priority: Prefer IMDb
+# Test 16: IMDb ratings module
 # ---------------------------------------------------------------------------
 
-def test_16_prefer_imdb(t):
+def test_16_imdb_ratings_module(t):
     # type: (TestResult) -> None
-    """Scan movie with Prefer IMDb for plot, verify IMDb plot written."""
-    from resources.lib.data.media_types import MOVIE
-    from resources.lib.providers.imdbapi import fetch_movie as imdb_fetch
-    from resources.lib.providers.tmdb import fetch_movie as tmdb_fetch
+    """The ratings store loads and answers known and unknown titles."""
+    from resources.lib.providers import imdb_ratings
 
-    print("\n--- Test 16: Prefer IMDb (Air, id:6) ---")
+    print("\n--- Test 16: IMDb ratings module (The Matrix, tt0133093) ---")
 
-    air = get_movie(6)
-    orig_plot = air["plot"]
-
-    tmdb_data = tmdb_fetch("964980", TMDB_KEY)
-    imdb_data = imdb_fetch("tt16419074")
-    if not tmdb_data or not imdb_data:
-        t.check("both providers have data", False)
+    if not _IMDBRATINGS_LIB:
+        t.check("IMDBRATINGS_LIB set", False, "point it at script.module.imdbratings/lib")
         return
-
-    imdb_plot = imdb_data["plot"]
-
-    set_movie(6, plot="")
-    try:
-        tmp = tempfile.mkdtemp()
-        tracker = make_tracker(tmp)
-        item = get_movie(6)
-        run_scan_with_settings(MOVIE, [item], tracker, plot_source=1)
-
-        after = get_movie(6)
-        t.check("plot matches IMDb",
-                after["plot"] == imdb_plot,
-                "written='{}...', imdb='{}...'".format(
-                    after["plot"][:40], imdb_plot[:40]))
-
-        field = tracker.get_field_status("movie", compute_identity(item, MOVIE), "plot")
-        t.check("tracker source is imdb",
-                field is not None and field.get("source") == "imdb",
-                "got {}".format(field.get("source") if field else "None"))
-
-        tracker.close()
-    finally:
-        set_movie(6, plot=orig_plot)
+    ready = imdb_ratings.prepare(lambda: False)
+    t.check("store loaded", ready)
+    if not ready:
+        return
+    matrix = imdb_ratings.lookup("tt0133093")
+    t.check("The Matrix has a rating", matrix is not None)
+    if matrix:
+        t.check("rating between 8 and 9.5", 8.0 <= matrix[0] <= 9.5, "got {}".format(matrix))
+        t.check("votes above 1M", matrix[1] > 1000000, "got {}".format(matrix))
+    t.check("unknown title answers None (absent, not an error)",
+            imdb_ratings.lookup("tt0000000") is None)
 
 
 # ---------------------------------------------------------------------------
-# Test 17: Source priority: TMDB only (no IMDb calls)
+# Test 17: rating_source TMDB only never consults IMDb
 # ---------------------------------------------------------------------------
 
 def test_17_tmdb_only(t):
     # type: (TestResult) -> None
-    """TMDB-only mode should not call IMDb at all."""
+    """TMDB-only ratings make no IMDb lookup; prefer-IMDb does."""
     from resources.lib.data.media_types import MOVIE
-
-    print("\n--- Test 17: TMDB only mode (Air, id:6) ---")
-
-    air = get_movie(6)
-    orig_plot = air["plot"]
-
-    imdb_call_count = [0]
     import resources.lib.engine.scan as scan_mod
-    orig_imdb = scan_mod.imdb_fetch_movie
 
-    def counting_imdb(*args, **kwargs):
-        imdb_call_count[0] += 1
-        return orig_imdb(*args, **kwargs)
+    print("\n--- Test 17: rating_source TMDB only vs prefer IMDb (Air) ---")
 
-    set_movie(6, plot="")
-    scan_mod.imdb_fetch_movie = counting_imdb
+    found = find_by_title("VideoLibrary.GetMovies", "movies", "Air", ["title"])
+    if found is None:
+        t.check("movie in library", False)
+        return
+    movie_id = found["movieid"]
+    calls = [0]
+    orig_lookup = scan_mod.imdb_rating_lookup
+
+    def counting(*args, **kwargs):
+        calls[0] += 1
+        return orig_lookup(*args, **kwargs)
+
+    scan_mod.imdb_rating_lookup = counting
     try:
-        tmp = tempfile.mkdtemp()
-        tracker = make_tracker(tmp)
-        item = get_movie(6)
-        # rating_source=2 (TMDB_ONLY), plot_source=2, default_source=2
-        stats = run_scan_with_settings(MOVIE, [item], tracker,
-                                       rating_source=2, plot_source=2, default_source=2)
-
-        t.check("no IMDb calls", imdb_call_count[0] == 0,
-                "got {} calls".format(imdb_call_count[0]))
+        tracker = make_tracker(tempfile.mkdtemp(dir=_SCRATCH))
+        stats = run_scan_with_settings(MOVIE, [get_movie(movie_id)], tracker,
+                                       rating_source=2, imdb_ready=True,
+                                       enabled_fields=frozenset({"rating"}))
+        t.check("TMDB only: no IMDb lookups", calls[0] == 0, "got {}".format(calls[0]))
         t.check("item processed", stats["processed"] >= 1)
-
-        after = get_movie(6)
-        t.check("plot written", len(after["plot"]) > 20,
-                "got '{}'".format(after["plot"][:40]))
-
         tracker.close()
+
+        if _IMDBRATINGS_LIB:
+            tracker = make_tracker(tempfile.mkdtemp(dir=_SCRATCH))
+            run_scan_with_settings(MOVIE, [get_movie(movie_id)], tracker,
+                                   rating_source=1, imdb_ready=True,
+                                   enabled_fields=frozenset({"rating"}))
+            t.check("prefer IMDb: IMDb consulted", calls[0] >= 1, "got {}".format(calls[0]))
+            tracker.close()
     finally:
-        scan_mod.imdb_fetch_movie = orig_imdb
-        set_movie(6, plot=orig_plot)
+        scan_mod.imdb_rating_lookup = orig_lookup
 
 
 # ===========================================================================
-# Group C: Episode Matching Across Scrapers (tests 18-22)
+# Group C: Episode Matching Across Scrapers (tests 18, 20-22)
 # ===========================================================================
 
 
@@ -1050,10 +1088,10 @@ def test_18_tmdb_episode_matching(t):
 
     set_episode(2, plot="")
     try:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
         item = get_episode(2)
-        show_map = {"1923": "157744"}
+        show_map = {item["tvshowid"]: "157744"}
         stats = run_scan_with_settings(EPISODE, [item], tracker,
                                        show_id_map=show_map)
 
@@ -1071,69 +1109,21 @@ def test_18_tmdb_episode_matching(t):
 
 
 # ---------------------------------------------------------------------------
-# Test 19: TVDB-scraped episode (has imdb_id, no tmdb_id)
-# ---------------------------------------------------------------------------
-
-def test_19_tvdb_episode_imdb_fetch(t):
-    # type: (TestResult) -> None
-    """Episode with IMDB ID but no TMDB ID uses direct IMDb fetch."""
-    from resources.lib.data.media_types import EPISODE
-
-    print("\n--- Test 19: TVDB episode (Bluey S01E01, id:4311, imdb:tt8865002) ---")
-
-    ep = get_episode(4311)
-    t.check("episode found", ep.get("showtitle") == "Bluey (2018)",
-            "got '{}'".format(ep.get("showtitle")))
-    ids = ep.get("uniqueid", {})
-    t.check("has imdb", "imdb" in ids, "ids: {}".format(ids))
-    t.check("no tmdb", "tmdb" not in ids, "ids: {}".format(ids))
-
-    orig_plot = ep.get("plot", "")
-
-    set_episode(4311, plot="")
-    try:
-        tmp = tempfile.mkdtemp()
-        tracker = make_tracker(tmp)
-        item = get_episode(4311)
-        show_map = {"Bluey (2018)": "82728"}
-        stats = run_scan_with_settings(EPISODE, [item], tracker,
-                                       show_id_map=show_map)
-
-        t.check("processed", stats["processed"] >= 1)
-        t.check("updated", stats["updated"] >= 1,
-                "got updated={}".format(stats["updated"]))
-
-        after = get_episode(4311)
-        t.check("plot written", len(after.get("plot", "")) > 10,
-                "got '{}'".format(after.get("plot", "")[:40]))
-
-        field = tracker.get_field_status("episode",
-                                         compute_identity(item, EPISODE), "plot")
-        t.check("source is imdb",
-                field is not None and field.get("source") == "imdb",
-                "got {}".format(field.get("source") if field else "None"))
-
-        tracker.close()
-    finally:
-        set_episode(4311, plot=orig_plot)
-
-
-# ---------------------------------------------------------------------------
 # Test 20: TVDB-only episode (no imdb, no tmdb): skipped at episode level
 # ---------------------------------------------------------------------------
 
 def test_20_tvdb_only_episode_skipped(t):
     # type: (TestResult) -> None
-    """Episode with only TVDB ID is skipped because no usable ID is available.
+    """Episode with only a TVDB id, whose show is not resolved yet.
 
-    Under the maturity model an episode without imdb_id or tmdb_id cannot be
-    fetched, so it is always skipped (no fetch_count advance). There is no
-    exhaustion state; the item is re-evaluated every scan in case IDs are
-    enriched later.
+    A TVDB id is usable, so the episode is processed, but every provider step
+    needs the show's ids: without them the fields are transient, nothing is
+    written and fetch_count stays at 0, scan after scan, until the show is
+    resolved.
     """
     from resources.lib.data.media_types import EPISODE
 
-    print("\n--- Test 20: TVDB-only episode skipped (Transformers S01E01, id:6098) ---")
+    print("\n--- Test 20: TVDB-only episode, show unresolved (Transformers S01E01, id:6098) ---")
 
     ep = get_episode(6098)
     t.check("episode found", "Pilot" in ep.get("title", ""),
@@ -1146,14 +1136,14 @@ def test_20_tvdb_only_episode_skipped(t):
     title_key = "{} S{:02d}E{:02d}".format(
         ep.get("showtitle", ""), ep.get("season", 0), ep.get("episode", 0))
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_episode(6098)
 
-    # Scan 1: no usable ID, should be skipped
+    # Scan 1: processed, every field transient
     stats = run_scan_with_settings(EPISODE, [item], tracker, show_id_map={})
-    t.check("skipped (no usable ID)", stats["skipped"] >= 1,
-            "processed={} skipped={}".format(stats["processed"], stats["skipped"]))
+    t.check("processed, nothing written", stats["processed"] >= 1 and stats["updated"] == 0,
+            "processed={} updated={}".format(stats["processed"], stats["updated"]))
 
     after = get_episode(6098)
     t.check("rating unchanged", after["rating"] == orig_rating,
@@ -1163,7 +1153,8 @@ def test_20_tvdb_only_episode_skipped(t):
     tracker.start_new_cycle()
     item = get_episode(6098)
     stats2 = run_scan_with_settings(EPISODE, [item], tracker, show_id_map={})
-    t.check("still skipped on second scan", stats2["skipped"] >= 1)
+    t.check("second scan: still nothing written", stats2["updated"] == 0,
+            "updated={}".format(stats2["updated"]))
 
     # No fetch_count rows should exist (item was never fetched)
     tracker_item = tracker.get_item("episode", title_key)
@@ -1195,7 +1186,7 @@ def test_21_tvmaze_only_episode(t):
     t.check("has tvmaze only", "tvmaze" in ids and "imdb" not in ids and "tmdb" not in ids,
             "ids: {}".format(ids))
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_episode(6190)
     stats = run_scan_with_settings(EPISODE, [item], tracker, show_id_map={})
@@ -1224,7 +1215,7 @@ def test_22_nfo_episode_skip(t):
     has_real_id = any(ids.get(k) for k in ("imdb", "tmdb", "tvdb", "tvmaze"))
     t.check("no real IDs", not has_real_id, "ids: {}".format(ids))
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     item = get_episode(5046)
     stats = run_scan_with_settings(EPISODE, [item], tracker, show_id_map={})
@@ -1259,7 +1250,7 @@ def test_23_idempotent_rescan(t):
 
     set_movie(6, plot="")
     try:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
         item = get_movie(6)
 
@@ -1331,7 +1322,7 @@ def test_24_selective_field_update(t):
 
     set_movie(6, rating=0.0, votes="0")
     try:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
         item = get_movie(6)
         run_scan_with_settings(MOVIE, [item], tracker)
@@ -1372,41 +1363,33 @@ def test_24_selective_field_update(t):
 
 def test_25_both_providers_none_no_error(t):
     # type: (TestResult) -> None
-    """When both providers return None (clean 404, no data), this is a valid
-    sample: fetch_count advances and errors are NOT incremented.
+    """When TMDB returns None (clean 404, no data), this is a valid sample:
+    fetch_count advances and errors are NOT incremented.
     """
     from resources.lib.data.media_types import MOVIE
 
-    print("\n--- Test 25: Both providers None, fetch_count advances (Air, id:6) ---")
+    print("\n--- Test 25: TMDB None, fetch_count advances (Air, id:6) ---")
 
     air = get_movie(6)
     orig_plot = air["plot"]
 
     import resources.lib.engine.scan as scan_mod
     orig_tmdb = scan_mod.tmdb_fetch_movie
-    orig_imdb = scan_mod.imdb_fetch_movie
-    call_count = [0]
 
     def null_tmdb(*a, **kw):
-        call_count[0] += 1
-        return None
-
-    def null_imdb(*a, **kw):
-        call_count[0] += 1
         return None
 
     set_movie(6, plot="")
     scan_mod.tmdb_fetch_movie = null_tmdb
-    scan_mod.imdb_fetch_movie = null_imdb
     try:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
         item = get_movie(6)
 
         stats = run_scan_with_settings(MOVIE, [item], tracker)
 
-        # Both providers returned None cleanly: fetch_clean is True, so
-        # fetch_count must advance to 1 (the sample happened, provider just had nothing)
+        # TMDB returned None cleanly: the sample happened, the provider just
+        # had nothing, so fetch_count advances to 1
         fs = tracker.get_field_status("movie", compute_identity(item, MOVIE), "plot")
         count = (fs.get("fetch_count") or 0) if fs else 0
         t.check("fetch_count advanced (clean no-data is a valid sample)",
@@ -1421,7 +1404,6 @@ def test_25_both_providers_none_no_error(t):
         tracker.close()
     finally:
         scan_mod.tmdb_fetch_movie = orig_tmdb
-        scan_mod.imdb_fetch_movie = orig_imdb
         set_movie(6, plot=orig_plot)
 
 
@@ -1449,7 +1431,7 @@ def test_26_manual_reset_rebaselines(t):
 
     set_movie(6, plot="")
     try:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
         identity_air_26 = compute_identity(item, MOVIE)
 
@@ -1522,7 +1504,7 @@ def test_27_provider_logs(t):
     set_movie(6, plot="")
     try:
         with LogCapture() as logs:
-            tmp = tempfile.mkdtemp()
+            tmp = tempfile.mkdtemp(dir=_SCRATCH)
             tracker = make_tracker(tmp)
             item = get_movie(6)
             run_scan_with_settings(MOVIE, [item], tracker)
@@ -1564,7 +1546,7 @@ def test_28_scan_lifecycle_logs(t):
     set_movie(6, plot="")
     try:
         with LogCapture() as logs:
-            tmp = tempfile.mkdtemp()
+            tmp = tempfile.mkdtemp(dir=_SCRATCH)
             tracker = make_tracker(tmp)
             item = get_movie(6)
             run_scan_with_settings(MOVIE, [item], tracker)
@@ -1601,7 +1583,7 @@ def test_28_scan_lifecycle_logs(t):
 
 def test_29_episode_provider_logs(t):
     # type: (TestResult) -> None
-    """IMDb episode fetch logs have correct event and fields."""
+    """The TMDB season fetch behind an episode logs its event and fields."""
     from resources.lib.data.media_types import EPISODE
 
     print("\n--- Test 29: Episode provider logs (Bluey S01E01) ---")
@@ -1612,21 +1594,21 @@ def test_29_episode_provider_logs(t):
     set_episode(4311, plot="")
     try:
         with LogCapture() as logs:
-            tmp = tempfile.mkdtemp()
+            tmp = tempfile.mkdtemp(dir=_SCRATCH)
             tracker = make_tracker(tmp)
             item = get_episode(4311)
-            show_map = {"Bluey (2018)": "82728"}
+            show_map = {item["tvshowid"]: "82728"}
             run_scan_with_settings(EPISODE, [item], tracker,
                                    show_id_map=show_map)
             tracker.close()
 
-        imdb_lines = logs.find("event=imdb.episode")
-        t.check("has imdb.episode log", len(imdb_lines) >= 1)
-        if imdb_lines:
-            line = imdb_lines[0]
-            t.check("has imdb_id=tt8865002", "imdb_id=tt8865002" in line,
-                    "line: {}".format(line[:100]))
-            t.check("has title", "title=" in line)
+        season_lines = logs.find("event=tmdb.season")
+        t.check("has tmdb.season log", len(season_lines) >= 1)
+        if season_lines:
+            line = season_lines[0]
+            t.check("has tmdb_id=82728", "tmdb_id=82728" in line,
+                    "line: {}".format(line[:120]))
+            t.check("has episodes count", "episodes=" in line)
     finally:
         set_episode(4311, plot=orig_plot)
 
@@ -1648,7 +1630,7 @@ def test_30_log_consistency(t):
     set_movie(6, plot="")
     try:
         with LogCapture() as logs:
-            tmp = tempfile.mkdtemp()
+            tmp = tempfile.mkdtemp(dir=_SCRATCH)
             tracker = make_tracker(tmp)
             item = get_movie(6)
             run_scan_with_settings(MOVIE, [item], tracker)
@@ -1692,70 +1674,8 @@ def test_30_log_consistency(t):
 
 
 # ===========================================================================
-# Group F: Edge Cases (tests 31-33)
+# Group F: Edge Cases (tests 32-33)
 # ===========================================================================
-
-
-# ---------------------------------------------------------------------------
-# Test 31: Episode with both providers (data merge)
-# ---------------------------------------------------------------------------
-
-def test_31_episode_dual_provider(t):
-    # type: (TestResult) -> None
-    """Episode with both IDs: rating from IMDb, plot from TMDB."""
-    from resources.lib.data.media_types import EPISODE
-    from resources.lib.providers.imdbapi import fetch_episode as imdb_fetch_ep
-    from resources.lib.providers.tmdb import fetch_season as tmdb_fetch_season_fn
-
-    print("\n--- Test 31: Dual provider episode (1923 S01E01, id:1) ---")
-
-    ep = get_episode(1)
-    orig_plot = ep["plot"]
-
-    imdb_data = imdb_fetch_ep("tt18469978")
-    tmdb_season = tmdb_fetch_season_fn("157744", 1, TMDB_KEY)
-    t.check("IMDb has data", imdb_data is not None)
-    t.check("TMDB season has data", tmdb_season is not None)
-
-    tmdb_ep = None
-    if tmdb_season:
-        for ep_data in tmdb_season:
-            if ep_data.get("tmdb_id") == "4014249":
-                tmdb_ep = ep_data
-                break
-    t.check("TMDB episode found by ID", tmdb_ep is not None)
-    if not imdb_data or not tmdb_ep:
-        return
-
-    tmdb_plot = tmdb_ep["plot"]
-    imdb_plot = imdb_data["plot"]
-    t.check("plots differ", tmdb_plot != imdb_plot,
-            "tmdb='{}...', imdb='{}...'".format(tmdb_plot[:40], imdb_plot[:40]))
-
-    set_episode(1, plot="")
-    try:
-        tmp = tempfile.mkdtemp()
-        tracker = make_tracker(tmp)
-        item = get_episode(1)
-        show_map = {"1923": "157744"}
-        run_scan_with_settings(EPISODE, [item], tracker,
-                               show_id_map=show_map,
-                               plot_source=0)
-
-        after = get_episode(1)
-        t.check("plot matches TMDB",
-                after["plot"] == tmdb_plot,
-                "written='{}...', tmdb='{}...'".format(
-                    after["plot"][:40], tmdb_plot[:40]))
-
-        p_field = tracker.get_field_status("episode", compute_identity(item, EPISODE), "plot")
-        t.check("plot source is tmdb",
-                p_field is not None and p_field.get("source") == "tmdb",
-                "got {}".format(p_field.get("source") if p_field else "None"))
-
-        tracker.close()
-    finally:
-        set_episode(1, plot=orig_plot)
 
 
 # ---------------------------------------------------------------------------
@@ -1764,7 +1684,11 @@ def test_31_episode_dual_provider(t):
 
 def test_32_show_id_map_mismatch(t):
     # type: (TestResult) -> None
-    """Wrong show_id_map key: TMDB path fails, IMDb path succeeds."""
+    """An episode whose show is missing from show_id_map is transient.
+
+    Without its show's TMDB id the episode cannot be looked up, which says
+    nothing about the episode: nothing is written and the clock stays put.
+    """
     from resources.lib.data.media_types import EPISODE
 
     print("\n--- Test 32: Show ID map mismatch (1923 S01E01, id:1) ---")
@@ -1772,31 +1696,25 @@ def test_32_show_id_map_mismatch(t):
     ep = get_episode(1)
     orig_plot = ep["plot"]
 
-    wrong_map = {"1923 WRONG": "157744"}
-
     set_episode(1, plot="")
     try:
-        tmp = tempfile.mkdtemp()
-        tracker = make_tracker(tmp)
+        tracker = make_tracker(tempfile.mkdtemp(dir=_SCRATCH))
         item = get_episode(1)
+        wrong_map = {item["tvshowid"] + 100000: "157744"}
         stats = run_scan_with_settings(EPISODE, [item], tracker,
-                                       show_id_map=wrong_map)
-
-        # The "No show TMDB ID" message is at DEBUG level, which only
-        # goes to file, not xbmc.log. We verify the TMDB path was
-        # skipped by checking that IMDb was the source (below).
+                                       show_id_map=wrong_map,
+                                       enabled_fields=frozenset({"plot"}))
 
         after = get_episode(1)
-        t.check("plot written via IMDb", len(after.get("plot", "")) > 10,
+        t.check("plot not written", after.get("plot", "") == "",
                 "got '{}'".format(after.get("plot", "")[:40]))
-        t.check("updated", stats["updated"] >= 1,
+        t.check("not counted as updated", stats["updated"] == 0,
                 "updated={}".format(stats["updated"]))
-
+        t.check("no error counted", stats["errors"] == 0,
+                "errors={}".format(stats["errors"]))
         field = tracker.get_field_status("episode", compute_identity(item, EPISODE), "plot")
-        t.check("source is imdb",
-                field is not None and field.get("source") == "imdb",
-                "got {}".format(field.get("source") if field else "None"))
-
+        count = (field.get("fetch_count") or 0) if field else 0
+        t.check("fetch_count not advanced", count == 0, "fetch_count={}".format(count))
         tracker.close()
     finally:
         set_episode(1, plot=orig_plot)
@@ -1823,7 +1741,7 @@ def test_33_skip_not_due(t):
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     item["premiered"] = yesterday
 
-    tmp = tempfile.mkdtemp()
+    tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     identity_burial_33 = compute_identity(item, MOVIE)
 
@@ -1831,8 +1749,13 @@ def test_33_skip_not_due(t):
     tracker.upsert_item("movie", identity_burial_33, title="Burial",
                         kodi_id=50, tmdb_id="1155875")
     tracker.commit()
+    # Stamp the fingerprint of the settings this scan uses; a row without one
+    # counts as sampled under other settings and is re-checked.
+    from resources.lib.engine.scan import settings_fingerprint
     tracker.record_field_fetch("movie", identity_burial_33, "plot",
-                               next_retry="2099-01-01")
+                               next_retry="2099-01-01",
+                               settings_fp=settings_fingerprint(
+                                   "plot", _default_settings(), "en-US", "movie"))
     tracker.commit()
 
     import resources.lib.engine.scan as scan_mod
@@ -1895,7 +1818,7 @@ def test_34_resume_interrupted_scan(t):
         movies.append(get_movie(mid))
 
     try:
-        tmp = tempfile.mkdtemp()
+        tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
 
         # Create a monitor that aborts after 1 item
@@ -1927,7 +1850,7 @@ def test_34_resume_interrupted_scan(t):
             source_config={"sources": [], "default_language": "en-US"},
             enabled_fields=frozenset({"plot"}),
             tmdb_api_key=TMDB_KEY,
-            settings=_default_settings(rate_limit=0.0, plot_source=0),
+            settings=_default_settings(rate_limit=0.0),
             monitor=AbortingMonitor(),
             items=movies,
         )
@@ -1954,7 +1877,7 @@ def test_34_resume_interrupted_scan(t):
             source_config={"sources": [], "default_language": "en-US"},
             enabled_fields=frozenset({"plot"}),
             tmdb_api_key=TMDB_KEY,
-            settings=_default_settings(rate_limit=0.0, plot_source=0),
+            settings=_default_settings(rate_limit=0.0),
             items=movies2,
         )
 
@@ -1982,12 +1905,12 @@ def test_34_resume_interrupted_scan(t):
 # ---------------------------------------------------------------------------
 
 GROUPS = {
-    "imdb": ("11", "12", "13", "14"),
+    "providers": ("11", "12", "13", "14"),
     "resolve": ("15", "16", "17"),
-    "episode": ("18", "19", "20", "21", "22"),
+    "episode": ("18", "20", "21", "22"),
     "lifecycle": ("23", "24", "25", "26"),
     "logging": ("27", "28", "29", "30"),
-    "edge": ("31", "32", "33"),
+    "edge": ("32", "33"),
     "resume": ("34",),
 }
 
@@ -2002,27 +1925,25 @@ ALL_TESTS = [
     ("8", "TVDB-only resolve_id", test_8_tvdb_only_resolve_id),
     ("9", "Bogus IDs graceful skip", test_9_bogus_ids_graceful_skip),
     ("10", "Logging completeness", test_10_logging_completeness),
-    ("11", "IMDb movie fetch", test_11_imdb_movie_fetch),
-    ("12", "IMDb episode fetch", test_12_imdb_episode_fetch),
-    ("13", "IMDb season pagination", test_13_imdb_season_pagination),
-    ("14", "IMDb certificates", test_14_imdb_certificates),
-    ("15", "Prefer TMDB", test_15_prefer_tmdb),
-    ("16", "Prefer IMDb", test_16_prefer_imdb),
-    ("17", "TMDB only mode", test_17_tmdb_only),
+    ("11", "TVDB series verification", test_11_tvdb_series_verification),
+    ("12", "TVDB episode list", test_12_tvdb_episode_list),
+    ("13", "TMDB placeholder titles", test_13_tmdb_placeholder_titles),
+    ("14", "TMDB find by TVDB id", test_14_tmdb_find_by_tvdb),
+    ("15", "Movie plot from TMDB", test_15_movie_plot_from_tmdb),
+    ("16", "IMDb ratings module", test_16_imdb_ratings_module),
+    ("17", "TMDB only ratings", test_17_tmdb_only),
     ("18", "TMDB episode matching", test_18_tmdb_episode_matching),
-    ("19", "TVDB episode IMDb fetch", test_19_tvdb_episode_imdb_fetch),
-    ("20", "TVDB-only episode skipped", test_20_tvdb_only_episode_skipped),
+    ("20", "TVDB-only episode, show unresolved", test_20_tvdb_only_episode_skipped),
     ("21", "TVmaze-only episode", test_21_tvmaze_only_episode),
     ("22", "NFO episode skip", test_22_nfo_episode_skip),
     ("23", "Idempotent re-scan / refresh-on-diff", test_23_idempotent_rescan),
     ("24", "Selective field update", test_24_selective_field_update),
-    ("25", "Both providers None, no error", test_25_both_providers_none_no_error),
+    ("25", "TMDB None, no error", test_25_both_providers_none_no_error),
     ("26", "Manual reset re-baselines", test_26_manual_reset_rebaselines),
     ("27", "Provider log events", test_27_provider_logs),
     ("28", "Scan lifecycle logs", test_28_scan_lifecycle_logs),
     ("29", "Episode provider logs", test_29_episode_provider_logs),
     ("30", "Log consistency", test_30_log_consistency),
-    ("31", "Episode dual provider", test_31_episode_dual_provider),
     ("32", "Show ID map mismatch", test_32_show_id_map_mismatch),
     ("33", "SKIP_NOT_DUE gate", test_33_skip_not_due),
     ("34", "Resume interrupted scan", test_34_resume_interrupted_scan),
@@ -2033,7 +1954,7 @@ def main():
     # type: () -> None
     print("MetaMender Integration Tests")
     print("Kodi: {}".format(KODI_URL))
-    print("TMDB: {}...".format(TMDB_KEY[:8]))
+    print("TMDB key: {}".format("set" if TMDB_KEY else "MISSING"))
 
     try:
         result = rpc("JSONRPC.Ping")

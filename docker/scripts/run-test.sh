@@ -7,10 +7,10 @@
 #   run-test.sh --log       # Dump the addon log (metamender.log)
 #   run-test.sh --kodi-log  # MetaMender entries from kodi.log
 #
-# --status is read-only. The default (trigger scan) runs the REAL addon service
-# inside the container and writes to the shared library: back up first
-# (setup.sh does this) and restore-db.sh afterwards. For surgical, no-side-effect
-# engine checks, prefer the host harness: ./scripts/verify.py
+# --status is read-only. The default (trigger scan) asks the add-on inside the
+# container to scan; on the headless image that scan stops at the scan lock (no
+# home window, see docker/README.md) and writes nothing. Full service runs use
+# the Flatpak Kodi; surgical engine checks use the host harness, verify.py.
 
 set -euo pipefail
 

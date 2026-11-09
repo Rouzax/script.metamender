@@ -4,7 +4,7 @@
 # What this does:
 #   1. Verifies the shared container is running
 #   2. Backs up the test MySQL databases (the addon writes to the shared library)
-#   3. Installs the script.module.requests dependency
+#   3. Installs the script.module.requests and script.module.imdbratings dependencies
 #   4. Symlinks the addon source into Kodi's addons directory
 #   5. Creates addon settings (TMDB key, debug logging, fast scan interval)
 #   6. Restarts Kodi so everything takes effect
@@ -15,10 +15,11 @@
 #   - MetaMender mounted at /addon-metamender (already in the shared compose)
 #
 # NOTE: MetaMender's cross-process lock (service/lock.py) uses xbmcgui.Window
-#   properties. Those are unreliable on the headless image. The SERVICE may not
-#   acquire its lock cleanly here. For surgical engine checks prefer the host
-#   harness: docker/scripts/verify.py (runs the real run_scan against this
-#   container over JSON-RPC, no in-container service needed).
+#   properties. The headless image has no home window, so the lock raises
+#   "Window id does not exist" and the in-container service never scans. Run
+#   the service in the Flatpak Kodi (see docker/README.md); use this container
+#   with the host harness, docker/scripts/verify.py, which runs the real
+#   run_scan against it over JSON-RPC.
 
 set -euo pipefail
 
@@ -60,11 +61,13 @@ echo "=== Step 2: Backup databases ==="
 "$KODI_HEADLESS_DIR/scripts/backup-db.sh"
 
 echo ""
-echo "=== Step 3: Install script.module.requests ==="
+echo "=== Step 3: Install dependencies ==="
 docker exec "$CONTAINER" install_addon "script.module.requests" || {
     echo "WARNING: install_addon failed. Attempting pip fallback..."
     docker exec "$CONTAINER" pip3 install requests 2>/dev/null || true
 }
+docker exec "$CONTAINER" install_addon "script.module.imdbratings" || \
+    echo "WARNING: install_addon script.module.imdbratings failed; IMDb ratings stay transient."
 
 echo ""
 echo "=== Step 4: Link addon source ==="
@@ -81,7 +84,7 @@ docker exec "$CONTAINER" mkdir -p "$ADDON_DATA"
 SETTINGS_XML="<settings version=\"1\">
     <setting id=\"tmdb_api_key\">${TMDB_API_KEY}</setting>
     <setting id=\"rating_source\">0</setting>
-    <setting id=\"plot_source\">0</setting>
+    <setting id=\"text_source_order\">0</setting>
     <setting id=\"enable_ratings\">true</setting>
     <setting id=\"enable_plots\">true</setting>
     <setting id=\"enable_episode_titles\">true</setting>
@@ -90,10 +93,7 @@ SETTINGS_XML="<settings version=\"1\">
     <setting id=\"enable_trailers\">true</setting>
     <setting id=\"enable_taglines\">true</setting>
     <setting id=\"enable_details\">true</setting>
-    <setting id=\"min_votes_movie\">50</setting>
-    <setting id=\"min_votes_episode\">20</setting>
     <setting id=\"stale_threshold_days\">365</setting>
-    <setting id=\"max_retries\">4</setting>
     <setting id=\"country\">0</setting>
     <setting id=\"enable_fsk\">false</setting>
     <setting id=\"enable_bbfc\">false</setting>

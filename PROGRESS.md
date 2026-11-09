@@ -76,11 +76,17 @@ staleness.py, retry ladder) removed. 344 unit tests green; live suite refreshed.
 - [x] Rig scripts moved to JSON-RPC port 8101
 
 ## Phase 7d: Replace the IMDb provider
-api.imdbapi.dev shut down in July 2026. Design not yet written.
-- [ ] 7d.1 Design: IMDb ratings via script.module.imdbratings, TMDB for text, TVDB Dutch-text fallback, id resolution for items without ids
-- [ ] 7d.2 Implementation plan
-- [ ] 7d.3 Implement and remove providers/imdbapi.py
-- [ ] 7d.4 Live validation on Omega and Piers
+api.imdbapi.dev shut down in July 2026. Built on branch
+feat/7d-provider-replacement.
+- [x] 7d.1 Design: IMDb ratings via script.module.imdbratings, TMDB and TheTVDB for text, id resolution for items without usable ids
+- [x] 7d.2 IMDb ratings from script.module.imdbratings 1.0.0 (`providers/imdb_ratings.py`): the store is refreshed once per cycle with an abort that yields to playback; while no dataset is loaded the rating is transient, a missing title is a real "no rating". `providers/imdbapi.py` and its settings removed
+- [x] 7d.3 TheTVDB v4 provider (`providers/tvdb.py`): token login with one re-login on 401, auth failure disables TVDB for the cycle only, 400 is transient, a series' episodes are fetched per language in one paged call and cached only when every page loaded; `http.provider_post` for the login; the circuit breaker tracks any provider by name
+- [x] 7d.4 Text chain per field (`engine/chain.py`, `engine/textrules.py`, `providers/languages.py`): folder language first (`text_source_order`, TMDB then TVDB by default), then the `fallback_language` (default en-US) in `fallback_order`; a transient step stops the chain; "Aflevering N"-style placeholders count as empty in every TMDB language; fallback values only fill empty or placeholder fields. Movies stay TMDB-only
+- [x] 7d.5 Ids: discovered ids survive later scans, episodes find their show by Kodi `tvshowid`; untyped `unknown` uniqueids are accepted as TVDB ids only after the series name (or its translation or an alias) matches the Kodi title, episodes only when the id is in the show's TVDB episode list; TMDB `/find` and `external_ids` fill missing cross-references, an empty answer is retried after 30 days
+- [x] 7d.6 NFO items (`data/nfo.py`, `engine/protect.py`): NFO detection follows Kodi's own lookup; on an NFO-managed item a field is written only when empty, a placeholder, or still equal to metamender's last write, and the NFO's rating slots and `default` flag are never changed; unreachable media skips the item for the cycle
+- [x] 7d.7 Tracker (schema v3, no migration): per-field provenance (`written_value` fingerprint in Kodi's stored form), per-field transient verdicts instead of one per item, fallback values re-checked monthly up to 12 times, and a settings fingerprint per field so changing the rating source, the text or fallback order, the fallback language or a folder's language re-checks the affected fields once
+- [x] 7d.8 Live validation on Omega 21.3 and Piers 22.0 RC1 (full service scans in the Flatpak Kodi against testvideo131 / testvideo149, identical results on both): IMDb ratings added to 370 movies, 427 shows and 5,451 episodes; NFO titles, NFO rating slots and their `default` flags unchanged; untyped TVDB ids accepted for 14 of 16 kids' shows; a second scan writes nothing and every old field is final except fallback plots waiting for their monthly re-check. Live suite (`tests/live_integration_test.py`) rewritten for the new providers
+- [ ] 7d.9 Live findings: show verification rejects Buurman en Buurman (TVDB 80767) because TVDB's first-aired year (1979) is three years off Kodi's (1976), so its episodes get no TVDB text; shows with only a TVmaze id (De 12 van Schouwendam, Stanley H.) keep their "Aflevering N" / "Episode N" placeholders; the service cannot scan in the headless Docker image (scan lock needs a home window)
 
 ## Phase 8: Certifications (rewrite, not a port of script.eucert.fixer)
 - [ ] 8.0 Settle the ten decisions in the Phase 8 review action list
