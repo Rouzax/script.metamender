@@ -36,7 +36,7 @@ def test_transient_stops_chain_no_write():
 def test_empty_and_placeholder_fall_through():
     first, _ = _step("Aflevering 3")
     second, _ = _step("Geknoei")
-    out = run_chain([first, second], "Aflevering 3")
+    out = run_chain([first, second], None)
     assert out.value == "Geknoei" and not out.transient
 
 
@@ -57,9 +57,10 @@ def test_fallback_fills_placeholder_current():
 
 
 def test_fallback_never_replaces_real_current():
-    step, _ = _step("English", fallback=True)
+    step, probe = _step("English", fallback=True)
     out = run_chain([step], "Sterrenkijken")
     assert out == FieldOutcome(transient=False, value=None, from_fallback=False)
+    assert probe.calls == 0
 
 
 def test_all_empty_is_answered_empty():
@@ -79,3 +80,22 @@ def test_non_text_values_pass_through():
 
 def test_no_steps_is_answered_empty():
     assert run_chain([], None) == FieldOutcome(False, None, False)
+
+
+def test_transient_fallback_ignored_when_current_is_real():
+    step, probe = _step(TRANSIENT, fallback=True)
+    out = run_chain([step], "Sterrenkijken")
+    assert out == FieldOutcome(transient=False, value=None, from_fallback=False)
+    assert probe.calls == 0
+
+
+def test_transient_fallback_is_transient_when_current_is_empty():
+    step, _ = _step(TRANSIENT, fallback=True)
+    assert run_chain([step], None).transient is True
+
+
+def test_skipped_fallback_does_not_block_later_native_step():
+    fallback, _ = _step("English", fallback=True)
+    native, _ = _step("Nederlands")
+    out = run_chain([fallback, native], "Sterrenkijken")
+    assert out == FieldOutcome(transient=False, value="Nederlands", from_fallback=False)

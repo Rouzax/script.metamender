@@ -51,12 +51,14 @@ def run_chain(steps: List[Step], current_value: Any) -> FieldOutcome:
     """Resolve one field. A fallback value is only used to fill an empty or
     placeholder current value, never to replace real text."""
     for step in steps:
+        if step.fallback and not _is_empty(current_value):
+            # A fallback only fills an empty or placeholder value, so its
+            # result (or transient failure) could never matter.
+            continue
         value = step.fetch()
         if value is TRANSIENT:
             return FieldOutcome(transient=True, value=None, from_fallback=False)
         if _is_empty(value):
             continue
-        if step.fallback and not _is_empty(current_value):
-            return _ANSWERED_EMPTY
         return FieldOutcome(transient=False, value=value, from_fallback=step.fallback)
     return _ANSWERED_EMPTY
