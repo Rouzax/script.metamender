@@ -4427,3 +4427,48 @@ class TestExtractIds:
         assert tracker.get_show_tvdb_map() == {}
         assert not mock_fetch.called
         tracker.close()
+
+
+class TestUnmappedLanguage:
+    """A folder language TVDB has no id for is logged once per code per scan."""
+
+    @patch("resources.lib.engine.scan.log")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series_episodes")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season", return_value=[])
+    def test_logged_once_per_code_per_scan(
+        self, mock_season, mock_tvdb_eps, mock_update, mock_log, tmp_path, kodi_stubs,
+    ):
+        first = _make_episode_item(title="")
+        first["uniqueid"] = {"tmdb": "1", "tvdb": "888"}
+        second = _make_episode_item(title="", episode=2)
+        second["episodeid"] = 101
+        second["uniqueid"] = {"tmdb": "2", "tvdb": "889"}
+        config = {
+            "sources": [{"path": _SHOWS, "language": "dutch", "enabled": True}],
+            "default_language": "en-US",
+        }
+        settings = _make_settings()
+        settings["fallback_language"] = "dutch"
+        tracker = _make_tracker(tmp_path)
+        _register_show(tracker)
+
+        def warnings():
+            return [
+                c for c in mock_log.warning.call_args_list
+                if c.kwargs.get("event") == "scan.language_unmapped"
+            ]
+
+        for _ in range(2):
+            tracker.start_new_cycle()
+            run_scan(
+                EPISODE, tracker, config, frozenset({"title"}),
+                "k", settings, items=[first, second], show_id_map={10: "55555"},
+                reset=True,
+            )
+        tracker.close()
+
+        mock_tvdb_eps.assert_not_called()
+        logged = warnings()
+        assert len(logged) == 2  # once in each scan
+        assert all(c.kwargs["language"] == "dutch" for c in logged)

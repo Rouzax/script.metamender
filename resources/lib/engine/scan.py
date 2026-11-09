@@ -38,6 +38,9 @@ Logging:
           verified as the item's TVDB id
         - scan.unknown_id_rejected (INFO): An `unknown`-type uniqueid names a
           different TVDB series, or an episode outside the show's TVDB list
+        - scan.language_unmapped (WARNING): A folder or fallback language code
+          has no TheTVDB language, so TVDB is not asked for it; once per code
+          per scan
 """
 from __future__ import annotations
 
@@ -688,10 +691,30 @@ def _tvdb_cached(
     return result
 
 
-def _verification_lang(folder_lang: str) -> str:
+def _tvdb_lang(ctx: _ScanCtx, kodi_lang: str) -> Optional[str]:
+    """TVDB language id for a Kodi language code, or None when TVDB has none.
+
+    TVDB then has nothing for that language, which is an answer, so a code
+    that maps to nothing (a typo such as "dutch" in sources.json) would
+    silently turn TVDB off for the folder. It is logged once per code per
+    scan.
+    """
+    lang = tvdb_language(kodi_lang)
+    key = "scan.language_unmapped:" + kodi_lang
+    if lang is None and kodi_lang.strip() and key not in ctx.logged_once:
+        ctx.logged_once.add(key)
+        log.warning(
+            "Language code has no TheTVDB language, TVDB is not asked for it",
+            event="scan.language_unmapped", language=kodi_lang,
+            media_type=ctx.media_type.name,
+        )
+    return lang
+
+
+def _verification_lang(ctx: _ScanCtx, folder_lang: str) -> str:
     """TVDB language for the verification fetch: the folder language, so the
     record is the one the text chain asks for anyway, else English."""
-    return tvdb_language(folder_lang) or "eng"
+    return _tvdb_lang(ctx, folder_lang) or "eng"
 
 
 def _unknown_verdict(
@@ -727,7 +750,7 @@ def _verify_unknown_show(
     """Accept the show's unknown id when the TVDB series it names carries the
     Kodi title among its names, translations or aliases."""
     series = _tvdb_cached(
-        ctx, "series", unknown_id, _verification_lang(folder_lang),
+        ctx, "series", unknown_id, _verification_lang(ctx, folder_lang),
         tvdb_fetch_series, identity,
     )
     if series is TRANSIENT:
@@ -758,7 +781,7 @@ def _verify_unknown_episode(
         # Derived without a call, so it is not recorded as a lookup.
         return
     episodes = _tvdb_cached(
-        ctx, "episodes", show_tvdb_id, _verification_lang(folder_lang),
+        ctx, "episodes", show_tvdb_id, _verification_lang(ctx, folder_lang),
         tvdb_fetch_series_episodes, identity,
     )
     if episodes is TRANSIENT:
@@ -1184,7 +1207,7 @@ class _TextSources:
 
     def tvdb(self, field: str, kodi_lang: str) -> Any:
         ctx = self._ctx
-        lang = tvdb_language(kodi_lang)
+        lang = _tvdb_lang(ctx, kodi_lang)
         if lang is None:
             return None
         if self._ids.tvdb_transient:
