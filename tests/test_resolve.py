@@ -312,7 +312,9 @@ def test_build_ratings_skips_zero_and_out_of_range():
 
 
 def test_build_ratings_no_candidates_returns_none():
-    m, src, votes, _fp = build_ratings({}, {}, None, {"trakt": {"rating": 6.0, "votes": 5}}, PREFER_TMDB)
+    m, src, votes, _fp = build_ratings(
+        {}, None, {"trakt": {"rating": 6.0, "votes": 5}}, PREFER_TMDB,
+    )
     assert m is None
 
 

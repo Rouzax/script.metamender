@@ -8,7 +8,8 @@ through ``xbmcvfs`` so SMB, NFS and other VFS paths work.
 Logging:
     Logger: 'nfo'
     Key events:
-        - nfo.listdir_failed (WARNING): a folder could not be listed
+        - nfo.listdir_failed / nfo.exists_failed (ERROR): a VFS call failed;
+          the item is reported UNREACHABLE
 """
 from __future__ import annotations
 
@@ -72,20 +73,24 @@ def _replace_ext(path: str, ext: str) -> str:
     return _join(folder, new) if folder else new
 
 
+class _VfsError(Exception):
+    """A VFS call failed, so nothing can be concluded about the NFO."""
+
+
 def _exists(path: str) -> bool:
     try:
         return bool(path) and bool(xbmcvfs.exists(path))
-    except Exception:
+    except Exception as exc:
         log.exception("VFS exists check failed", event="nfo.exists_failed", path=path)
-        return False
+        raise _VfsError(path) from exc
 
 
 def _nfo_files(folder: str) -> List[str]:
     try:
         _dirs, files = xbmcvfs.listdir(folder)
-    except Exception:
+    except Exception as exc:
         log.exception("Could not list folder", event="nfo.listdir_failed", folder=folder)
-        return []
+        raise _VfsError(folder) from exc
     return [f for f in files if f.lower().endswith(".nfo")]
 
 
@@ -195,12 +200,17 @@ def nfo_state(media_type_name: str, file_path: str) -> str:
     instance because a share is offline, so the caller must not conclude that
     there is no NFO.
     """
-    if not file_path or not _exists(_first_media_path(file_path)):
+    try:
+        if not file_path or not _exists(_first_media_path(file_path)):
+            return UNREACHABLE
+
+        if media_type_name == "tvshow":
+            found = _join(file_path, "tvshow.nfo")
+            return NFO if _exists(found) else NO_NFO
+
+        found = _find_file_nfo(file_path, media_type_name == "movie")
+    except _VfsError:
+        # A share dropping mid-check must not read as "no NFO": that would
+        # unlock writes onto a possibly NFO-managed item.
         return UNREACHABLE
-
-    if media_type_name == "tvshow":
-        found = _join(file_path, "tvshow.nfo")
-        return NFO if _exists(found) else NO_NFO
-
-    found = _find_file_nfo(file_path, media_type_name == "movie")
     return NFO if found else NO_NFO

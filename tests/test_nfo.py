@@ -179,7 +179,20 @@ def test_empty_path_is_unreachable(vfs):
     assert nfo_state("movie", "") == UNREACHABLE
 
 
-def test_listing_failure_means_no_nfo(vfs, kodi_stubs):
+def test_listing_failure_is_unreachable(vfs, kodi_stubs):
     media = vfs("Film", "file.mkv")
     kodi_stubs["xbmcvfs"].listdir.side_effect = OSError("share went away")
-    assert nfo_state("movie", media) == NO_NFO
+    assert nfo_state("movie", media) == UNREACHABLE
+
+
+def test_exists_failure_on_nfo_candidate_is_unreachable(vfs, kodi_stubs):
+    media = vfs("Film", "file.mkv")
+    real = kodi_stubs["xbmcvfs"].exists.side_effect
+
+    def flaky(path):
+        if path.endswith(".nfo"):
+            raise OSError("share went away")
+        return real(path)
+
+    kodi_stubs["xbmcvfs"].exists.side_effect = flaky
+    assert nfo_state("movie", media) == UNREACHABLE
