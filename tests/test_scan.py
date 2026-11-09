@@ -4579,3 +4579,88 @@ class TestTvdbAuthStats:
         )
         tracker.close()
         assert stats["tvdb_auth_failed"] is False
+
+
+class TestFallbackRecheckCounting:
+    """Only a monthly recheck (a sample that replaced a FINAL verdict) spends
+    one of a fallback value's FALLBACK_RECHECKS; ordinary samples of young
+    content on the refetch schedule do not."""
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_dense_schedule_does_not_spend_rechecks(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+        settings = _make_settings()
+        settings["refetch_schedule"] = "1,1,1,1,1,1,1,1"
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", checks=0, settings=settings)
+        for _ in range(4):
+            tracker._conn.execute("UPDATE field_status SET next_retry = '2020-01-01'")
+            tracker.commit()
+            tracker.start_new_cycle()
+            run_scan(
+                MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+                "k", settings, items=[_young_movie(plot="English plot")],
+            )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert row["fetch_count"] == 5  # every scheduled sample was taken
+        assert (row["from_fallback"], row["fallback_checks"]) == (1, 0)
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_young_fallback_write_keeps_count(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """A young item whose fallback value changes is rewritten from the
+        fallback again; that is a schedule sample, not a recheck."""
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "New English plot"})
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot", checks=2)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_young_movie(plot="")],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "New English plot"
+        assert (row["from_fallback"], row["fallback_checks"]) == (1, 2)
+
+
+class TestSettingsChangeWrites:
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_settings_change_recheck_writes_differing_answer(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """Old content is final, but a changed folder language re-checks it,
+        and an answer that differs from Kodi's value is written."""
+        mock_fetch.side_effect = _plot_by_lang({
+            "nl-NL": "Nederlandse plot", "de-DE": "Deutsche Handlung",
+        })
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie()],
+        )
+        tracker.start_new_cycle()
+        mock_update.reset_mock()
+        german = {
+            "sources": [{"path": "smb://server/movies/", "language": "de-DE", "enabled": True}],
+            "default_language": "en-US",
+        }
+        run_scan(
+            MOVIE, tracker, german, frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="Nederlandse plot")],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Deutsche Handlung"
+        assert row["fetch_count"] == 1
+        assert row["source"] == "tmdb"
+        assert row["from_fallback"] == 0

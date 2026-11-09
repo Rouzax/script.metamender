@@ -1678,6 +1678,9 @@ def run_scan(
         }
 
         decisions = {}  # type: Dict[str, str]
+        # Fields due only because a fallback value holds back FINAL: their
+        # sample is a monthly recheck and spends one of FALLBACK_RECHECKS.
+        rechecks = set()  # type: Set[str]
         for f in candidates:
             if f in rebaseline:
                 # Update now, or changed settings: due regardless of the
@@ -1685,19 +1688,22 @@ def run_scan(
                 decisions[f] = FETCH_NOW
                 continue
             fs = fs_map.get(f, {})
+            base = decide_field(
+                age,
+                int(fs.get("fetch_count") or 0),
+                fs.get("next_retry"),
+                today,
+                threshold,
+            )
             decisions[f] = apply_fallback_recheck(
-                decide_field(
-                    age,
-                    int(fs.get("fetch_count") or 0),
-                    fs.get("next_retry"),
-                    today,
-                    threshold,
-                ),
+                base,
                 bool(fs.get("from_fallback")),
                 int(fs.get("fallback_checks") or 0),
                 fs.get("next_retry"),
                 today,
             )
+            if base == FINAL and decisions[f] == FETCH_NOW:
+                rechecks.add(f)
 
         due = any(d == FETCH_NOW for d in decisions.values())
 
@@ -1876,16 +1882,21 @@ def run_scan(
                 # earlier schedule date.
                 mature = age is not None and age >= threshold
                 next_due = fallback_recheck_due(None if mature else next_due, today)
-            record = (
-                tracker.reset_field_clock if f in rebaseline
-                else tracker.record_field_fetch
-            )
-            record(
-                media_type.name, identity, f,
-                next_retry=next_due, settings_fp=fps[f],
-                written_value=provenance.get(f), source=source,
-                vote_count=vote_count, from_fallback=from_fallback,
-            )
+            if f in rebaseline:
+                tracker.reset_field_clock(
+                    media_type.name, identity, f,
+                    next_retry=next_due, settings_fp=fps[f],
+                    written_value=provenance.get(f), source=source,
+                    vote_count=vote_count, from_fallback=from_fallback,
+                )
+            else:
+                tracker.record_field_fetch(
+                    media_type.name, identity, f,
+                    next_retry=next_due, settings_fp=fps[f],
+                    written_value=provenance.get(f), source=source,
+                    vote_count=vote_count, from_fallback=from_fallback,
+                    fallback_recheck=f in rechecks,
+                )
         _finish_lookups(ctx, identity, ids, today)
         tracker.commit()
 

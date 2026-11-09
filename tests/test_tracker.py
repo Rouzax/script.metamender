@@ -604,6 +604,14 @@ def test_fallback_checks_increment_and_reset(tmp_path):
     t.record_field_fetch("movie", "Air", "plot", None, from_fallback=True)
     row = t.get_field_status("movie", "Air", "plot")
     assert (row["from_fallback"], row["fallback_checks"]) == (1, 0)
+    t.record_field_fetch(
+        "movie", "Air", "plot", None, from_fallback=True, fallback_recheck=True,
+    )
+    t.record_field_fetch("movie", "Air", "plot", None, fallback_recheck=True)
+    row = t.get_field_status("movie", "Air", "plot")
+    assert (row["from_fallback"], row["fallback_checks"]) == (1, 2)
+    # A sample that was not a recheck (young content on its schedule)
+    # leaves the count alone.
     t.record_field_fetch("movie", "Air", "plot", None, from_fallback=True)
     t.record_field_fetch("movie", "Air", "plot", None)
     row = t.get_field_status("movie", "Air", "plot")
@@ -633,8 +641,8 @@ def test_reset_field_clock_restarts_fallback_checks_and_keeps_provenance(tmp_pat
     fallback value metamender wrote, so flag and fingerprint stay."""
     t = _tracker_with_item(tmp_path)
     t.record_field_fetch("movie", "Air", "plot", None, written_value="fp", from_fallback=True)
-    t.record_field_fetch("movie", "Air", "plot", None)
-    t.record_field_fetch("movie", "Air", "plot", None)
+    t.record_field_fetch("movie", "Air", "plot", None, fallback_recheck=True)
+    t.record_field_fetch("movie", "Air", "plot", None, fallback_recheck=True)
     assert t.get_field_status("movie", "Air", "plot")["fallback_checks"] == 2
     t.reset_field_clock("movie", "Air", "plot", "2026-09-15")
     row = t.get_field_status("movie", "Air", "plot")

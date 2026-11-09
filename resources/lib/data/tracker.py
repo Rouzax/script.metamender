@@ -376,6 +376,7 @@ class TrackerDB:
         written_value: Optional[str] = None,
         from_fallback: Optional[bool] = None,
         settings_fp: Optional[str] = None,
+        fallback_recheck: bool = False,
     ) -> None:
         """Record a successful sample: bump fetch_count, stamp fetched_at, set the
         next due date and (optionally) provenance.
@@ -383,9 +384,12 @@ class TrackerDB:
         COALESCE keeps the prior source, vote_count, written_value and
         from_fallback when the new call passes None. settings_fp is always
         overwritten so it names the settings the latest answer was fetched
-        under. fallback_checks counts re-samples of a fallback-sourced value:
-        the first fallback write is not a recheck (0), later samples of a row
-        still flagged from_fallback add one, and from_fallback=False clears
+        under. fallback_checks counts the monthly rechecks of a
+        fallback-sourced value: a sample with ``fallback_recheck`` (one that
+        replaced a FINAL verdict) of a row still flagged from_fallback adds
+        one; any other sample, such as young content on its refetch schedule,
+        leaves the count, so a dense schedule cannot spend the rechecks early.
+        The first fallback write starts at 0, and from_fallback=False clears
         both the flag and the counter.
         """
         item_id = self._get_item_id(media_type, identity)
@@ -409,7 +413,9 @@ class TrackerDB:
                 "written_value = COALESCE(excluded.written_value, field_status.written_value), "
                 "fallback_checks = CASE "
                 "WHEN :fallback = 0 THEN 0 "
-                "WHEN field_status.from_fallback = 1 THEN field_status.fallback_checks + 1 "
+                "WHEN field_status.from_fallback = 1 AND :recheck = 1 "
+                "THEN field_status.fallback_checks + 1 "
+                "WHEN field_status.from_fallback = 1 THEN field_status.fallback_checks "
                 "ELSE 0 END, "
                 "from_fallback = COALESCE(:fallback, field_status.from_fallback), "
                 "settings_fp = excluded.settings_fp",
@@ -418,6 +424,7 @@ class TrackerDB:
                     "next_retry": next_retry, "source": source,
                     "vote_count": vote_count, "written_value": written_value,
                     "fallback": fallback, "settings_fp": settings_fp,
+                    "recheck": int(fallback_recheck),
                 },
             )
         except sqlite3.Error:
