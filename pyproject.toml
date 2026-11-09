@@ -36,7 +36,7 @@ combine-as-imports = true
 # use a context manager.
 # gaps.py is dead code (no caller outside tests) and should be deleted rather
 # than fixed; see docs/superpowers/reviews/2026-09-12-adversarial-review.
-"resources/lib/utils.py" = ["I001", "SIM102", "SIM103", "SIM115"]
+"resources/lib/utils.py" = ["SIM115"]
 "resources/lib/engine/gaps.py" = ["SIM103"]
 "resources/lib/engine/resolve.py" = ["PLC0206"]
 

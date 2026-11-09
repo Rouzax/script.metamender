@@ -43,14 +43,16 @@ from resources.lib.constants import (
     LOG_TIMESTAMP_TRIM,
 )
 
-
 _TITLE_SEPARATORS = frozenset((" ", ":", "-"))
 
 # TMDB v3 takes its key as a query parameter, and requests puts the full URL
 # into its exception messages, so a key reaches log text through error= values
 # and tracebacks. Covers both the query form (api_key=...) and a repr'd params
-# dict ('api_key': '...').
-_SECRET_RE = re.compile(r"""(?i)(api_?key(?:=|['"]?\s*:\s*['"]?))[^&\s'"]+""")
+# dict ('api_key': '...'). Also covers JSON bodies ({"apikey": "..."}) and
+# bearer tokens ("Authorization: Bearer ..."), which TVDB uses.
+_SECRET_RE = re.compile(
+    r"""(?i)((?:api_?key(?:=|['"]?\s*:\s*['"]?))|(?:\bbearer\s+))[^&\s'",}]+"""
+)
 
 
 def _redact(text: str) -> str:
@@ -65,9 +67,7 @@ def is_empty(value: Any) -> bool:
         return True
     if isinstance(value, (int, float)) and value == 0:
         return True
-    if isinstance(value, list) and len(value) == 0:
-        return True
-    return False
+    return isinstance(value, list) and len(value) == 0
 
 
 def normalize_for_compare(text: str) -> str:
@@ -91,9 +91,12 @@ def title_matches(result_title: str, search_title: str) -> bool:
     if r_lower == s_lower:
         return True
 
-    if len(r_lower) > len(s_lower) and r_lower.startswith(s_lower):
-        if r_lower[len(s_lower)] in _TITLE_SEPARATORS:
-            return True
+    if (
+        len(r_lower) > len(s_lower)
+        and r_lower.startswith(s_lower)
+        and r_lower[len(s_lower)] in _TITLE_SEPARATORS
+    ):
+        return True
 
     s_norm = normalize_for_compare(search_title)
     r_norm = normalize_for_compare(result_title)
@@ -101,11 +104,11 @@ def title_matches(result_title: str, search_title: str) -> bool:
     if r_norm == s_norm:
         return True
 
-    if len(r_norm) > len(s_norm) and r_norm.startswith(s_norm):
-        if r_norm[len(s_norm)] in _TITLE_SEPARATORS:
-            return True
-
-    return False
+    return (
+        len(r_norm) > len(s_norm)
+        and r_norm.startswith(s_norm)
+        and r_norm[len(s_norm)] in _TITLE_SEPARATORS
+    )
 
 
 def create_scraper_session() -> "requests.Session":

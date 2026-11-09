@@ -57,3 +57,30 @@ def test_api_key_cut_by_truncation_leaves_no_fragment(kodi_stubs):
 def test_api_key_in_message_text_is_redacted(kodi_stubs):
     get_logger("test").error("GET /3/movie/1?api_key=" + _FAKE_KEY, event="t")
     assert _FAKE_KEY not in _last_kodi_line(kodi_stubs)
+
+
+def test_bearer_token_is_redacted(kodi_stubs):
+    token = "eyJhbGciOiJIUzI1NiJ9.payload.sig"
+    get_logger("test").warning(
+        "Provider request failed", event="t",
+        error="Authorization: Bearer " + token + " rejected",
+    )
+    line = _last_kodi_line(kodi_stubs)
+    assert token not in line
+    assert "Bearer ***" in line
+    assert "rejected" in line
+
+
+def test_apikey_json_body_is_redacted(kodi_stubs):
+    get_logger("test").warning(
+        "Provider request failed", event="t",
+        error="body={'apikey': 'abc123secret', 'pin': 'x'}",
+    )
+    line = _last_kodi_line(kodi_stubs)
+    assert "abc123secret" not in line
+    assert "'pin': 'x'" in line
+    get_logger("test").warning(
+        "Provider request failed", event="t",
+        error='body={"apikey": "abc123secret", "pin": "x"}',
+    )
+    assert "abc123secret" not in _last_kodi_line(kodi_stubs)
