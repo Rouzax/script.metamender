@@ -43,14 +43,6 @@ msgctxt "#32027"
 msgid "Which provider to prefer when looking up audience ratings. If the preferred source has no data, the other source is tried as a fallback."
 msgstr ""
 
-msgctxt "#32028"
-msgid "Plot source"
-msgstr ""
-
-msgctxt "#32029"
-msgid "Which provider to prefer when looking up plot summaries. If the preferred source has no data, the other source is tried as a fallback."
-msgstr ""
-
 msgctxt "#32030"
 msgid "Prefer TMDB"
 msgstr ""
@@ -90,7 +82,7 @@ msgid "Enable plots backfill"
 msgstr ""
 
 msgctxt "#32105"
-msgid "Backfill missing plot summaries and outlines from TMDB or IMDb."
+msgid "Backfill missing plot summaries from TMDB or TheTVDB."
 msgstr ""
 
 msgctxt "#32106"
@@ -98,7 +90,7 @@ msgid "Enable episode title backfill"
 msgstr ""
 
 msgctxt "#32107"
-msgid "Backfill missing episode titles from TMDB. Only affects episodes with generic or empty titles."
+msgid "Backfill missing episode titles from TMDB or TheTVDB. Generic titles such as \"Episode 3\" count as missing and are never written."
 msgstr ""
 
 msgctxt "#32108"
@@ -446,31 +438,7 @@ msgctxt "#32362"
 msgid "Reset tracker: {} fields cleared"
 msgstr ""
 
-# --- Default source / refetch schedule settings (32370-32380) ---
-
-msgctxt "#32370"
-msgid "Default source"
-msgstr ""
-
-msgctxt "#32371"
-msgid "Default provider to use when a field has no per-field source preference configured. Applied to all fields that do not override this setting."
-msgstr ""
-
-msgctxt "#32372"
-msgid "TMDB preferred"
-msgstr ""
-
-msgctxt "#32373"
-msgid "IMDb preferred"
-msgstr ""
-
-msgctxt "#32374"
-msgid "TMDB only"
-msgstr ""
-
-msgctxt "#32375"
-msgid "IMDb only"
-msgstr ""
+# --- Refetch schedule settings (32376-32380) ---
 
 msgctxt "#32376"
 msgid "Refresh schedule (days)"
@@ -490,4 +458,38 @@ msgstr ""
 
 msgctxt "#32380"
 msgid "Content age in days before metadata is treated as stable; older content is fetched once, newer content is refreshed on a schedule."
+msgstr ""
+
+# --- Text source settings (32390-32397) ---
+
+msgctxt "#32390"
+msgid "Text source order"
+msgstr ""
+
+msgctxt "#32391"
+msgid "Which provider to ask first for TV show and episode titles and plots in the source folder's language. If the first has nothing, the second is asked. Movies always use TMDB."
+msgstr ""
+
+msgctxt "#32392"
+msgid "TMDB, then TheTVDB"
+msgstr ""
+
+msgctxt "#32393"
+msgid "TheTVDB, then TMDB"
+msgstr ""
+
+msgctxt "#32394"
+msgid "Fallback language"
+msgstr ""
+
+msgctxt "#32395"
+msgid "Language code (for example en-US) used when no provider has a title or plot in the source folder's language. A fallback value only fills an empty field and never replaces existing text. Set it to the folder's own language to turn the fallback off."
+msgstr ""
+
+msgctxt "#32396"
+msgid "Fallback language order"
+msgstr ""
+
+msgctxt "#32397"
+msgid "Which provider to ask first for TV show and episode text in the fallback language."
 msgstr ""

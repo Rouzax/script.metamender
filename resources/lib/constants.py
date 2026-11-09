@@ -93,7 +93,6 @@ PROVIDER_CIRCUIT_BREAKER_THRESHOLD = 5
 # =============================================================================
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
-IMDBAPI_BASE_URL = "https://api.imdbapi.dev"
 TVDB_BASE_URL = "https://api4.thetvdb.com/v4"
 # Project key issued to this add-on; TVDB intends project keys to ship
 # inside the client, unlike the user-supplied TMDB key.
@@ -102,8 +101,8 @@ FSK_API_URL = "https://www.fsk.de/fskapi/ReleaseSearch"
 BBFC_SEARCH_URL = "https://www.bbfc.co.uk/search"
 KIJKWIJZER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
-# Explicit User-Agent for provider API calls. imdbapi.dev filters by UA (a bare
-# urllib UA is rejected); a browser-like UA is reliably accepted.
+# Explicit User-Agent for provider API calls: some provider front ends reject
+# a bare urllib UA, while a browser-like UA is reliably accepted.
 METAMENDER_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"

@@ -26,6 +26,7 @@ from resources.lib.service.daemon import (
     _get_db_path,
     _get_sources_config_path,
     _load_settings,
+    _prepare_imdb_ratings,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.utils import (
@@ -91,6 +92,7 @@ def run() -> None:
         # A monitor so the manual scan yields to playback and honors abort,
         # exactly like the service scan.
         monitor = xbmc.Monitor()
+        settings["imdb_ready"] = _prepare_imdb_ratings(settings, monitor)
 
         for media_type in (MOVIE, TVSHOW):
             stats = run_scan(

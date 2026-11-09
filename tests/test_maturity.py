@@ -1,5 +1,5 @@
 from resources.lib.engine.maturity import (
-    FETCH_NOW, SKIP_NOT_DUE, FINAL, FINAL_EMPTY,
+    FETCH_NOW, SKIP_NOT_DUE, FINAL,
     decide_field, compute_next_due,
 )
 
@@ -7,24 +7,20 @@ THRESH = 365
 
 
 def test_first_encounter_fetches():
-    assert decide_field(None, 0, None, "2026-06-19", THRESH, False) == FETCH_NOW
-
-
-def test_structural_absence_is_final_empty():
-    assert decide_field(10, 0, None, "2026-06-19", THRESH, True) == FINAL_EMPTY
+    assert decide_field(None, 0, None, "2026-06-19", THRESH) == FETCH_NOW
 
 
 def test_old_content_after_one_sample_is_final():
     # content_age 400 >= 365, has been sampled once
-    assert decide_field(400, 1, None, "2026-06-19", THRESH, False) == FINAL
+    assert decide_field(400, 1, None, "2026-06-19", THRESH) == FINAL
 
 
 def test_young_on_schedule_due():
-    assert decide_field(50, 1, "2026-06-19", "2026-06-19", THRESH, False) == FETCH_NOW
+    assert decide_field(50, 1, "2026-06-19", "2026-06-19", THRESH) == FETCH_NOW
 
 
 def test_young_on_schedule_not_due():
-    assert decide_field(50, 1, "2026-12-01", "2026-06-19", THRESH, False) == SKIP_NOT_DUE
+    assert decide_field(50, 1, "2026-12-01", "2026-06-19", THRESH) == SKIP_NOT_DUE
 
 
 def test_next_due_on_schedule_uses_interval():

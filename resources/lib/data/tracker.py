@@ -495,6 +495,19 @@ class TrackerDB:
             show_map[row["kodi_id"]] = row["tmdb_id"]
         return show_map
 
+    def get_show_tvdb_map(self) -> Dict[int, str]:
+        """Map a TV show's Kodi id to its TVDB series ID.
+
+        The episode scan needs the series ID to fetch a show's episode list
+        from TVDB; Kodi stores it only on the show, not on its episodes.
+        """
+        cursor = self._conn.execute(
+            "SELECT kodi_id, tvdb_id FROM items "
+            "WHERE media_type = 'tvshow' AND tvdb_id IS NOT NULL "
+            "AND kodi_id IS NOT NULL"
+        )
+        return {row["kodi_id"]: row["tvdb_id"] for row in cursor.fetchall()}
+
     # ------------------------------------------------------------------
     # Cycle tracking and scan state (Task 2.4)
     # ------------------------------------------------------------------

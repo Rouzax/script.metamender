@@ -2,7 +2,7 @@
 Background service daemon for MetaMender.
 
 Runs as a Kodi service, periodically scanning the library for
-metadata gaps and backfilling from TMDB and IMDb.
+metadata gaps and backfilling from TMDB, TheTVDB and the IMDb ratings store.
 
 Logging:
     Logger: 'service'
@@ -16,6 +16,8 @@ Logging:
         - service.library_scan_finished (INFO): Library scan event received
         - service.orphans_pruned (INFO/DEBUG): Orphan prune result (INFO when >0)
         - service.prune_skip (DEBUG): Prune skipped (targeted scan or disabled)
+        - service.imdb_prepare_failed (ERROR): Preparing the IMDb ratings store
+          raised; IMDb ratings are transient for the cycle
 """
 from __future__ import annotations
 
@@ -40,7 +42,9 @@ from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
+from resources.lib.engine.resolve import rating_sources
 from resources.lib.engine.scan import run_scan
+from resources.lib.providers import imdb_ratings
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.utils import (
     ApiKeyError,
@@ -116,10 +120,10 @@ def _load_settings() -> Dict[str, Any]:
     """Read all settings needed by the scan engine.
 
     Returns:
-        Dict with tmdb_api_key, rating_source, plot_source, default_source,
-        enabled_fields (FrozenSet), stale_threshold_days, refetch_schedule,
-        rate_limit, scan_interval, show_notifications, and
-        resume_interrupted.
+        Dict with tmdb_api_key, rating_source, text_source_order,
+        fallback_order, fallback_language, enabled_fields (FrozenSet),
+        stale_threshold_days, refetch_schedule, rate_limit, scan_interval,
+        show_notifications, resume_interrupted and orphan_retention_days.
     """
     # Build enabled fields from individual toggles
     fields: set = set()
@@ -130,8 +134,9 @@ def _load_settings() -> Dict[str, Any]:
     return {
         "tmdb_api_key": get_setting("tmdb_api_key"),
         "rating_source": get_int_setting("rating_source", 0),
-        "plot_source": get_int_setting("plot_source", 0),
-        "default_source": get_int_setting("default_source", 0),
+        "text_source_order": get_int_setting("text_source_order", 0),
+        "fallback_order": get_int_setting("fallback_order", 0),
+        "fallback_language": get_setting("fallback_language").strip() or "en-US",
         "enabled_fields": frozenset(fields),
         "stale_threshold_days": get_int_setting("stale_threshold_days", 365),
         "refetch_schedule": get_setting("refetch_schedule"),
@@ -163,6 +168,34 @@ def _get_sources_config_path() -> str:
 
 
 
+def _prepare_imdb_ratings(settings: Dict[str, Any], monitor: Any) -> bool:
+    """Load or refresh the IMDb ratings store once per cycle; True when ready.
+
+    Skipped (False) when ratings are off or rating_source never consults IMDb.
+    The download yields to shutdown and to video playback. Any failure means
+    "not ready": IMDb ratings are then transient for the cycle while every
+    other field proceeds, and the service keeps running.
+    """
+    if "rating" not in settings["enabled_fields"]:
+        return False
+    if not rating_sources(settings.get("rating_source", 0))[1]:
+        return False
+
+    def abort() -> bool:
+        return bool(
+            monitor.abortRequested() or xbmc.getCondVisibility("Player.HasVideo")
+        )
+
+    try:
+        return imdb_ratings.prepare(abort)
+    except Exception:
+        log.exception(
+            "Preparing the IMDb ratings store failed",
+            event="service.imdb_prepare_failed",
+        )
+        return False
+
+
 def _run_scan(
     tracker: TrackerDB,
     source_config: Dict[str, Any],
@@ -180,6 +213,7 @@ def _run_scan(
     """
     tmdb_api_key = settings["tmdb_api_key"]
     enabled_fields = settings["enabled_fields"]
+    settings = dict(settings, imdb_ready=_prepare_imdb_ratings(settings, monitor))
 
     all_stats = {}  # type: Dict[str, Dict[str, int]]
 

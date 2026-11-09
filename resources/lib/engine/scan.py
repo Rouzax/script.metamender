@@ -1,27 +1,40 @@
 """
 Scan orchestrator for MetaMender.
 
-Coordinates a single scan cycle: queries Kodi, detects gaps,
+Coordinates a single scan cycle: queries Kodi, decides per field what is due,
 calls providers, writes results, and updates the tracker.
+
+Text fields come from TMDB and TheTVDB (TVDB): title and plot run through a
+per-field provider chain (engine/chain.py) that ends in fallback-language
+steps; every other text field has one TMDB step. Ratings come from TMDB and
+the IMDb ratings store. Each field gets its own verdict: a field is transient
+(no write, no clock advance) only when a provider in its own chain, or its
+own ID prerequisite, was transient.
 
 Logging:
     Logger: 'scan'
     Key events:
         - scan.start (INFO): Scan cycle starting for a media type
-        - scan.complete (INFO): Scan cycle finished with stats
+        - scan.complete (INFO): Scan cycle finished with stats and the
+          providers disabled this cycle
         - scan.skip (DEBUG): Item skipped (disabled source, not due, no candidates)
         - scan.abort (INFO): Scan interrupted by Kodi shutdown
         - scan.processing (DEBUG): Starting to process a single item
         - scan.updated (INFO): Item metadata written to Kodi
-        - scan.breaker (WARNING): A provider tripped, or TMDB down so the pass stops (scope="tmdb")
-        - scan.apikey (ERROR): A provider rejected the API key (terminal)
+        - scan.breaker (WARNING): A provider tripped, or every provider the
+          enabled fields need is down so the pass stops (scope="all")
+        - scan.apikey (ERROR): TMDB rejected the API key (terminal)
+        - scan.tvdb_auth (ERROR): TVDB rejected the add-on's credentials;
+          TVDB is disabled for the cycle, the scan continues
+        - scan.imdb_lookup_failed (ERROR): The IMDb ratings store raised
+          unexpectedly; the rating is transient for that item
 """
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 import xbmc
 
@@ -36,23 +49,17 @@ from resources.lib.data.media_types import MediaType
 from resources.lib.data.sources import match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
+from resources.lib.engine.chain import TRANSIENT, FieldOutcome, Step, run_chain
 from resources.lib.engine.maturity import (
     FETCH_NOW,
     FINAL,
-    FINAL_EMPTY,
     compute_next_due,
     decide_field,
 )
-from resources.lib.engine.resolve import (
-    IMDB_ONLY,
-    build_ratings,
-    resolve_metadata,
-    wants_imdb,
-)
-from resources.lib.providers.imdbapi import (
-    fetch_episode as imdb_fetch_episode,
-    fetch_movie as imdb_fetch_movie,
-)
+from resources.lib.engine.protect import may_write
+from resources.lib.engine.resolve import build_ratings, rating_sources
+from resources.lib.providers.imdb_ratings import lookup as imdb_rating_lookup
+from resources.lib.providers.languages import tmdb_language, tvdb_language
 from resources.lib.providers.tmdb import (
     fetch_episode_external_ids as tmdb_fetch_episode_ids,
     fetch_movie as tmdb_fetch_movie,
@@ -60,10 +67,16 @@ from resources.lib.providers.tmdb import (
     fetch_tvshow as tmdb_fetch_tvshow,
     resolve_id,
 )
+from resources.lib.providers.tvdb import (
+    fetch_series as tvdb_fetch_series,
+    fetch_series_episodes as tvdb_fetch_series_episodes,
+)
 from resources.lib.utils import (
     ApiKeyError,
     TransientProviderError,
+    TvdbAuthError,
     get_logger,
+    is_empty,
 )
 
 log = get_logger('scan')
@@ -88,10 +101,18 @@ _TMDB_TO_KODI = {
 
 _KODI_TO_TMDB = {v: k for k, v in _TMDB_TO_KODI.items()}
 
-# Fields resolved by resolve_metadata for a plain SetXDetails write. "rating"
-# and "votes" are excluded: they are written via the named-slot ratings map
-# (build_ratings), not as flat fields, so resolving them here would be discarded.
-_RESOLVE_FIELDS = [k for k in _TMDB_TO_KODI if k not in ("rating", "votes")]
+# Text fields TVDB also supplies. Only these get the full provider chain with
+# fallback-language steps; every other field has a single TMDB step.
+_CHAIN_FIELDS = frozenset({"title", "plot"})
+_RATING_FIELDS = frozenset({"rating", "votes"})
+# Key holding each chained field in a TVDB series record.
+_TVDB_SERIES_KEYS = {"title": "name", "plot": "overview"}
+
+# text_source_order / fallback_order setting values (settings.xml).
+TEXT_TMDB_FIRST = 0
+TEXT_TVDB_FIRST = 1
+FALLBACK_TVDB_FIRST = 0
+FALLBACK_TMDB_FIRST = 1
 
 
 def _make_stats() -> Dict[str, Any]:
@@ -109,16 +130,6 @@ def _make_stats() -> Dict[str, Any]:
     }
 
 
-# Fields the active source setting cannot supply -> immediate final-empty.
-# IMDb /titles has no tagline/studio/trailer, so an IMDb-only run can never
-# fill them and should not keep sampling. IMDb does supply countries
-# (originCountries), so "country" is intentionally absent from this set.
-# Episode firstaired is TMDB-only (the direct IMDb episode fetch has no air
-# date), so it is included here; it has no effect for movies/shows because
-# "firstaired" is not in their candidate field sets.
-_TMDB_ONLY_FIELDS = frozenset({"tagline", "studio", "trailer", "firstaired"})
-
-
 def _content_age_days(
     item: Dict[str, Any], media_type: MediaType, today: str
 ) -> Optional[int]:
@@ -134,11 +145,6 @@ def _content_age_days(
         return (date.fromisoformat(today) - date.fromisoformat(raw[:10])).days
     except ValueError:
         return None
-
-
-def _structurally_absent(field: str, default_pref: int) -> bool:
-    """Whether the active source setting cannot supply this field at all."""
-    return default_pref == IMDB_ONLY and field in _TMDB_ONLY_FIELDS
 
 
 def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
@@ -213,7 +219,8 @@ def _extract_fields(
     (even when that value is already non-empty). Skips "mpaa" (Phase 8) and the
     named-slot rating/votes (handled by build_ratings).
 
-    Episode titles take the latest provider value (no placeholder gating).
+    Title and plot arrive from the provider chain, which never yields a
+    placeholder title, so no placeholder check is needed here.
 
     Guards that remain: empty provider values are skipped, identical values are
     never rewritten (same-value skip), runtime is converted minutes -> seconds,
@@ -295,7 +302,7 @@ class _ScanCtx:
 
     Holds everything that does not vary per item, so the per-item helpers take a
     single ``ctx`` plus the handful of per-item values. Mutable members
-    (breaker, pacer, season_cache, tracker) are referenced, not copied.
+    (breaker, pacer, caches, tracker) are referenced, not copied.
     """
 
     media_type: MediaType
@@ -307,19 +314,18 @@ class _ScanCtx:
     sources: List[Dict[str, Any]]
     enabled_fields: FrozenSet[str]
     show_id_map: Dict[int, str]
+    show_tvdb_map: Dict[int, str]
     season_cache: Dict[str, Optional[List[Dict[str, Any]]]]
+    # (kind, tvdb_id, tvdb_lang) -> fetched record. Only real answers are
+    # cached, so a transient failure is retried by the next item.
+    tvdb_cache: Dict[Tuple[str, str, str], Any]
     settings: Dict[str, Any]
     schedule: Tuple[int, ...]
     rating_pref: int
-    plot_pref: int
-    default_pref: int
-
-
-# Sentinel returned by _call_provider when a provider transient-failed (as
-# opposed to a clean "no data" 404, which returns None). It lets the caller tell
-# "provider down" from "provider has nothing" so counters only advance on a
-# clean answer.
-_TRANSIENT = object()
+    text_order: int
+    fallback_order: int
+    fallback_language: str
+    imdb_ready: bool
 
 
 def _call_provider(
@@ -331,23 +337,31 @@ def _call_provider(
 ) -> Any:
     """Pace, run a provider fn, and apply circuit-breaker bookkeeping.
 
-    Records breaker success on any non-raising return (including None). On
-    ApiKeyError re-raises (terminal). On TransientProviderError records a breaker
-    failure, logs the trip once, and returns the ``_TRANSIENT`` sentinel. When
-    ``best_effort`` is True (episode ID enrichment) BOTH exceptions are
-    swallowed, logged at scan.error, None is returned, and the breaker is left
-    untouched.
+    Records breaker success on any non-raising return (including None, a real
+    "nothing"). On ApiKeyError re-raises (terminal, TMDB only). On
+    TvdbAuthError disables TVDB for the cycle, logs once, and returns
+    ``TRANSIENT``. On TransientProviderError records a breaker failure, logs
+    the trip once, and returns ``TRANSIENT``. When ``best_effort`` is True
+    (episode ID enrichment) both TMDB exceptions are logged at scan.error and
+    yield ``TRANSIENT`` without touching the breaker.
     """
     ctx.pacer.wait()
     try:
         result = fn()
+    except TvdbAuthError:
+        if ctx.breaker.disable("tvdb"):
+            log.exception(
+                "TheTVDB rejected the add-on's credentials, TVDB disabled for this cycle",
+                event="scan.tvdb_auth", identity=identity,
+            )
+        return TRANSIENT
     except ApiKeyError:
         if best_effort:
             log.exception(
                 "Provider call failed (best effort)",
                 event="scan.error", provider=provider, identity=identity,
             )
-            return None
+            return TRANSIENT
         log.exception(
             "Provider API key invalid",
             event="scan.apikey", provider=provider, identity=identity,
@@ -359,14 +373,14 @@ def _call_provider(
                 "Provider call failed (best effort)",
                 event="scan.error", provider=provider, identity=identity,
             )
-            return None
+            return TRANSIENT
         if ctx.breaker.record_failure(provider):
             log.warning(
                 "Provider disabled for this cycle after repeated failures",
                 event="scan.breaker", provider=provider,
                 threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD, identity=identity,
             )
-        return _TRANSIENT
+        return TRANSIENT
     ctx.breaker.record_success(provider)
     return result
 
@@ -390,6 +404,22 @@ def _enrich_imdb_id(
     )
 
 
+@dataclass(frozen=True)
+class _Primary:
+    """The item's folder-language TMDB answer and what it settled about IDs."""
+
+    # TMDB record, None (TMDB answered "nothing", or no TMDB id), or TRANSIENT.
+    tmdb: Any
+    # Movie/show TMDB id (after resolve_id) or the episode's own TMDB id.
+    tmdb_id: Optional[str]
+    # The episode's show TMDB id; None for movies and shows.
+    show_tmdb_id: Optional[str]
+    imdb_id: Optional[str]
+    # The IMDb id is missing and the lookup that could have found it did not
+    # answer, so an IMDb rating cannot be known this scan.
+    imdb_id_transient: bool
+
+
 def _fetch_movie_or_show(
     ctx: _ScanCtx,
     item: Dict[str, Any],
@@ -400,67 +430,54 @@ def _fetch_movie_or_show(
     imdb_id: Optional[str],
     tvdb_id: Optional[str],
     language: str,
-) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
-    """Fetch movie/TV show data from TMDB then IMDb. Returns
-    (tmdb_data, imdb_data, imdb_id). Caller has checked the breaker.
+) -> _Primary:
+    """Fetch movie/TV show data from TMDB, resolving the TMDB id first when
+    missing, and write back an IMDb id TMDB reports.
 
-    A provider this item needs but cannot reach (breaker open, or the TMDB ID
-    lookup failed transiently) yields ``_TRANSIENT``, never None: None means the
-    provider answered "nothing", which would advance the maturity clock.
+    A TMDB call this item needs but cannot make or complete (breaker open, or
+    the id lookup failed transiently) yields ``TRANSIENT``, never None: None
+    means TMDB answered "nothing", which would advance the maturity clock.
     """
     tmdb_data = None  # type: Any
-    imdb_data = None  # type: Any
 
-    # Resolve TMDB ID if missing.
     if not tmdb_id:
         if ctx.breaker.is_disabled("tmdb"):
-            tmdb_data = _TRANSIENT
+            tmdb_data = TRANSIENT
         else:
             resolved = _call_provider(
                 "tmdb",
                 lambda: resolve_id(ctx.tmdb_api_key, tvdb_id=tvdb_id, imdb_id=imdb_id),
                 ctx, identity,
             )
-            if resolved is _TRANSIENT:
-                tmdb_data = _TRANSIENT
+            if resolved is TRANSIENT:
+                tmdb_data = TRANSIENT
             elif resolved:
                 tmdb_id = resolved
                 ctx.tracker.upsert_item(ctx.media_type.name, identity, tmdb_id=tmdb_id)
 
-    # Fetch TMDB data.
     if tmdb_id and ctx.breaker.is_disabled("tmdb"):
-        tmdb_data = _TRANSIENT
+        tmdb_data = TRANSIENT
     elif tmdb_id:
-        if ctx.media_type.name == "movie":
-            tmdb_data = _call_provider(
-                "tmdb",
-                lambda: tmdb_fetch_movie(tmdb_id, ctx.tmdb_api_key, language),
-                ctx, identity,
-            )
-        else:
-            tmdb_data = _call_provider(
-                "tmdb",
-                lambda: tmdb_fetch_tvshow(tmdb_id, ctx.tmdb_api_key, language),
-                ctx, identity,
-            )
+        fetch = tmdb_fetch_movie if ctx.media_type.name == "movie" else tmdb_fetch_tvshow
+        found_id = tmdb_id
+        tmdb_data = _call_provider(
+            "tmdb",
+            lambda: fetch(found_id, ctx.tmdb_api_key, language),
+            ctx, identity,
+        )
 
-    # Enrich: if TMDB returned an IMDB ID and the item lacks one, write it back.
-    if (not imdb_id and tmdb_data is not _TRANSIENT and tmdb_data
+    if (not imdb_id and tmdb_data is not TRANSIENT and tmdb_data
             and tmdb_data.get("imdb_id")):
-        new_imdb = tmdb_data["imdb_id"]
-        _enrich_imdb_id(ctx, item, kodi_id, title, identity, new_imdb)
-        imdb_id = new_imdb
+        imdb_id = tmdb_data["imdb_id"]
+        _enrich_imdb_id(ctx, item, kodi_id, title, identity, imdb_id)
 
-    # Fetch IMDb data if a source setting would consult it.
-    if imdb_id and wants_imdb(ctx.default_pref, ctx.rating_pref, ctx.plot_pref):
-        if ctx.breaker.is_disabled("imdb"):
-            imdb_data = _TRANSIENT
-        else:
-            imdb_data = _call_provider(
-                "imdb", lambda: imdb_fetch_movie(imdb_id), ctx, identity,
-            )
-
-    return tmdb_data, imdb_data, imdb_id
+    return _Primary(
+        tmdb=tmdb_data,
+        tmdb_id=tmdb_id,
+        show_tmdb_id=None,
+        imdb_id=imdb_id,
+        imdb_id_transient=not imdb_id and tmdb_data is TRANSIENT,
+    )
 
 
 def _fetch_episode_tmdb(
@@ -474,16 +491,17 @@ def _fetch_episode_tmdb(
     tmdb_id: str,
     imdb_id: Optional[str],
     language: str,
-) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+) -> Tuple[Any, Optional[str], bool]:
     """TMDB episode path: look up the season (cached), match by episode ID, and
-    best-effort enrich the IMDB ID. Returns (tmdb_episode_data, imdb_id).
+    enrich the IMDB ID. Returns (tmdb_episode_data, imdb_id,
+    imdb_id_transient).
 
-    Mirrors the original behaviour exactly: the (cached) season fetch is NOT
-    preceded by a pacing sleep and only arms the pacer on a cache MISS; breaker
-    success is recorded once at the end; ApiKeyError propagates and a transient
-    failure trips the breaker.
+    The (cached) season fetch is not preceded by a pacing sleep and only arms
+    the pacer on a cache miss; breaker success is recorded once at the end;
+    ApiKeyError propagates and a transient failure trips the breaker.
     """
     tmdb_data = None  # type: Any
+    imdb_id_transient = False
     try:
         cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
         is_cache_miss = cache_key not in ctx.season_cache
@@ -492,7 +510,6 @@ def _fetch_episode_tmdb(
         )
         if season_data is not None:
             tmdb_data = _find_episode_by_tmdb_id(season_data, tmdb_id)
-            # Enrich: if the episode has no IMDB ID, fetch it from TMDB.
             if not imdb_id and tmdb_data is not None:
                 ep_num = tmdb_data.get("episode_number", 0)
                 enriched = _call_provider(
@@ -502,10 +519,11 @@ def _fetch_episode_tmdb(
                     ),
                     ctx, identity, best_effort=True,
                 )
-                enriched_imdb = enriched.get("imdb_id") if enriched else None
-                if enriched_imdb:
-                    _enrich_imdb_id(ctx, item, kodi_id, title, identity, enriched_imdb)
-                    imdb_id = enriched_imdb
+                if enriched is TRANSIENT:
+                    imdb_id_transient = True
+                elif enriched and enriched.get("imdb_id"):
+                    imdb_id = enriched["imdb_id"]
+                    _enrich_imdb_id(ctx, item, kodi_id, title, identity, imdb_id)
         if is_cache_miss:
             ctx.pacer.arm()
         ctx.breaker.record_success("tmdb")
@@ -516,17 +534,14 @@ def _fetch_episode_tmdb(
         )
         raise
     except TransientProviderError:
-        # Signal "provider down", not "provider has nothing": returning None
-        # here would make _fetch_for_item compute fetch_clean=True and advance
-        # the maturity clock on an answer that was never received.
-        tmdb_data = _TRANSIENT
+        tmdb_data = TRANSIENT
         if ctx.breaker.record_failure("tmdb"):
             log.warning(
                 "Provider disabled for this cycle after repeated failures",
                 event="scan.breaker", provider="tmdb",
                 threshold=PROVIDER_CIRCUIT_BREAKER_THRESHOLD, identity=identity,
             )
-    return tmdb_data, imdb_id
+    return tmdb_data, imdb_id, imdb_id_transient
 
 
 def _fetch_episode(
@@ -538,93 +553,296 @@ def _fetch_episode(
     tmdb_id: Optional[str],
     imdb_id: Optional[str],
     language: str,
-) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[str]]:
-    """Fetch episode data by ID. Returns (tmdb_data, imdb_data, imdb_id). Caller
-    has checked the breaker and that at least one ID is present.
+) -> _Primary:
+    """Fetch the episode's TMDB record by its TMDB id via the show's season.
 
-    As in _fetch_movie_or_show, a needed provider whose breaker is open yields
-    ``_TRANSIENT`` rather than None.
+    As in _fetch_movie_or_show, a needed TMDB call that cannot be made (breaker
+    open, show id unknown) yields ``TRANSIENT`` rather than None.
     """
     tmdb_data = None  # type: Any
-    imdb_data = None  # type: Any
+    imdb_id_transient = False
+    ep_show_tmdb_id = (ctx.show_id_map or {}).get(item.get("tvshowid"))
 
-    # TMDB path first (so enrichment can provide imdb_id for the IMDb path).
     if tmdb_id and ctx.breaker.is_disabled("tmdb"):
-        tmdb_data = _TRANSIENT
-    elif tmdb_id:
-        ep_show_tmdb_id = (ctx.show_id_map or {}).get(item.get("tvshowid"))
-        if not ep_show_tmdb_id:
-            # Not knowing the show is not an answer from TMDB: hold the clock.
-            log.debug(
-                "No show TMDB ID for episode, TMDB path transient",
-                event="scan.skip", title=title, tvshowid=item.get("tvshowid"),
-            )
-            tmdb_data = _TRANSIENT
-        if ep_show_tmdb_id:
-            season_number = item.get("season", 0)
-            tmdb_data, imdb_id = _fetch_episode_tmdb(
-                ctx, item, kodi_id, title, identity,
-                ep_show_tmdb_id, season_number, tmdb_id, imdb_id, language,
-            )
+        tmdb_data = TRANSIENT
+    elif tmdb_id and not ep_show_tmdb_id:
+        # Not knowing the show is not an answer from TMDB: hold the clock.
+        log.debug(
+            "No show TMDB ID for episode, TMDB path transient",
+            event="scan.skip", title=title, tvshowid=item.get("tvshowid"),
+        )
+        tmdb_data = TRANSIENT
+    elif tmdb_id and ep_show_tmdb_id:
+        tmdb_data, imdb_id, imdb_id_transient = _fetch_episode_tmdb(
+            ctx, item, kodi_id, title, identity,
+            ep_show_tmdb_id, item.get("season", 0), tmdb_id, imdb_id, language,
+        )
 
-    # IMDb path: direct episode fetch by IMDB ID, if a source setting wants it.
-    if imdb_id and wants_imdb(ctx.default_pref, ctx.rating_pref, ctx.plot_pref):
-        if ctx.breaker.is_disabled("imdb"):
-            imdb_data = _TRANSIENT
+    return _Primary(
+        tmdb=tmdb_data,
+        tmdb_id=tmdb_id,
+        show_tmdb_id=ep_show_tmdb_id,
+        imdb_id=imdb_id,
+        imdb_id_transient=imdb_id_transient or (not imdb_id and tmdb_data is TRANSIENT),
+    )
+
+
+_UNFETCHED = object()
+
+
+class _TextSources:
+    """Lazy per-item lookups behind the title/plot chain steps.
+
+    Each method returns the field's value, None (the provider answered and has
+    nothing, or the item has no id for it) or ``TRANSIENT``. TMDB in the folder
+    language reuses the primary fetch; the fallback-language TMDB record is
+    fetched at most once per item, and TVDB records go through the per-scan
+    cache so a show's episode list is fetched once per language.
+    """
+
+    def __init__(
+        self,
+        ctx: _ScanCtx,
+        item: Dict[str, Any],
+        identity: str,
+        primary: _Primary,
+        tvdb_id: Optional[str],
+    ) -> None:
+        self._ctx = ctx
+        self._item = item
+        self._identity = identity
+        self._primary = primary
+        self._tvdb_id = tvdb_id
+        self._tmdb_fallback = _UNFETCHED  # type: Any
+
+    def tmdb(self, field: str, fallback: bool) -> Any:
+        if fallback:
+            if self._tmdb_fallback is _UNFETCHED:
+                self._tmdb_fallback = self._fetch_tmdb_fallback()
+            data = self._tmdb_fallback
         else:
-            imdb_data = _call_provider(
-                "imdb", lambda: imdb_fetch_episode(imdb_id), ctx, identity,
+            data = self._primary.tmdb
+        if data is TRANSIENT:
+            return TRANSIENT
+        return data.get(field) if data else None
+
+    def _fetch_tmdb_fallback(self) -> Any:
+        ctx = self._ctx
+        p = self._primary
+        lang = tmdb_language(ctx.fallback_language)
+        if not p.tmdb_id:
+            return None
+        if ctx.media_type.name == "episode" and not p.show_tmdb_id:
+            return TRANSIENT
+        if ctx.breaker.is_disabled("tmdb"):
+            return TRANSIENT
+        if ctx.media_type.name != "episode":
+            fetch = tmdb_fetch_movie if ctx.media_type.name == "movie" else tmdb_fetch_tvshow
+            return _call_provider(
+                "tmdb",
+                lambda: fetch(p.tmdb_id, ctx.tmdb_api_key, lang),
+                ctx, self._identity,
             )
+        season_number = self._item.get("season", 0)
+        show_id = p.show_tmdb_id or ""
+        cache_key = "{}:{}:{}".format(show_id, season_number, lang)
+        if cache_key in ctx.season_cache:
+            season = ctx.season_cache[cache_key]  # type: Any
+        else:
+            season = _call_provider(
+                "tmdb",
+                lambda: _get_season_data(
+                    show_id, season_number, ctx.tmdb_api_key, lang, ctx.season_cache,
+                ),
+                ctx, self._identity,
+            )
+        if season is TRANSIENT or season is None:
+            return season
+        return _find_episode_by_tmdb_id(season, p.tmdb_id)
 
-    return tmdb_data, imdb_data, imdb_id
+    def tvdb(self, field: str, kodi_lang: str) -> Any:
+        ctx = self._ctx
+        lang = tvdb_language(kodi_lang)
+        if lang is None or not self._tvdb_id:
+            return None
+        if ctx.media_type.name == "tvshow":
+            series = self._tvdb_record("series", self._tvdb_id, lang, tvdb_fetch_series)
+            if series is TRANSIENT or series is None:
+                return series
+            return series.get(_TVDB_SERIES_KEYS[field])
+        if ctx.media_type.name == "episode":
+            show_tvdb_id = ctx.show_tvdb_map.get(self._item.get("tvshowid"))
+            if not show_tvdb_id:
+                return None
+            episodes = self._tvdb_record(
+                "episodes", show_tvdb_id, lang, tvdb_fetch_series_episodes,
+            )
+            if episodes is TRANSIENT or episodes is None:
+                return episodes
+            episode = episodes.get(str(self._tvdb_id))
+            return episode.get(field) if episode else None
+        return None
+
+    def _tvdb_record(
+        self, kind: str, tvdb_id: str, lang: str, fetch: Callable[[str, str], Any],
+    ) -> Any:
+        ctx = self._ctx
+        key = (kind, tvdb_id, lang)
+        if key in ctx.tvdb_cache:
+            return ctx.tvdb_cache[key]
+        if ctx.breaker.is_disabled("tvdb"):
+            return TRANSIENT
+        result = _call_provider(
+            "tvdb", lambda: fetch(tvdb_id, lang), ctx, self._identity,
+        )
+        if result is not TRANSIENT:
+            ctx.tvdb_cache[key] = result
+        return result
 
 
-def _fetch_for_item(
+def _fallback_applies(ctx: _ScanCtx, folder_lang: str) -> bool:
+    """The fallback steps run only when the fallback language is set and is
+    not the folder's own language."""
+    fallback = ctx.fallback_language.strip()
+    return bool(fallback) and tmdb_language(fallback) != tmdb_language(folder_lang)
+
+
+def _text_chain(
+    ctx: _ScanCtx,
+    sources: _TextSources,
+    field: str,
+    folder_lang: str,
+    current: Any,
+) -> Tuple[FieldOutcome, Optional[str]]:
+    """Run the title/plot chain. Returns the outcome and the provider whose
+    step produced the value (None when there is no value).
+
+    Shows and episodes ask TMDB and TVDB in the folder language in the
+    text_source_order, then (when the fallback language differs) both in the
+    fallback language in the fallback_order. Movies ask TMDB only.
+    """
+    def tmdb_step(fallback: bool) -> Tuple[str, Callable[[], Any], bool]:
+        return ("tmdb", lambda: sources.tmdb(field, fallback), fallback)
+
+    def tvdb_step(lang: str, fallback: bool) -> Tuple[str, Callable[[], Any], bool]:
+        return ("tvdb", lambda: sources.tvdb(field, lang), fallback)
+
+    movie = ctx.media_type.name == "movie"
+    if movie:
+        specs = [tmdb_step(False)]
+    elif ctx.text_order == TEXT_TVDB_FIRST:
+        specs = [tvdb_step(folder_lang, False), tmdb_step(False)]
+    else:
+        specs = [tmdb_step(False), tvdb_step(folder_lang, False)]
+
+    if _fallback_applies(ctx, folder_lang):
+        if movie:
+            specs.append(tmdb_step(True))
+        elif ctx.fallback_order == FALLBACK_TMDB_FIRST:
+            specs += [tmdb_step(True), tvdb_step(ctx.fallback_language, True)]
+        else:
+            specs += [tvdb_step(ctx.fallback_language, True), tmdb_step(True)]
+
+    heard = []  # type: List[str]
+
+    def step(provider: str, fetch: Callable[[], Any], fallback: bool) -> Step:
+        def run() -> Any:
+            heard.append(provider)
+            return fetch()
+        return Step(fetch=run, fallback=fallback)
+
+    outcome = run_chain([step(*spec) for spec in specs], current)
+    return outcome, (heard[-1] if outcome.value is not None else None)
+
+
+def _imdb_rating(ctx: _ScanCtx, primary: _Primary, identity: str) -> Any:
+    """The item's IMDb (rating, votes), None when IMDb has none, or TRANSIENT
+    when the store is not ready, the IMDb id could not be settled, or the
+    lookup failed."""
+    if not ctx.imdb_ready or primary.imdb_id_transient:
+        return TRANSIENT
+    if not primary.imdb_id:
+        return None
+    try:
+        return imdb_rating_lookup(primary.imdb_id)
+    except TransientProviderError:
+        return TRANSIENT
+    except Exception:
+        log.exception(
+            "IMDb rating lookup failed",
+            event="scan.imdb_lookup_failed", identity=identity,
+        )
+        return TRANSIENT
+
+
+def _resolve_ratings(
     ctx: _ScanCtx,
     item: Dict[str, Any],
-    kodi_id: Any,
-    title: str,
+    primary: _Primary,
     identity: str,
-    tmdb_id: Optional[str],
-    imdb_id: Optional[str],
-    tvdb_id: Optional[str],
-    language: str,
-) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], bool]:
-    """Dispatch the movie/show or episode fetch and report whether the answer
-    is clean.
+) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str], Optional[int]]:
+    """Ratings verdict and map. Returns (transient, new_ratings_map,
+    default_source, default_votes).
 
-    Wraps the existing _fetch_movie_or_show / _fetch_episode dispatch. A
-    consulted provider that transient-failed yields the _TRANSIENT sentinel;
-    this converts it to None (so resolve treats it as "no data") and reports
-    fetch_clean=False. A clean 404 stays None with fetch_clean=True. Counters
-    advance only when fetch_clean is True.
+    Transient when a source rating_source consults did not answer for this
+    item; a source it does not consult cannot hold the rating back.
     """
-    if ctx.media_type.name == "episode":
-        tmdb_raw, imdb_raw, _ = _fetch_episode(
-            ctx, item, kodi_id, title, identity, tmdb_id, imdb_id, language,
-        )
-    else:
-        tmdb_raw, imdb_raw, _ = _fetch_movie_or_show(
-            ctx, item, kodi_id, title, identity,
-            tmdb_id, imdb_id, tvdb_id, language,
-        )
+    use_tmdb, use_imdb = rating_sources(ctx.rating_pref)
+    imdb = _imdb_rating(ctx, primary, identity) if use_imdb else None
+    if (use_tmdb and primary.tmdb is TRANSIENT) or imdb is TRANSIENT:
+        return True, None, None, None
+    tmdb_data = primary.tmdb if primary.tmdb is not TRANSIENT else None
+    new_ratings, source, votes, _slot_fps = build_ratings(
+        tmdb_data or {}, imdb, item.get("ratings") or {},
+        ctx.rating_pref, nfo_managed=False,
+    )
+    return False, new_ratings, source, votes
 
-    fetch_clean = not (tmdb_raw is _TRANSIENT or imdb_raw is _TRANSIENT)
-    tmdb_data = None if tmdb_raw is _TRANSIENT else tmdb_raw
-    imdb_data = None if imdb_raw is _TRANSIENT else imdb_raw
-    return tmdb_data, imdb_data, fetch_clean
+
+def _resolve_fields(
+    ctx: _ScanCtx,
+    item: Dict[str, Any],
+    identity: str,
+    primary: _Primary,
+    tvdb_id: Optional[str],
+    folder_lang: str,
+    fields: List[str],
+) -> Tuple[Dict[str, FieldOutcome], Dict[str, Any], Dict[str, Optional[str]]]:
+    """Per-field verdicts for the non-rating fields.
+
+    Returns (outcomes keyed by Kodi field, provider values keyed by TMDB key
+    for _extract_fields, winning provider per Kodi field).
+    """
+    outcomes = {}  # type: Dict[str, FieldOutcome]
+    values = {}  # type: Dict[str, Any]
+    providers = {}  # type: Dict[str, Optional[str]]
+    text = _TextSources(ctx, item, identity, primary, tvdb_id)
+    tmdb_transient = primary.tmdb is TRANSIENT
+    tmdb_data = {} if tmdb_transient or not primary.tmdb else primary.tmdb
+
+    for f in fields:
+        if f in _RATING_FIELDS:
+            continue
+        key = _KODI_TO_TMDB.get(f, f)
+        if f in _CHAIN_FIELDS:
+            outcome, provider = _text_chain(ctx, text, f, folder_lang, item.get(f))
+        else:
+            value = None if tmdb_transient else tmdb_data.get(key)
+            outcome = FieldOutcome(transient=tmdb_transient, value=value, from_fallback=False)
+            provider = None if is_empty(value) else "tmdb"
+        outcomes[f] = outcome
+        providers[f] = provider
+        if outcome.value is not None:
+            values[key] = outcome.value
+    return outcomes, values, providers
 
 
 def _write_fields(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
     kodi_id: Any,
     title: str,
     identity: str,
     fields_to_write: Dict[str, Any],
-    source_map: Dict[str, str],
-    ratings_source: Optional[str],
-    ratings_votes: Optional[int],
     stats: Dict[str, Any],
 ) -> set:
     """Write fields to Kodi and count stats. Returns the set of fields written
@@ -679,6 +897,28 @@ def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
         )
 
 
+def _candidate_fields(media_type: MediaType, enabled_fields: FrozenSet[str]) -> List[str]:
+    """Fields this pass manages: enabled, backfilled for the media type, and
+    known to the providers. Titles are managed for episodes only."""
+    fields = (
+        {_TMDB_TO_KODI.get(k, k) for k in _TMDB_TO_KODI}
+        & enabled_fields & media_type.backfill_fields
+    )
+    if media_type.name != "episode":
+        fields.discard("title")
+    return sorted(fields)
+
+
+def _needed_providers(media_type: MediaType, candidates: List[str]) -> List[str]:
+    """Providers the pass can still make progress with. TMDB always; TVDB
+    when a show or episode text field it supplies is managed. The IMDb store
+    has no breaker, so it never stops a pass."""
+    needed = ["tmdb"]
+    if media_type.name != "movie" and _CHAIN_FIELDS & set(candidates):
+        needed.append("tvdb")
+    return needed
+
+
 def run_scan(
     media_type: MediaType,
     tracker: TrackerDB,
@@ -696,7 +936,7 @@ def run_scan(
     """Run a single scan cycle for one media type.
 
     Queries Kodi for all items (or uses a pre-built list), computes a per-field
-    maturity decision for each, fetches metadata once when any field is due,
+    maturity decision for each, fetches metadata when any field is due,
     refreshes non-final fields overwrite-on-diff, and records the per-field
     sampling facts in the tracker.
 
@@ -708,12 +948,15 @@ def run_scan(
         enabled_fields: Set of field names the user wants backfilled.
         tmdb_api_key: TMDB API key.
         settings: Dict with stale_threshold_days, rate_limit, rating_source,
-            plot_source, default_source, and optionally refetch_schedule.
+            text_source_order, fallback_order, fallback_language, imdb_ready
+            (whether the IMDb ratings store is loaded this cycle; an IMDb
+            rating is transient while it is False) and optionally
+            refetch_schedule.
         monitor: xbmc.Monitor instance (has abortRequested()), or
             None for tests.
         show_id_map: Dict mapping a show's Kodi id to its show-level TMDB ID.
             Required for episode scans so fetch_season uses the show
-            ID, not the episode ID.
+            ID, not the episode ID. The show TVDB ids come from the tracker.
         items: Pre-built list of Kodi items to process. When provided,
             skips the Kodi library query. Useful for targeted scans
             (single item, folder, season) and testing.
@@ -754,13 +997,21 @@ def run_scan(
         sources=source_config.get("sources", []),
         enabled_fields=enabled_fields,
         show_id_map=show_id_map or {},
+        show_tvdb_map=(
+            tracker.get_show_tvdb_map() if media_type.name == "episode" else {}
+        ),
         season_cache={},
+        tvdb_cache={},
         settings=settings,
         schedule=schedule,
         rating_pref=settings.get("rating_source", 0),
-        plot_pref=settings.get("plot_source", 0),
-        default_pref=settings.get("default_source", 0),
+        text_order=settings.get("text_source_order", TEXT_TMDB_FIRST),
+        fallback_order=settings.get("fallback_order", FALLBACK_TVDB_FIRST),
+        fallback_language=settings.get("fallback_language", "en-US"),
+        imdb_ready=bool(settings.get("imdb_ready", False)),
     )
+    candidates = _candidate_fields(media_type, enabled_fields)
+    needed = _needed_providers(media_type, candidates)
 
     log.info(
         "Scan starting",
@@ -850,15 +1101,8 @@ def run_scan(
         fs_map = tracker.get_field_status_map(media_type.name, identity)
         threshold = settings.get("stale_threshold_days", 365)
 
-        candidate_fields = sorted(
-            {_TMDB_TO_KODI.get(k, k) for k in _TMDB_TO_KODI}
-            & ctx.enabled_fields & media_type.backfill_fields
-        )
-
         decisions = {}  # type: Dict[str, str]
-        for f in candidate_fields:
-            if f == "title" and media_type.name != "episode":
-                continue
+        for f in candidates:
             if reset:
                 # Reset path (Update now): every candidate field is due
                 # regardless of its recorded maturity so the clock re-baselines.
@@ -871,7 +1115,6 @@ def run_scan(
                 fs.get("next_retry"),
                 today,
                 threshold,
-                _structurally_absent(f, ctx.default_pref),
             )
 
         # Nothing is due this scan: mark processed and move on without a fetch.
@@ -890,10 +1133,10 @@ def run_scan(
             decisions=decisions,
         )
 
-        if breaker.all_disabled(("tmdb",)):
+        if breaker.all_disabled(needed):
             log.warning(
-                "TMDB disabled, stopping scan",
-                event="scan.breaker", scope="tmdb",
+                "Every provider the enabled fields need is disabled, stopping scan",
+                event="scan.breaker", scope="all", providers=needed,
                 media_type=media_type.name, processed=stats["processed"],
             )
             stats["aborted"] = True
@@ -908,41 +1151,46 @@ def run_scan(
             stats["skipped"] += 1
             continue
 
-        # Fetch the item once; fetch_clean is False if a consulted provider
-        # transient-failed (see _fetch_for_item / _call_provider).
-        tmdb_data, imdb_data, fetch_clean = _fetch_for_item(
-            ctx, item, kodi_id, title, identity,
-            tmdb_id, imdb_id, tvdb_id, language,
-        )
-
-        merged_data, source_map = resolve_metadata(
-            tmdb_data, imdb_data, _RESOLVE_FIELDS, ctx.plot_pref, ctx.default_pref,
-        )
+        tmdb_lang = tmdb_language(language)
+        if media_type.name == "episode":
+            primary = _fetch_episode(
+                ctx, item, kodi_id, title, identity, tmdb_id, imdb_id, tmdb_lang,
+            )
+        else:
+            primary = _fetch_movie_or_show(
+                ctx, item, kodi_id, title, identity,
+                tmdb_id, imdb_id, tvdb_id, tmdb_lang,
+            )
 
         # Non-final fields are refreshed (overwrite-on-diff); final ones are not.
-        nonfinal = [
-            f for f, d in decisions.items() if d not in (FINAL, FINAL_EMPTY)
-        ]
-        fields_to_write = _extract_fields(merged_data, nonfinal, media_type, item)
+        nonfinal = [f for f, d in decisions.items() if d != FINAL]
+        outcomes, values, providers = _resolve_fields(
+            ctx, item, identity, primary, tvdb_id, language, nonfinal,
+        )
+        answered = [f for f in nonfinal if f in outcomes and not outcomes[f].transient]
+        fields_to_write = {
+            f: v
+            for f, v in _extract_fields(values, answered, media_type, item).items()
+            if may_write(False, item.get(f), None)
+        }
 
         ratings_source = None  # type: Optional[str]
         ratings_votes = None  # type: Optional[int]
-        if "rating" in nonfinal or "votes" in nonfinal:
-            imdb_dict = imdb_data or {}
-            imdb_rating = (
-                (imdb_dict["rating"], imdb_dict.get("votes"))
-                if imdb_dict.get("rating") is not None else None
+        rating_due = [f for f in nonfinal if f in _RATING_FIELDS]
+        if rating_due:
+            transient, new_ratings, ratings_source, ratings_votes = _resolve_ratings(
+                ctx, item, primary, identity,
             )
-            new_ratings, ratings_source, ratings_votes, _slot_fps = build_ratings(
-                tmdb_data or {}, imdb_rating, item.get("ratings") or {},
-                ctx.rating_pref, nfo_managed=False,
+            rating_outcome = FieldOutcome(
+                transient=transient, value=None, from_fallback=False,
             )
+            for f in rating_due:
+                outcomes[f] = rating_outcome
             if new_ratings is not None:
                 fields_to_write["ratings"] = new_ratings
 
         written = _write_fields(
-            ctx, item, kodi_id, title, identity, fields_to_write,
-            source_map, ratings_source, ratings_votes, stats,
+            ctx, kodi_id, title, identity, fields_to_write, stats,
         )
 
         # A field whose write was attempted and rejected by Kodi was NOT filled,
@@ -953,39 +1201,41 @@ def run_scan(
         attempted = set(fields_to_write)
         if "ratings" in attempted:
             attempted.discard("ratings")
-            attempted.update({"rating", "votes"})
+            attempted.update(_RATING_FIELDS)
         write_failed = attempted - written
 
-        # Advance counters ONLY on a clean answer; a transient failure leaves
-        # them put so the field is retried next scan instead of being wrongly
-        # sampled/finalized. The reset path (Update now) re-baselines each clock.
-        if fetch_clean:
-            premiered = item.get(media_type.date_field, "")
-            for f in nonfinal:
-                if f in write_failed:
-                    continue
-                if reset:
-                    nd = compute_next_due(
-                        1, ctx.schedule, premiered, threshold, today,
-                    )
-                    tracker.reset_field_clock(media_type.name, identity, f, next_retry=nd)
-                    continue
-                new_count = int(fs_map.get(f, {}).get("fetch_count") or 0) + 1
-                next_due = compute_next_due(
-                    new_count, ctx.schedule, premiered, threshold, today,
-                )
-                if f in ("rating", "votes"):
-                    # Rating/votes are sourced from the named-slot ratings map;
-                    # record the chosen slot and its votes for staleness.
-                    src = ratings_source
-                    vc = ratings_votes
-                else:
-                    src = source_map.get(_KODI_TO_TMDB.get(f, f))
-                    vc = None
+        # Advance a field's clock ONLY when its own providers answered; a
+        # transient field is retried next scan instead of being wrongly
+        # sampled/finalized. The reset path (Update now) re-baselines instead.
+        premiered = item.get(media_type.date_field, "")
+        for f in nonfinal:
+            outcome = outcomes[f]
+            if outcome.transient or f in write_failed:
+                continue
+            if reset:
+                nd = compute_next_due(1, ctx.schedule, premiered, threshold, today)
+                tracker.reset_field_clock(media_type.name, identity, f, next_retry=nd)
+                continue
+            new_count = int(fs_map.get(f, {}).get("fetch_count") or 0) + 1
+            next_due = compute_next_due(
+                new_count, ctx.schedule, premiered, threshold, today,
+            )
+            if f in _RATING_FIELDS:
+                # Rating/votes are sourced from the named-slot ratings map;
+                # record the chosen slot and its votes for staleness.
                 tracker.record_field_fetch(
                     media_type.name, identity, f,
-                    next_retry=next_due, source=src, vote_count=vc,
+                    next_retry=next_due, source=ratings_source,
+                    vote_count=ratings_votes,
                 )
+                continue
+            tracker.record_field_fetch(
+                media_type.name, identity, f,
+                next_retry=next_due, source=providers.get(f),
+                from_fallback=(
+                    outcome.from_fallback if outcome.value is not None else None
+                ),
+            )
         tracker.commit()
 
         tracker.mark_cycle_processed(media_type.name, identity)
@@ -1000,7 +1250,7 @@ def run_scan(
         skipped=stats["skipped"],
         updated=stats["updated"],
         errors=stats["errors"],
-        disabled=sorted(p for p in ("tmdb", "imdb") if breaker.is_disabled(p)),
+        disabled=breaker.disabled(),
         duration_ms=int((time.perf_counter() - scan_start) * 1000),
     )
 

@@ -14,7 +14,6 @@ from typing import Optional, Tuple
 FETCH_NOW = "fetch_now"
 SKIP_NOT_DUE = "skip_not_due"
 FINAL = "final"
-FINAL_EMPTY = "final_empty"
 
 
 def decide_field(
@@ -23,11 +22,8 @@ def decide_field(
     next_retry: Optional[str],
     today: str,
     threshold_days: int,
-    structurally_absent: bool,
 ) -> str:
     """Decide what to do with a field this scan, before any API call."""
-    if structurally_absent:
-        return FINAL_EMPTY
     if fetch_count == 0:
         return FETCH_NOW
     if content_age_days is not None and content_age_days >= threshold_days:

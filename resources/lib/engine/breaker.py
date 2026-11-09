@@ -9,7 +9,7 @@ Logging:
 """
 from __future__ import annotations
 
-from typing import Dict, Iterable, Set
+from typing import Dict, Iterable, List, Set
 
 from resources.lib.constants import PROVIDER_CIRCUIT_BREAKER_THRESHOLD
 
@@ -24,6 +24,10 @@ class CircuitBreaker:
 
     def is_disabled(self, provider: str) -> bool:
         return provider in self._disabled
+
+    def disabled(self) -> List[str]:
+        """Names of the providers disabled this cycle, sorted."""
+        return sorted(self._disabled)
 
     def all_disabled(self, providers: Iterable[str]) -> bool:
         """True when every named provider is disabled; False for none named."""

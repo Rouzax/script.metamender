@@ -465,6 +465,16 @@ def test_show_id_map_keyed_by_kodi_id_survives_same_title(tmp_path):
     assert result == {1: "2316", 2: "2996"}
 
 
+def test_show_tvdb_map_keyed_by_kodi_id(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    tracker.upsert_item("tvshow", "a", title="A", kodi_id=1, tvdb_id="71663")
+    tracker.upsert_item("tvshow", "b", title="B", kodi_id=2, tmdb_id="2996")
+    tracker.upsert_item("episode", "c", title="C", kodi_id=3, tvdb_id="349232")
+    result = tracker.get_show_tvdb_map()
+    tracker.close()
+    assert result == {1: "71663"}
+
+
 # --- Schema v3: provenance columns and settings fingerprint ---
 
 _V2_SCHEMA_SQL = """\

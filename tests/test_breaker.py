@@ -69,3 +69,11 @@ def test_trip_reported_once():
     cb = CircuitBreaker(threshold=1)
     assert cb.record_failure("tmdb") is True   # newly tripped
     assert cb.record_failure("tmdb") is False  # already disabled, not "newly" tripped
+
+
+def test_disabled_lists_providers_sorted():
+    cb = CircuitBreaker(threshold=1)
+    assert cb.disabled() == []
+    cb.disable("tvdb")
+    cb.record_failure("tmdb")
+    assert cb.disabled() == ["tmdb", "tvdb"]

@@ -35,6 +35,7 @@ from resources.lib.service.daemon import (
     _get_db_path,
     _get_sources_config_path,
     _load_settings,
+    _prepare_imdb_ratings,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.utils import (
@@ -184,6 +185,8 @@ def update_now(dbtype: str, dbid: str) -> None:
         if media_type.name == "episode":
             show_id_map = tracker.get_show_id_map()
 
+        monitor = xbmc.Monitor()
+        settings["imdb_ready"] = _prepare_imdb_ratings(settings, monitor)
         stats = run_scan(
             media_type=media_type,
             tracker=tracker,
@@ -191,7 +194,7 @@ def update_now(dbtype: str, dbid: str) -> None:
             enabled_fields=settings["enabled_fields"],
             tmdb_api_key=tmdb_api_key,
             settings=settings,
-            monitor=xbmc.Monitor(),
+            monitor=monitor,
             items=[item],
             reset=True,
             breaker=CircuitBreaker(),

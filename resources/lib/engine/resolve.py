@@ -1,120 +1,36 @@
 """
-Source priority resolution for MetaMender.
+Rating resolution for MetaMender.
 
-Resolves per-field values between TMDB and IMDb data based on user
-preference settings. Handles four modes: Prefer TMDB, Prefer IMDb,
-TMDB only, IMDb only.
+Builds the Kodi named-slot ratings map from the TMDB and IMDb ratings under
+the user's rating_source preference: Prefer TMDB, Prefer IMDb, TMDB only,
+IMDb only.
 
 Logging:
     Logger: 'resolve'
     Key events:
-        - resolve.field (DEBUG): Field resolved from a specific source
+        - resolve.ratings (DEBUG): Ratings map built
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from resources.lib.engine.protect import fingerprint
-from resources.lib.utils import get_logger, is_empty
+from resources.lib.utils import get_logger
 
 log = get_logger('resolve')
 
-# Preference values matching settings.xml integer options
+# rating_source values, matching the settings.xml integer options
 PREFER_TMDB = 0
 PREFER_IMDB = 1
 TMDB_ONLY = 2
 IMDB_ONLY = 3
 
-# Fields where plot_source preference applies
-_PLOT_FIELDS = frozenset({"plot"})
 
-
-def resolve_field(
-    field: str,
-    tmdb_value: Any,
-    imdb_value: Any,
-    preference: int,
-) -> Tuple[Any, str]:
-    """Resolve a single field between TMDB and IMDb values.
-
-    Returns (value, source_name). source_name is "tmdb", "imdb", or
-    "" if both are empty.
-    """
-    if preference == TMDB_ONLY:
-        if not is_empty(tmdb_value):
-            return (tmdb_value, "tmdb")
-        return (None, "")
-
-    if preference == IMDB_ONLY:
-        if not is_empty(imdb_value):
-            return (imdb_value, "imdb")
-        return (None, "")
-
-    if preference == PREFER_TMDB:
-        if not is_empty(tmdb_value):
-            return (tmdb_value, "tmdb")
-        if not is_empty(imdb_value):
-            return (imdb_value, "imdb")
-        return (None, "")
-
-    if preference == PREFER_IMDB:
-        if not is_empty(imdb_value):
-            return (imdb_value, "imdb")
-        if not is_empty(tmdb_value):
-            return (tmdb_value, "tmdb")
-        return (None, "")
-
-    # Unknown preference, default to prefer TMDB
-    if not is_empty(tmdb_value):
-        return (tmdb_value, "tmdb")
-    if not is_empty(imdb_value):
-        return (imdb_value, "imdb")
-    return (None, "")
-
-
-def resolve_metadata(
-    tmdb_data: Optional[Dict[str, Any]],
-    imdb_data: Optional[Dict[str, Any]],
-    gap_fields: List[str],
-    plot_pref: int,
-    default_pref: int,
-) -> Tuple[Dict[str, Any], Dict[str, str]]:
-    """Resolve all gap fields between TMDB and IMDb data.
-
-    Args:
-        tmdb_data: Dict from TMDB provider, or None.
-        imdb_data: Dict from IMDb provider, or None.
-        gap_fields: List of field names that need values.
-        plot_pref: Preference for the plot field.
-        default_pref: Preference for all other fields.
-
-    Returns:
-        Tuple of (merged_data, source_map).
-        merged_data: Dict containing the best value per field.
-        source_map: Dict mapping field name to source name ("tmdb" or
-            "imdb") for fields that got a value.
-    """
-    tmdb = tmdb_data or {}
-    imdb = imdb_data or {}
-
-    merged = {}  # type: Dict[str, Any]
-    sources = {}  # type: Dict[str, str]
-
-    for field in gap_fields:
-        pref = plot_pref if field in _PLOT_FIELDS else default_pref
-        value, source = resolve_field(field, tmdb.get(field), imdb.get(field), pref)
-        if not is_empty(value):
-            merged[field] = value
-            sources[field] = source
-
-    return (merged, sources)
-
-
-def wants_imdb(default_pref: int, rating_pref: int, plot_pref: int) -> bool:
-    """Return True if any source setting would consult IMDb."""
-    return any(
-        p in (PREFER_TMDB, PREFER_IMDB, IMDB_ONLY)
-        for p in (default_pref, rating_pref, plot_pref)
+def rating_sources(rating_pref: int) -> Tuple[bool, bool]:
+    """(consults TMDB, consults IMDb) under a rating_source preference."""
+    return (
+        rating_pref in (PREFER_TMDB, PREFER_IMDB, TMDB_ONLY),
+        rating_pref in (PREFER_TMDB, PREFER_IMDB, IMDB_ONLY),
     )
 
 
@@ -193,8 +109,7 @@ def build_ratings(
     owned = owned_slots or {}
 
     # Collect in-range candidates honoring the preference's source filter
-    use_tmdb = rating_pref in (PREFER_TMDB, PREFER_IMDB, TMDB_ONLY)
-    use_imdb = rating_pref in (PREFER_TMDB, PREFER_IMDB, IMDB_ONLY)
+    use_tmdb, use_imdb = rating_sources(rating_pref)
     candidates = {}  # type: Dict[str, Tuple[float, int]]
     if use_tmdb:
         r = _norm_rating(tmdb_data.get("rating"))

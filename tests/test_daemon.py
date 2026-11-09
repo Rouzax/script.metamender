@@ -79,20 +79,85 @@ def test_maybe_prune_orphans_retention_zero_never_prunes():
     tracker.prune_orphans.assert_not_called()
 
 
-def test_load_settings_has_default_source_and_schedule(kodi_stubs, settings_mock):
-    """_load_settings must include default_source and refetch_schedule (raw string),
-    and must NOT include min_votes_movie, min_votes_episode, or max_retries."""
+def test_load_settings_has_new_keys_not_old(kodi_stubs, settings_mock):
+    """_load_settings carries the text-source keys with their defaults and the
+    raw refetch_schedule string; the replaced and retired keys are gone."""
     s = daemon._load_settings()
 
-    assert "default_source" in s
-    assert isinstance(s["default_source"], int)
-
-    assert "refetch_schedule" in s
+    assert s["text_source_order"] == 0
+    assert s["fallback_order"] == 0
+    assert s["fallback_language"] == "en-US"
     assert isinstance(s["refetch_schedule"], str)
 
-    assert "max_retries" not in s
-    assert "min_votes_movie" not in s
-    assert "min_votes_episode" not in s
+    for retired in ("plot_source", "default_source", "max_retries",
+                    "min_votes_movie", "min_votes_episode"):
+        assert retired not in s
+
+
+def _prepare_settings(rating_source=0, fields=("rating",)):
+    return {"rating_source": rating_source, "enabled_fields": frozenset(fields)}
+
+
+class _AbortMonitor:
+    def __init__(self, aborted=False):
+        self.aborted = aborted
+
+    def abortRequested(self):
+        return self.aborted
+
+
+def test_prepare_imdb_ratings_passes_abort_on_shutdown_or_playback(kodi_stubs):
+    from unittest.mock import patch
+
+    monitor = _AbortMonitor()
+    with patch.object(daemon.imdb_ratings, "prepare", return_value=True) as prep:
+        assert daemon._prepare_imdb_ratings(_prepare_settings(), monitor) is True
+    abort = prep.call_args[0][0]
+    with patch.object(daemon.xbmc, "getCondVisibility", return_value=False):
+        assert abort() is False
+        monitor.aborted = True
+        assert abort() is True
+    monitor.aborted = False
+    with patch.object(daemon.xbmc, "getCondVisibility", return_value=True):
+        assert abort() is True
+
+
+def test_prepare_imdb_ratings_skipped_when_imdb_not_consulted(kodi_stubs):
+    from unittest.mock import patch
+
+    with patch.object(daemon.imdb_ratings, "prepare") as prep:
+        assert daemon._prepare_imdb_ratings(
+            _prepare_settings(rating_source=2), _AbortMonitor()
+        ) is False
+        assert daemon._prepare_imdb_ratings(
+            _prepare_settings(fields=("plot",)), _AbortMonitor()
+        ) is False
+    prep.assert_not_called()
+
+
+def test_prepare_imdb_ratings_exception_yields_not_ready(kodi_stubs):
+    from unittest.mock import patch
+
+    with patch.object(daemon.imdb_ratings, "prepare", side_effect=RuntimeError("boom")), \
+            patch.object(daemon.log, "exception") as log_exc:
+        assert daemon._prepare_imdb_ratings(_prepare_settings(), _AbortMonitor()) is False
+    log_exc.assert_called_once()
+    assert log_exc.call_args.kwargs["event"] == "service.imdb_prepare_failed"
+
+
+def test_run_scan_passes_imdb_ready_to_every_pass(kodi_stubs):
+    from unittest.mock import patch
+
+    tracker = MagicMock()
+    tracker.get_show_id_map.return_value = {}
+    settings = {"tmdb_api_key": "k", "enabled_fields": frozenset({"rating"}),
+                "rating_source": 0}
+    with patch.object(daemon, "_prepare_imdb_ratings", return_value=True) as prep, \
+            patch.object(daemon, "run_scan", return_value={}) as scan:
+        daemon._run_scan(tracker, {}, settings, _AbortMonitor())
+    prep.assert_called_once()
+    assert [c.kwargs["settings"]["imdb_ready"] for c in scan.call_args_list] == [True] * 3
+    assert "imdb_ready" not in settings
 
 
 class _FakeMonitor:
