@@ -216,10 +216,64 @@ def test_400_is_transient():
     assert posts[0]["transient_400"] is True
 
 
-def test_project_key_not_logged(caplog):
-    caplog.set_level(logging.DEBUG)
+def test_episode_without_translation_yields_empty_text():
+    page = {"data": {"episodes": [
+        {"id": 5, "name": None, "overview": None},
+        {"id": 6, "name": "Titel", "overview": "Plot"},
+    ]}, "links": {"next": None}}
     with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
-            patch.object(tvdb, "provider_get", side_effect=_router(_series_routes())):
-        tvdb.fetch_series("80767", "nld")
-    assert constants.TVDB_API_KEY not in caplog.text
-    assert "tok-1" not in caplog.text
+            patch.object(tvdb, "provider_get", side_effect=_router({"page=0": page})):
+        result = tvdb.fetch_series_episodes("1", "nld")
+    assert result == {
+        "5": {"title": "", "plot": ""},
+        "6": {"title": "Titel", "plot": "Plot"},
+    }
+
+
+def test_episode_without_id_is_skipped():
+    page = {"data": {"episodes": [{"name": "x"}, {"id": 2, "name": "y"}]},
+            "links": {"next": None}}
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router({"page=0": page})):
+        assert list(tvdb.fetch_series_episodes("1", "nld")) == ["2"]
+
+
+def test_translation_transient_error_propagates():
+    routes = _series_routes(TransientProviderError("http 500"))
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router(routes)):
+        with pytest.raises(TransientProviderError):
+            tvdb.fetch_series("80767", "nld")
+
+
+class _Resp:
+    def __init__(self, status, body):
+        self.status_code = status
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+def test_project_key_not_logged(caplog):
+    """Drive the real http helpers over a failing transport: the key and the
+    token must not reach log text."""
+    import requests
+
+    caplog.set_level(logging.DEBUG)
+    key, token = constants.TVDB_API_KEY, "tok-secret"
+
+    def fake_post(url, json=None, **kwargs):
+        return _Resp(200, {"data": {"token": token}})
+
+    def fake_get(url, **kwargs):
+        raise requests.ConnectionError(
+            "failed {} Authorization: Bearer {} apikey={}".format(url, token, key)
+        )
+
+    with patch("resources.lib.providers.http.requests.post", side_effect=fake_post), \
+            patch("resources.lib.providers.http.requests.get", side_effect=fake_get):
+        with pytest.raises(TransientProviderError) as exc:
+            tvdb.fetch_series("80767", "nld")
+    assert key not in caplog.text and token not in caplog.text
+    assert key not in str(exc.value) and token not in str(exc.value)

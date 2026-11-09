@@ -10,7 +10,7 @@ Auth:
     token is cached for the process; a 401 triggers one fresh login and one
     retry. A login rejection, or a 401 that survives the fresh login, raises
     TvdbAuthError so the caller can disable TVDB without touching other
-    providers.
+    providers; the caller logs it once.
 
 Logging:
     Logger: 'tvdb'
@@ -18,7 +18,6 @@ Logging:
         - tvdb.login: bearer token obtained
         - tvdb.series: series names and translations fetched
         - tvdb.episodes: full episode list fetched
-        - tvdb.auth_error: login rejected or 401 after a fresh login
 """
 from __future__ import annotations
 
@@ -66,7 +65,6 @@ def _login() -> str:
             transient_400=True,
         )
     except ApiKeyError:
-        log.error("TVDB login rejected", event="tvdb.auth_error", stage="login")
         raise TvdbAuthError("TVDB login rejected")
     token = ((body or {}).get("data") or {}).get("token")
     if not token:
@@ -97,11 +95,6 @@ def _get(path: str) -> Optional[Dict[str, Any]]:
             )
         except ApiKeyError:
             if attempt:
-                log.error(
-                    "TVDB refused a fresh token",
-                    event="tvdb.auth_error",
-                    stage="request",
-                )
                 raise TvdbAuthError("TVDB refused a fresh token")
             _reset_token()
     raise AssertionError("unreachable")  # pragma: no cover
@@ -149,8 +142,11 @@ def fetch_series_episodes(
 ) -> Optional[Dict[str, Dict[str, str]]]:
     """Fetch every episode of a series in `lang`, keyed by TVDB episode id.
 
-    Returns {episode_id: {"title", "plot"}} (missing text is ""), or None when
-    TVDB has no such series. Raises TransientProviderError when any page
+    Returns {episode_id: {"title", "plot"}}, or None when TVDB has no such
+    series. Title and plot are the `lang` translation only: TVDB returns null
+    for an episode with no translation in `lang` (verified live, no fallback
+    to the original or English text), which becomes "". Records without an id
+    are skipped. Raises TransientProviderError when any page
     fails or vanishes, so a partial list is never returned or cached.
     """
     episodes: Dict[str, Dict[str, str]] = {}
@@ -161,7 +157,9 @@ def fetch_series_episodes(
                 return None
             raise TransientProviderError("tvdb episode page {} missing".format(page))
         for ep in (body.get("data") or {}).get("episodes") or []:
-            episodes[str(ep.get("id"))] = {
+            if ep.get("id") is None:
+                continue
+            episodes[str(ep["id"])] = {
                 "title": ep.get("name") or "",
                 "plot": ep.get("overview") or "",
             }
