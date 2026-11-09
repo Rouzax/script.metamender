@@ -116,6 +116,7 @@ def _make_episode_item(
     # type: (...) -> Dict[str, Any]
     return {
         "episodeid": 100,
+        "tvshowid": 10,
         "title": title,
         "showtitle": showtitle,
         "season": season,
@@ -973,7 +974,7 @@ class TestRunScanEpisodes:
         mock_update.return_value = True
 
         tracker = _make_tracker(tmp_path)
-        show_map = {"Test Show": "55555"}
+        show_map = {10: "55555"}
         stats = run_scan(
             EPISODE, tracker, _make_source_config(),
             frozenset({"rating", "plot", "title"}),
@@ -1005,7 +1006,7 @@ class TestRunScanEpisodes:
         mock_update.return_value = True
 
         tracker = _make_tracker(tmp_path)
-        show_map = {"Test Show": "55555"}
+        show_map = {10: "55555"}
         run_scan(
             EPISODE, tracker, _make_source_config(),
             frozenset({"rating", "plot", "title"}),
@@ -1030,7 +1031,7 @@ class TestRunScanEpisodes:
         mock_update.return_value = True
 
         tracker = _make_tracker(tmp_path)
-        show_map = {"Test Show": "55555"}
+        show_map = {10: "55555"}
         stats = run_scan(
             EPISODE, tracker, _make_source_config(),
             frozenset({"rating"}),
@@ -1066,7 +1067,7 @@ class TestRunScanEpisodes:
             EPISODE, tracker, _make_source_config(),
             frozenset({"rating"}),
             "fake_key", _make_settings(),
-            show_id_map={"Test Show": "55555"},
+            show_id_map={10: "55555"},
         )
 
         assert stats["skipped"] >= 1
@@ -1097,7 +1098,7 @@ class TestRunScanEpisodes:
         mock_update.return_value = True
 
         tracker = _make_tracker(tmp_path)
-        show_map = {"Test Show": "55555"}
+        show_map = {10: "55555"}
         stats = run_scan(
             EPISODE, tracker, _make_source_config(),
             frozenset({"rating"}),
@@ -1977,7 +1978,7 @@ class TestEpisodeTransientDoesNotAdvanceClock:
             EPISODE, tracker, _make_source_config(),
             frozenset({"rating", "plot", "title"}),
             "fake_key", _make_settings(),
-            show_id_map={"Test Show": "55555"},
+            show_id_map={10: "55555"},
         )
         fs_map = tracker.get_field_status_map(
             "episode", compute_identity(_make_episode_item(), EPISODE)
@@ -2135,10 +2136,76 @@ class TestUnheardProviderDoesNotAdvanceClock:
         run_scan(
             EPISODE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
             "fake_key", _make_settings(), breaker=_tripped_breaker("imdb"),
-            show_id_map={"Test Show": "55555"},
+            show_id_map={10: "55555"},
         )
         fs_map = tracker.get_field_status_map("episode", compute_identity(item, EPISODE))
         tracker.close()
 
         mock_imdb.assert_not_called()
         assert all(row["fetch_count"] == 0 for row in fs_map.values())
+
+
+class TestEpisodeShowLookup:
+    """Episodes reach their show through the Kodi tvshowid, never the title."""
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_episode_show_lookup_miss_is_transient_not_clean(
+        self, mock_season, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        item = _make_episode_item()
+        item["tvshowid"] = 99
+        mock_get_all.return_value = [item]
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"plot", "title"}),
+            "fake_key", _make_settings(), show_id_map={10: "55555"},
+        )
+        fs_map = tracker.get_field_status_map("episode", compute_identity(item, EPISODE))
+        tracker.close()
+
+        mock_season.assert_not_called()
+        assert all(row["fetch_count"] == 0 for row in fs_map.values())
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_episode_without_tvshowid_is_transient(
+        self, mock_season, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        item = _make_episode_item()
+        del item["tvshowid"]
+        mock_get_all.return_value = [item]
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"plot", "title"}),
+            "fake_key", _make_settings(), show_id_map={10: "55555"},
+        )
+        fs_map = tracker.get_field_status_map("episode", compute_identity(item, EPISODE))
+        tracker.close()
+
+        mock_season.assert_not_called()
+        assert all(row["fetch_count"] == 0 for row in fs_map.values())
+
+    @patch("resources.lib.engine.scan.get_all_items")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_episode_uses_its_own_show_when_titles_collide(
+        self, mock_season, mock_update, mock_get_all, tmp_path, kodi_stubs
+    ):
+        item = _make_episode_item(showtitle="The Office")
+        item["tvshowid"] = 2
+        mock_get_all.return_value = [item]
+        mock_season.return_value = [_tmdb_episode_data()]
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"plot", "title"}),
+            "fake_key", _make_settings(), show_id_map={1: "2316", 2: "2996"},
+        )
+        tracker.close()
+
+        assert mock_season.call_args[0][0] == "2996"

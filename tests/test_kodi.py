@@ -221,6 +221,7 @@ def test_build_properties_episode():
     assert "title" in props
     assert "firstaired" in props
     assert "showtitle" in props
+    assert "tvshowid" in props
     assert "season" in props
     assert "episode" in props
     assert "director" in props

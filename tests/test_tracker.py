@@ -445,3 +445,21 @@ def test_begin_cycle_restarts_interrupted_cycle_when_resume_disabled(tmp_path):
     assert db.begin_cycle(resume_interrupted=False) is True
     assert db.get_item("movie", "Movie A")["cycle_processed"] == 0
     db.close()
+
+
+def test_upsert_none_id_keeps_stored_id(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    tracker.upsert_item("tvshow", "s1", tmdb_id="123", tvdb_id="80767")
+    tracker.upsert_item("tvshow", "s1", tmdb_id=None, tvdb_id=None, kodi_id=7)
+    row = tracker.get_item("tvshow", "s1")
+    tracker.close()
+    assert row["tmdb_id"] == "123" and row["tvdb_id"] == "80767" and row["kodi_id"] == 7
+
+
+def test_show_id_map_keyed_by_kodi_id_survives_same_title(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    tracker.upsert_item("tvshow", "a", title="The Office", kodi_id=1, tmdb_id="2316")
+    tracker.upsert_item("tvshow", "b", title="The Office", kodi_id=2, tmdb_id="2996")
+    result = tracker.get_show_id_map()
+    tracker.close()
+    assert result == {1: "2316", 2: "2996"}

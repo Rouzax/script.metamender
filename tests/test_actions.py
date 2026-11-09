@@ -117,7 +117,7 @@ def update_patched(monkeypatch: pytest.MonkeyPatch):
     acquire = MagicMock(return_value=True)
     release = MagicMock()
     load_source_config = MagicMock(return_value={"sources": [], "default_language": "en-US"})
-    build_show_id_map = MagicMock(return_value={"Some Show": "555"})
+    build_show_id_map = MagicMock(return_value={7: "555"})
     tracker.get_show_id_map = build_show_id_map
     load_settings = MagicMock(return_value={
         "tmdb_api_key": "key",
@@ -189,7 +189,7 @@ def test_update_now_episode_builds_show_id_map(update_patched):
     actions.update_now("episode", "5")
     update_patched["build_show_id_map"].assert_called_once()
     _, kwargs = update_patched["run_scan"].call_args
-    assert kwargs["show_id_map"] == {"Some Show": "555"}
+    assert kwargs["show_id_map"] == {7: "555"}
     assert kwargs["reset"] is True
 
 

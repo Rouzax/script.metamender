@@ -80,6 +80,8 @@ _UPSERT_KWARGS = frozenset((
     "source_path", "premiered", "date_added",
 ))
 
+_ID_KWARGS = frozenset(("tmdb_id", "imdb_id", "tvdb_id"))
+
 
 class TrackerDB:
     """SQLite-backed tracker for backfill item state."""
@@ -154,7 +156,13 @@ class TrackerDB:
 
         Returns the row id of the inserted or updated item.
         """
-        cols = {k: v for k, v in kwargs.items() if k in _UPSERT_KWARGS}
+        # A missing ID is "not known here", never "clear it": discovered IDs
+        # (resolved by search or enrichment) must survive a later scan whose
+        # Kodi uniqueid lacks them.
+        cols = {
+            k: v for k, v in kwargs.items()
+            if k in _UPSERT_KWARGS and not (k in _ID_KWARGS and v is None)
+        }
 
         set_parts = []
         for col in _UPSERT_KWARGS:
@@ -422,19 +430,22 @@ class TrackerDB:
         """Commit the current transaction (callers batch one item's writes)."""
         self._conn.commit()
 
-    def get_show_id_map(self) -> Dict[str, str]:
-        """Map TV show title to its show-level TMDB ID.
+    def get_show_id_map(self) -> Dict[int, str]:
+        """Map a TV show's Kodi id to its show-level TMDB ID.
 
         Built from the tvshow items recorded during the show scan so the
         episode scan can resolve the correct show TMDB ID for season lookups.
+        Keyed by Kodi id (an episode's ``tvshowid``), not title, because
+        distinct shows can share a title.
         """
-        show_map = {}  # type: Dict[str, str]
+        show_map = {}  # type: Dict[int, str]
         cursor = self._conn.execute(
-            "SELECT title, tmdb_id FROM items "
-            "WHERE media_type = 'tvshow' AND tmdb_id IS NOT NULL"
+            "SELECT kodi_id, tmdb_id FROM items "
+            "WHERE media_type = 'tvshow' AND tmdb_id IS NOT NULL "
+            "AND kodi_id IS NOT NULL"
         )
         for row in cursor.fetchall():
-            show_map[row["title"]] = row["tmdb_id"]
+            show_map[row["kodi_id"]] = row["tmdb_id"]
         return show_map
 
     # ------------------------------------------------------------------

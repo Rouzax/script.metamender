@@ -306,7 +306,7 @@ class _ScanCtx:
     default_language: str
     sources: List[Dict[str, Any]]
     enabled_fields: FrozenSet[str]
-    show_id_map: Dict[str, str]
+    show_id_map: Dict[int, str]
     season_cache: Dict[str, Optional[List[Dict[str, Any]]]]
     settings: Dict[str, Any]
     schedule: Tuple[int, ...]
@@ -551,13 +551,14 @@ def _fetch_episode(
     if tmdb_id and ctx.breaker.is_disabled("tmdb"):
         tmdb_data = _TRANSIENT
     elif tmdb_id:
-        showtitle = item.get("showtitle", "")
-        ep_show_tmdb_id = (ctx.show_id_map or {}).get(showtitle)
+        ep_show_tmdb_id = (ctx.show_id_map or {}).get(item.get("tvshowid"))
         if not ep_show_tmdb_id:
+            # Not knowing the show is not an answer from TMDB: hold the clock.
             log.debug(
-                "No show TMDB ID for episode, skipping TMDB path",
-                event="scan.skip", title=title, showtitle=showtitle,
+                "No show TMDB ID for episode, TMDB path transient",
+                event="scan.skip", title=title, tvshowid=item.get("tvshowid"),
             )
+            tmdb_data = _TRANSIENT
         if ep_show_tmdb_id:
             season_number = item.get("season", 0)
             tmdb_data, imdb_id = _fetch_episode_tmdb(
@@ -685,7 +686,7 @@ def run_scan(
     tmdb_api_key: str,
     settings: Dict[str, Any],
     monitor: Any = None,
-    show_id_map: Optional[Dict[str, str]] = None,
+    show_id_map: Optional[Dict[int, str]] = None,
     items: Optional[List[Dict[str, Any]]] = None,
     kodi_filter: Optional[Dict[str, str]] = None,
     breaker: Optional[CircuitBreaker] = None,
@@ -709,7 +710,7 @@ def run_scan(
             plot_source, default_source, and optionally refetch_schedule.
         monitor: xbmc.Monitor instance (has abortRequested()), or
             None for tests.
-        show_id_map: Dict mapping show title to show-level TMDB ID.
+        show_id_map: Dict mapping a show's Kodi id to its show-level TMDB ID.
             Required for episode scans so fetch_season uses the show
             ID, not the episode ID.
         items: Pre-built list of Kodi items to process. When provided,

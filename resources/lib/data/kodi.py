@@ -39,7 +39,7 @@ _EXTRA_PROPERTIES = {
         "mpaa", "genre",
     ],
     "episode": [
-        "showtitle", "season", "episode",
+        "tvshowid", "showtitle", "season", "episode",
         "director", "writer", "runtime",
     ],
 }

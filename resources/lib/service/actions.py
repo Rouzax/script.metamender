@@ -180,7 +180,7 @@ def update_now(dbtype: str, dbid: str) -> None:
         tracker = TrackerDB(_get_db_path())
         source_config = load_source_config(_get_sources_config_path())
 
-        show_id_map: Optional[Dict[str, str]] = None
+        show_id_map: Optional[Dict[int, str]] = None
         if media_type.name == "episode":
             show_id_map = tracker.get_show_id_map()
 
