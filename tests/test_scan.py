@@ -3172,3 +3172,146 @@ class TestImdbStoreErrorLogging:
         ]
         assert len(failures) == 1
         assert mock_lookup.call_count == 3
+
+
+class TestDeferredLookupsNotRecorded:
+    """A lookup deferred because the show is not resolved yet did not answer,
+    so it must not close the 30-day gate (ids_checked)."""
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_find_episode", return_value=None)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series_episodes")
+    def test_tmdb_deferred_for_unresolved_show_is_retried_next_scan(
+        self, mock_eps, mock_find, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"unknown": "340249"})
+        mock_eps.return_value = {"340249": {"title": "", "plot": ""}}
+        tracker = _make_tracker(tmp_path)
+        _register_checked_show(tracker, checked=False)
+
+        run_scan(
+            EPISODE, tracker, _nl_source_config(), frozenset({"runtime", "title"}),
+            "k", _make_settings(), items=[item], show_id_map={},
+        )
+        after_first = _row(tracker, EPISODE, item)
+        first_counts = _fs(tracker, EPISODE, item)
+
+        # The show resolves between the scans.
+        _register_checked_show(tracker, tmdb_id="55555")
+        tracker.start_new_cycle()
+        run_scan(
+            EPISODE, tracker, _nl_source_config(), frozenset({"runtime", "title"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        tracker.close()
+
+        assert after_first["tvdb_id"] == "340249"
+        assert after_first["ids_checked"] is None
+        assert _count(first_counts, "runtime") == 0
+        mock_find.assert_called_once_with("k", "340249")
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    def test_unknown_verification_deferred_keeps_gate_open(
+        self, mock_season, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tmdb": "99999", "unknown": "340249"})
+        mock_season.return_value = [_tmdb_episode_data()]
+        tracker = _make_tracker(tmp_path)
+        _register_checked_show(tracker, tvdb_id=None, tmdb_id="55555", checked=False)
+
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"runtime"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        row = _row(tracker, EPISODE, item)
+        tracker.close()
+
+        assert row["ids_checked"] is None
+
+
+class TestFoundEpisodeSeason:
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_episode_ids")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    @patch("resources.lib.engine.scan.tmdb_find_episode")
+    def test_found_episode_fetched_by_tmdb_numbering(
+        self, mock_find, mock_season, mock_ep_ids, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tvdb": "888"}, season=1, episode=1)
+        mock_find.return_value = {
+            "tmdb_id": "99999", "show_tmdb_id": "55555", "season": 2, "episode": 5,
+        }
+        mock_season.side_effect = lambda show, season, key, lang: (
+            [_tmdb_episode_data(episode_number=5, season_number=2)] if season == 2 else []
+        )
+        mock_ep_ids.return_value = {"imdb_id": "tt0777"}
+        tracker = _make_tracker(tmp_path)
+        _register_show(tracker)
+
+        for _ in range(2):
+            tracker.start_new_cycle()
+            run_scan(
+                EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+                "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+                reset=True,
+            )
+        row = _row(tracker, EPISODE, item)
+        tracker.close()
+
+        assert mock_find.call_count == 1
+        assert {c.args[1] for c in mock_season.call_args_list} == {2}
+        assert mock_ep_ids.call_args.args[:3] == ("55555", 2, 5)
+        assert row["tmdb_season"] == 2
+        assert _written(mock_update, "title") == "Pilot"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_season", return_value=[])
+    @patch("resources.lib.engine.scan.tmdb_find_episode")
+    def test_found_episode_missing_from_its_season_answers_nothing(
+        self, mock_find, mock_season, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _episode(100, {"tvdb": "888"})
+        mock_find.return_value = {
+            "tmdb_id": "99999", "show_tmdb_id": "55555", "season": 2, "episode": 5,
+        }
+        tracker = _make_tracker(tmp_path)
+        _register_show(tracker)
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"runtime"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        fs_map = _fs(tracker, EPISODE, item)
+        tracker.close()
+
+        assert mock_season.call_args.args[1] == 2
+        assert _count(fs_map, "runtime") == 1
+
+
+class TestShowYearVerification:
+    @pytest.mark.parametrize("premiered,tvdb_year,accepted", [
+        ("1976-06-01", 1976, True),
+        ("2025-01-01", 1976, False),
+        ("", 1976, True),
+        ("2025-01-01", None, True),
+    ])
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    def test_show_year_must_match_when_both_known(
+        self, mock_tvdb, mock_update, premiered, tvdb_year, accepted,
+        tmp_path, kodi_stubs
+    ):
+        item = _nl_show()
+        item["premiered"] = premiered
+        mock_tvdb.return_value = {
+            "name": "", "overview": "", "names": _BUURMAN_NAMES, "year": tvdb_year,
+        }
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        row = _row(tracker, TVSHOW, item)
+        tracker.close()
+
+        assert (row["tvdb_id"] == "80767") is accepted

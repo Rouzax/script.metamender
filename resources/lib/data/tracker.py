@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS items (
     status TEXT DEFAULT 'pending',
     cycle_processed INTEGER DEFAULT 0,
     ids_checked TEXT,
+    -- TMDB season of an episode whose TMDB id came from /find; TMDB can
+    -- number seasons differently from Kodi.
+    tmdb_season INTEGER,
     UNIQUE(media_type, identity)
 );
 
@@ -83,6 +86,7 @@ CREATE INDEX IF NOT EXISTS idx_field_status ON field_status(item_id, field);
 _UPSERT_KWARGS = frozenset((
     "kodi_id", "tmdb_id", "imdb_id", "tvdb_id",
     "source_path", "premiered", "date_added", "ids_checked",
+    "tmdb_season",
 ))
 
 _ID_KWARGS = frozenset(("tmdb_id", "imdb_id", "tvdb_id"))

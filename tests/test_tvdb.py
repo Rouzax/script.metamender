@@ -144,6 +144,23 @@ def test_series_without_translation_has_empty_text_but_keeps_names():
     assert "Pat a Mat" in result["names"]
 
 
+@pytest.mark.parametrize("record,year", [
+    ({"year": "1976", "firstAired": "1979-01-01"}, 1976),
+    ({"firstAired": "1976-05-02"}, 1976),
+    ({"year": "", "firstAired": ""}, None),
+    ({}, None),
+])
+def test_series_year_from_record(record: Dict[str, Any], year: Any) -> None:
+    routes = _series_routes()
+    data = dict(SERIES["data"])
+    data.update(record)
+    routes["/series/80767"] = {"data": data}
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router(routes)):
+        result = tvdb.fetch_series("80767", "nld")
+    assert result["year"] == year
+
+
 def test_series_404_returns_none():
     with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
             patch.object(tvdb, "provider_get", side_effect=_router({"/series/9": None})):

@@ -434,10 +434,14 @@ class _Ids:
         imdb: Optional[str],
         tvdb: Optional[str],
         may_look_up: bool,
+        tmdb_season: Optional[int] = None,
     ) -> None:
         self.tmdb = tmdb
         self.imdb = imdb
         self.tvdb = tvdb
+        # Episode only: the TMDB season /find placed the episode in, when its
+        # TMDB id came from /find. None means Kodi's season number applies.
+        self.tmdb_season = tmdb_season
         self.tmdb_transient = False
         self.tvdb_transient = False
         # Cross-reference lookups (and unknown-id verification) may run for
@@ -446,6 +450,11 @@ class _Ids:
         # A lookup ran and answered / a lookup ran and did not answer.
         self.looked_up = False
         self.lookup_failed = False
+
+    def defer(self) -> None:
+        """A lookup this item needs could not run yet (its show is not
+        resolved): like a failed lookup, it must not close the gate."""
+        self.lookup_failed = True
 
     def any(self) -> bool:
         return bool(self.tmdb or self.imdb or self.tvdb)
@@ -478,6 +487,18 @@ def _show_kodi_id(item: Dict[str, Any]) -> int:
     """The episode's show Kodi id, the key of the per-show maps."""
     value = item.get("tvshowid")
     return value if isinstance(value, int) else -1
+
+
+def _tmdb_season(item: Dict[str, Any], ids: _Ids) -> int:
+    """Season number to fetch the episode's TMDB record through."""
+    if ids.tmdb_season is not None:
+        return ids.tmdb_season
+    return int(item.get("season", 0) or 0)
+
+
+def _premiered_year(item: Dict[str, Any]) -> Optional[int]:
+    raw = str(item.get("premiered") or "")[:4]
+    return int(raw) if len(raw) == 4 and raw.isdigit() else None
 
 
 def _show_checked(ctx: _ScanCtx, item: Dict[str, Any]) -> bool:
@@ -561,7 +582,10 @@ def _verify_unknown_show(
     if series is None:
         _unknown_verdict(ctx, ids, identity, unknown_id, False, "no_such_series")
         return
-    matched = show_matches(item.get("title", ""), series.get("names") or [])
+    matched = show_matches(
+        item.get("title", ""), series.get("names") or [],
+        kodi_year=_premiered_year(item), candidate_year=series.get("year"),
+    )
     _unknown_verdict(ctx, ids, identity, unknown_id, matched, "name_mismatch")
 
 
@@ -575,6 +599,7 @@ def _verify_unknown_episode(
     if not show_tvdb_id:
         if not _show_checked(ctx, item):
             ids.tvdb_transient = True
+            ids.defer()
         # The show has no TVDB id, so no episode list can confirm this one.
         # Derived without a call, so it is not recorded as a lookup.
         return
@@ -635,7 +660,9 @@ def _episode_tmdb_from_tvdb(
     not answered yet, the episode's TMDB fields wait for them.
     """
     if not ctx.show_id_map.get(_show_kodi_id(item)):
-        ids.tmdb_transient = not _show_checked(ctx, item)
+        if not _show_checked(ctx, item):
+            ids.tmdb_transient = True
+            ids.defer()
         return
     if not ids.may_look_up:
         return
@@ -651,7 +678,11 @@ def _episode_tmdb_from_tvdb(
     ids.looked_up = True
     if found:
         ids.tmdb = found["tmdb_id"]
-        ctx.tracker.upsert_item(ctx.media_type.name, identity, tmdb_id=ids.tmdb)
+        ids.tmdb_season = found["season"]
+        ctx.tracker.upsert_item(
+            ctx.media_type.name, identity,
+            tmdb_id=ids.tmdb, tmdb_season=ids.tmdb_season,
+        )
 
 
 def _resolve_ids(
@@ -680,6 +711,8 @@ def _resolve_ids(
         imdb=kodi_imdb or stored.get("imdb_id"),
         tvdb=kodi_tvdb or stored.get("tvdb_id"),
         may_look_up=may_look_up,
+        # A Kodi-typed TMDB id goes with Kodi's own season number.
+        tmdb_season=None if kodi_tmdb else stored.get("tmdb_season"),
     )
 
     if kind != "movie" and not ids.tvdb and unknown_id and may_look_up:
@@ -897,13 +930,16 @@ def _fetch_episode(
     elif tmdb_id and ep_show_tmdb_id:
         tmdb_data, imdb_id_transient = _fetch_episode_tmdb(
             ctx, item, kodi_id, title, identity, ids,
-            ep_show_tmdb_id, item.get("season", 0), language,
+            ep_show_tmdb_id, _tmdb_season(item, ids), language,
         )
 
-    if (tmdb_data is TRANSIENT and ids.may_look_up
-            and tmdb_id and not ids.tvdb):
-        # TMDB's external ids are where a missing episode TVDB id comes from.
-        ids.tvdb_transient = True
+    if (tmdb_data is TRANSIENT and ids.may_look_up and tmdb_id
+            and not (ids.imdb and ids.tvdb)):
+        # The episode external ids lookup needs the TMDB record, so it did
+        # not run. A missing TVDB id can only come from there.
+        ids.defer()
+        if not ids.tvdb:
+            ids.tvdb_transient = True
 
     return _Primary(
         tmdb=tmdb_data,
@@ -973,7 +1009,7 @@ class _TextSources:
                 lambda: fetch(tmdb_id, ctx.tmdb_api_key, lang),
                 ctx, self._identity,
             )
-        season_number = self._item.get("season", 0)
+        season_number = _tmdb_season(self._item, self._ids)
         show_id = p.show_tmdb_id or ""
         cache_key = "{}:{}:{}".format(show_id, season_number, lang)
         if cache_key in ctx.season_cache:

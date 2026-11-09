@@ -109,11 +109,20 @@ def _translation(tvdb_id: str, lang: str) -> Dict[str, str]:
     }
 
 
+def _series_year(record: Dict[str, Any]) -> Optional[int]:
+    for raw in (record.get("year"), (record.get("firstAired") or "")[:4]):
+        text = str(raw or "")
+        if len(text) == 4 and text.isdigit():
+            return int(text)
+    return None
+
+
 def fetch_series(tvdb_id: str, lang: str) -> Optional[Dict[str, Any]]:
     """Fetch a series' text in `lang` (a TVDB code such as "nld") and its names.
 
-    Returns {"name", "overview", "names"} or None when TVDB has no such
-    series. name/overview are the `lang` translation only ("" when TVDB has
+    Returns {"name", "overview", "names", "year"} or None when TVDB has no
+    such series. ``year`` is the series' first-aired year as an int, or None
+    when TVDB has neither a year nor a first-aired date. name/overview are the `lang` translation only ("" when TVDB has
     none), never the primary-language text, so a caller cannot mistake a
     foreign original for a native value. `names` holds the primary name, the
     `lang` and English translations and every alias, for id verification.
@@ -121,7 +130,8 @@ def fetch_series(tvdb_id: str, lang: str) -> Optional[Dict[str, Any]]:
     series = _get("/series/{}".format(tvdb_id))
     if series is None:
         return None
-    primary = (series.get("data") or {}).get("name") or ""
+    record = series.get("data") or {}
+    primary = record.get("name") or ""
     native = _translation(tvdb_id, lang)
     english = native if lang == _FALLBACK_LANG else _translation(tvdb_id, _FALLBACK_LANG)
     extended = _get("/series/{}/extended?short=true".format(tvdb_id))
@@ -134,7 +144,12 @@ def fetch_series(tvdb_id: str, lang: str) -> Optional[Dict[str, Any]]:
         if candidate and candidate not in names:
             names.append(candidate)
     log.debug("TVDB series fetched", event="tvdb.series", tvdb_id=tvdb_id, lang=lang)
-    return {"name": native["name"], "overview": native["overview"], "names": names}
+    return {
+        "name": native["name"],
+        "overview": native["overview"],
+        "names": names,
+        "year": _series_year(record),
+    }
 
 
 def fetch_series_episodes(
