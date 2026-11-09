@@ -233,7 +233,9 @@ def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
 # ASCII only: \d and str.isdigit also accept other scripts' digits, which
 # no provider uses in an id ("²" would even make int() raise).
 _IMDB_ID = re.compile(r"tt[0-9]+")
-_NUMERIC_ID = re.compile(r"[0-9]+")
+# No provider id comes near 12 digits. The check avoids int(), which raises
+# on very long digit strings from Python 3.11 on.
+_NUMERIC_ID = re.compile(r"[0-9]{1,12}")
 
 
 def _clean_id(raw: Any, imdb: bool = False) -> Optional[str]:
@@ -249,7 +251,7 @@ def _clean_id(raw: Any, imdb: bool = False) -> Optional[str]:
     value = str(raw).strip()
     if imdb:
         return value if _IMDB_ID.fullmatch(value) else None
-    return value if _NUMERIC_ID.fullmatch(value) and int(value) > 0 else None
+    return value if _NUMERIC_ID.fullmatch(value) and value.strip("0") else None
 
 
 def _extract_ids(

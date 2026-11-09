@@ -4389,6 +4389,9 @@ class TestExtractIds:
         # Non-ASCII digits: str.isdigit accepts them, int() raises on "²"
         # and reads "١٢" as 12; neither is an id.
         "²", "١٢", "①",
+        # Far longer than any provider id; int() on it raises ValueError
+        # on Python 3.11+ (integer string conversion limit).
+        "9" * 5000,
     ])
     def test_bogus_numeric_ids_dropped(self, bogus):
         item = {"uniqueid": {"tmdb": bogus, "tvdb": bogus, "unknown": bogus}}
