@@ -71,7 +71,7 @@ from resources.lib.engine.maturity import (
     decide_field,
 )
 from resources.lib.engine.protect import fingerprint, may_write
-from resources.lib.engine.resolve import build_ratings, rating_sources
+from resources.lib.engine.resolve import build_ratings, rating_sources, slot_fingerprint
 from resources.lib.providers.imdb_ratings import lookup as imdb_rating_lookup
 from resources.lib.providers.languages import tmdb_language, tvdb_language
 from resources.lib.providers.tmdb import (
@@ -226,6 +226,36 @@ def _find_episode_by_tmdb_id(
     return None
 
 
+# Kodi's separator for list fields (advancedsettings itemseparator default).
+# Lists are stored joined with it and split on it when read back.
+_KODI_ITEM_SEPARATOR = " / "
+
+
+def _kodi_form(value: Any) -> Any:
+    """A provider value as Kodi will store and return it.
+
+    Kodi's CVideoInfoTag setters trim text and drop empty list entries, and a
+    list comes back split on the item separator. Writing and fingerprinting
+    this form keeps the same-value skip and the provenance check matching what
+    Kodi reports on the next scan; the raw provider value would differ by
+    whitespace and never match again.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = []  # type: List[Any]
+        for entry in value:
+            if not isinstance(entry, str):
+                parts.append(entry)
+                continue
+            for piece in entry.split(_KODI_ITEM_SEPARATOR):
+                piece = piece.strip()
+                if piece:
+                    parts.append(piece)
+        return parts
+    return value
+
+
 def _extract_fields(
     provider_data: Dict[str, Any],
     gap_fields: List[str],
@@ -233,7 +263,8 @@ def _extract_fields(
     """Provider values for the requested fields, in the form Kodi stores.
 
     Skips "mpaa" (Phase 8) and the named-slot rating/votes (handled by
-    build_ratings). Empty provider values are dropped, runtime is converted
+    build_ratings). Values are put in Kodi's stored form (_kodi_form), then
+    empty ones are dropped, runtime is converted
     minutes -> seconds, and firstaired is kept only as a full ISO date (bare
     years are dropped). Title and plot arrive from the provider chain, which
     never yields a placeholder title, so no placeholder check is needed here.
@@ -253,7 +284,7 @@ def _extract_fields(
         if kodi_key in ("rating", "votes"):
             continue
 
-        value = provider_data.get(tmdb_key)
+        value = _kodi_form(provider_data.get(tmdb_key))
 
         # Skip empty provider values
         if value is None:
@@ -315,23 +346,42 @@ def _plan_writes(
     return to_write, held
 
 
-def _owned_slots(fs_map: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
-    """Rating slots metamender wrote, from the JSON provenance on the rating
-    rows. Unreadable provenance owns nothing, which protects every slot."""
-    for f in ("rating", "votes"):
-        raw = fs_map.get(f, {}).get("written_value")
-        if not raw:
-            continue
-        try:
-            parsed = json.loads(raw)
-        except ValueError:
-            return {}
-        if isinstance(parsed, dict) and all(
-            isinstance(k, str) and isinstance(v, str) for k, v in parsed.items()
-        ):
-            return parsed
+def _parse_slots(raw: Any) -> Dict[str, str]:
+    """A rating row's JSON provenance; anything unreadable owns nothing."""
+    if not raw:
         return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return {}
+    if isinstance(parsed, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in parsed.items()
+    ):
+        return parsed
     return {}
+
+
+def _owned_slots(
+    fs_map: Dict[str, Dict[str, Any]],
+    current_ratings: Dict[str, Any],
+) -> Dict[str, str]:
+    """Rating slots metamender wrote, from the JSON provenance on the rating
+    and votes rows.
+
+    The rows can disagree: only the due rating fields are recorded, so a row
+    whose field is final or disabled keeps older JSON. Per slot, the
+    fingerprint that matches the slot Kodi holds now wins, since that is the
+    write that put it there; otherwise the rating row's. Unreadable JSON owns
+    nothing, which protects every slot it would have named.
+    """
+    rows = [_parse_slots(fs_map.get(f, {}).get("written_value")) for f in ("rating", "votes")]
+    owned = {}  # type: Dict[str, str]
+    for slot in set(rows[0]) | set(rows[1]):
+        claims = [r[slot] for r in rows if slot in r]
+        entry = current_ratings.get(slot)
+        held = slot_fingerprint(entry) if isinstance(entry, dict) else None
+        owned[slot] = held if held in claims else claims[0]
+    return owned
 
 
 class _Pacer:
@@ -1624,7 +1674,7 @@ def run_scan(
 
         ratings_source = None  # type: Optional[str]
         ratings_votes = None  # type: Optional[int]
-        owned_slots = _owned_slots(fs_map)
+        owned_slots = _owned_slots(fs_map, item.get("ratings") or {})
         slot_fps = {}  # type: Dict[str, str]
         rating_due = [f for f in nonfinal if f in _RATING_FIELDS]
         if rating_due:
@@ -1697,16 +1747,18 @@ def run_scan(
                     vote_count=ratings_votes, written_value=provenance.get(f),
                 )
                 continue
-            # Source and fallback flag describe the value Kodi now holds, so
-            # they are recorded only when the answer is in Kodi (written now,
-            # or already equal); a dropped or protected answer keeps the old.
+            # Source describes the value Kodi now holds, so it is recorded
+            # only when the answer is in Kodi (written now, or already equal);
+            # a dropped or protected answer keeps the old one. The fallback
+            # flag marks a value metamender wrote from a fallback step, so only
+            # a write sets or clears it.
             in_kodi = f in written or f in held
             tracker.record_field_fetch(
                 media_type.name, identity, f,
                 next_retry=next_due,
                 source=providers.get(f) if in_kodi else None,
                 written_value=provenance.get(f),
-                from_fallback=outcome.from_fallback if in_kodi else None,
+                from_fallback=outcome.from_fallback if f in written else None,
             )
         _finish_lookups(ctx, identity, ids, today)
         tracker.commit()

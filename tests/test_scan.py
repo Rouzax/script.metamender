@@ -3662,3 +3662,166 @@ class TestSourceFromWrittenValue:
         assert not mock_update.called
         assert row["source"] == "tmdb"
         assert row["written_value"] is None
+
+
+class TestKodiStoredForm:
+    def test_extract_fields_trims_text_like_kodi(self):
+        out = _extract_fields({"plot": "  Een film.\n", "tagline": " \n"}, ["plot", "tagline"])
+        assert out == {"plot": "Een film."}
+
+    def test_extract_fields_list_padded_and_empty_entries(self):
+        out = _extract_fields(
+            {"genres": [" Drama ", "", "Actie / Avontuur", "  "]}, ["genre"],
+        )
+        assert out["genre"] == ["Drama", "Actie", "Avontuur"]
+
+    def test_extract_fields_list_of_only_empty_entries_dropped(self):
+        assert _extract_fields({"directors": ["", " "]}, ["director"]) == {}
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_padded_overview_written_trimmed_and_recognised_next_scan(
+        self, mock_fetch, mock_update, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+
+        mock_fetch.return_value = _tmdb_movie_response(plot="Een film.\n")
+        tracker = _make_tracker(tmp_path)
+        item = _young_movie(plot="")
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        first = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        assert _written(mock_update, "plot") == "Een film."
+        assert first["written_value"] == fingerprint("Een film.")
+
+        def rescan(provider_plot):
+            # Kodi returns the trimmed value it stored; the field is due again.
+            tracker._conn.execute("UPDATE field_status SET next_retry = '2020-01-01'")
+            tracker.start_new_cycle()
+            mock_update.reset_mock()
+            mock_fetch.return_value = _tmdb_movie_response(plot=provider_plot)
+            run_scan(
+                MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+                "k", _make_settings(), items=[_young_movie(plot="Een film.")],
+            )
+
+        rescan("Een film.\n")
+        assert not mock_update.called  # same-value skip matches
+        rescan("Een betere film.\n")  # still recognised as ours, so refreshed
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+        assert _written(mock_update, "plot") == "Een betere film."
+        assert row["written_value"] == fingerprint("Een betere film.")
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_list_written_and_fingerprinted_in_kodi_form(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+
+        mock_fetch.return_value = _tmdb_movie_response(genres=[" Drama ", "", "Komedie"])
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"genre"}),
+            "k", _make_settings(), items=[_make_movie_item()],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "genre")
+        tracker.close()
+
+        assert _written(mock_update, "genre") == ["Drama", "Komedie"]
+        assert row["written_value"] == fingerprint(["Drama", "Komedie"])
+
+
+class TestRatingProvenanceRows:
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.imdb_rating_lookup", return_value=(7.0, 80))
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_newer_votes_row_provenance_wins_over_stale_rating_row(
+        self, mock_fetch, mock_update, _mock_imdb, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        """Only the votes field is managed now, so only its row holds the JSON
+        of the last write; the rating row's older JSON must not protect the
+        slot metamender wrote."""
+        import json
+
+        from resources.lib.engine.resolve import slot_fingerprint
+
+        our_slot = {"rating": 6.5, "votes": 50, "default": False}
+        item = _young_movie()
+        item["ratings"] = {"imdb": our_slot}
+        mock_fetch.return_value = _tmdb_movie_response(rating=0, votes=0)
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "rating", json.dumps(
+            {"imdb": slot_fingerprint({"rating": 6.0, "votes": 10})},
+        ))
+        _seed_field(tracker, "votes", json.dumps({"imdb": slot_fingerprint(our_slot)}))
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"votes"}),
+            "k", _make_settings(), items=[item],
+        )
+        votes = tracker.get_field_status("movie", _MOVIE_IDENTITY, "votes")
+        tracker.close()
+
+        assert _written(mock_update, "ratings")["imdb"]["rating"] == 7.0
+        assert json.loads(votes["written_value"]) == {
+            "imdb": slot_fingerprint({"rating": 7.0, "votes": 80}),
+        }
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.imdb_rating_lookup", return_value=(7.0, 80))
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_no_row_matching_kodi_slot_protects_it(
+        self, mock_fetch, mock_update, _mock_imdb, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        import json
+
+        from resources.lib.engine.resolve import slot_fingerprint
+
+        item = _young_movie()
+        item["ratings"] = {"imdb": {"rating": 6.5, "votes": 50, "default": True}}
+        mock_fetch.return_value = _tmdb_movie_response(rating=0, votes=0)
+        tracker = _make_tracker(tmp_path)
+        stale = json.dumps({"imdb": slot_fingerprint({"rating": 6.0, "votes": 10})})
+        _seed_field(tracker, "rating", stale)
+        _seed_field(tracker, "votes", "not json")
+        run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"rating", "votes"}),
+            "k", _make_settings(), items=[item],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "ratings") is None
+
+
+class TestFallbackFlagOnlyOnWrite:
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_value_already_in_kodi_leaves_fallback_flag(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        """A matching answer metamender did not write says nothing about where
+        the stored value came from, so the flag is left as it is."""
+        mock_fetch.return_value = _tmdb_movie_response(plot="Nederlandse plot")
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry="2020-01-01", from_fallback=True,
+        )
+        tracker.commit()
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_young_movie(plot="Nederlandse plot")],
+        )
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert not mock_update.called
+        assert row["fetch_count"] == 2
+        assert row["from_fallback"] == 1
+        assert row["source"] == "tmdb"
