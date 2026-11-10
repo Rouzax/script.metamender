@@ -5203,3 +5203,105 @@ class TestDuplicateIdentities:
         ).fetchall())
         tracker.close()
         assert rows == {"tmdb:170": 40, "tmdb:999": 5}
+
+
+class TestUnconfiguredLanguage:
+    """A folder no sources.json entry and no default_language configure has
+    no known language: its text is fetched in Kodi's UI language and only
+    fills empty fields, so a first scan cannot replace a library's text with
+    another language's."""
+
+    @staticmethod
+    def _item():
+        item = _make_movie_item(plot="Een Nederlandse plot")
+        item["genre"] = ["Avontuur"]
+        item["runtime"] = 5400
+        return item
+
+    @patch("resources.lib.engine.scan.kodi_ui_language", return_value="nl-NL")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_text_fills_only_in_ui_language(
+        self, mock_tmdb, mock_update, _ui, tmp_path, kodi_stubs
+    ):
+        mock_tmdb.return_value = _tmdb_movie_response(
+            plot="An English plot", genres=["Adventure"], runtime=100,
+        )
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, {"sources": []}, frozenset({"plot", "tagline", "genre", "runtime"}),
+            "k", _make_settings(), items=[self._item()],
+        )
+        tracker.close()
+
+        assert mock_tmdb.call_args.args[2] == "nl-NL"
+        written = mock_update.call_args.kwargs
+        assert "plot" not in written
+        assert "genre" not in written
+        assert written["tagline"] == "Wow"
+        assert written["runtime"] == 6000
+
+    @patch("resources.lib.engine.scan.kodi_ui_language", return_value="nl-NL")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_configured_folder_still_replaces_text(
+        self, mock_tmdb, mock_update, _ui, tmp_path, kodi_stubs
+    ):
+        mock_tmdb.return_value = _tmdb_movie_response(plot="An English plot")
+        config = {"sources": [
+            {"path": "smb://server/movies/", "enabled": True, "language": "en-US"},
+        ]}
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, config, frozenset({"plot"}),
+            "k", _make_settings(), items=[self._item()],
+        )
+        tracker.close()
+
+        assert mock_tmdb.call_args.args[2] == "en-US"
+        assert mock_update.call_args.kwargs["plot"] == "An English plot"
+
+    @patch("resources.lib.engine.scan.kodi_ui_language", return_value="nl-NL")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_explicit_default_language_counts_as_configured(
+        self, mock_tmdb, mock_update, _ui, tmp_path, kodi_stubs
+    ):
+        mock_tmdb.return_value = _tmdb_movie_response(plot="An English plot")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, {"sources": [], "default_language": "en-US"},
+            frozenset({"plot"}), "k", _make_settings(), items=[self._item()],
+        )
+        tracker.close()
+
+        assert mock_tmdb.call_args.args[2] == "en-US"
+        assert mock_update.call_args.kwargs["plot"] == "An English plot"
+
+    @patch("resources.lib.engine.scan.kodi_ui_language", return_value="nl-NL")
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_own_earlier_fill_is_refreshed(
+        self, mock_tmdb, mock_update, _ui, tmp_path, kodi_stubs
+    ):
+        # A value metamender itself filled may still be refreshed.
+        from resources.lib.engine.protect import fingerprint
+
+        item = self._item()
+        item["plot"] = "Oude plot van metamender"
+        tracker = _make_tracker(tmp_path)
+        identity = compute_identity(item, MOVIE)
+        tracker.upsert_item("movie", identity, kodi_id=1)
+        tracker.record_field_fetch(
+            "movie", identity, "plot", next_retry="2000-01-01", source="tmdb",
+            written_value=fingerprint("Oude plot van metamender"),
+        )
+        tracker.commit()
+        mock_tmdb.return_value = _tmdb_movie_response(plot="Nieuwe plot")
+        run_scan(
+            MOVIE, tracker, {"sources": []}, frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        tracker.close()
+
+        assert mock_update.call_args.kwargs["plot"] == "Nieuwe plot"

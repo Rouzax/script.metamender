@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import os
 
+from unittest.mock import patch
+
 from resources.lib.data.sources import (
+    kodi_ui_language,
     load_source_config,
     match_source,
     save_source_config,
@@ -11,9 +14,10 @@ from resources.lib.data.sources import (
 
 
 def test_load_default_when_missing(tmp_path):
+    # No default_language: the scan then treats every folder as
+    # unconfigured (fill-only, Kodi's UI language).
     config = load_source_config(str(tmp_path / "sources.json"))
-    assert config["sources"] == []
-    assert config["default_language"] == "en-US"
+    assert config == {"sources": []}
 
 
 def test_save_and_load(tmp_path):
@@ -60,8 +64,7 @@ def test_match_source_no_match():
         {"path": "smb://server/movies/", "enabled": True, "language": "en-US"},
     ]
     result = match_source("smb://other/tv/file.mkv", sources)
-    assert result["enabled"] is True
-    assert result["language"] == "en-US"
+    assert result == {"enabled": True}
 
 
 def test_match_source_disabled():
@@ -79,7 +82,19 @@ def test_match_source_respects_path_boundary():
         {"path": "/media/movies", "enabled": True, "language": "fr-FR"},
     ]
     sibling = match_source("/media/movies_extra/film.mkv", sources)
-    assert sibling["language"] == "en-US"  # fell through to default
+    assert "language" not in sibling  # fell through to the default
 
     inside = match_source("/media/movies/film.mkv", sources)
     assert inside["language"] == "fr-FR"
+
+
+def test_kodi_ui_language_with_region():
+    with patch("resources.lib.data.sources.xbmc.getLanguage", return_value="nl-NL") as get:
+        assert kodi_ui_language() == "nl-NL"
+    assert get.call_args.kwargs == {"region": True}
+
+
+def test_kodi_ui_language_falls_back_to_en_us():
+    for answer in ("", None, 3):
+        with patch("resources.lib.data.sources.xbmc.getLanguage", return_value=answer):
+            assert kodi_ui_language() == "en-US"

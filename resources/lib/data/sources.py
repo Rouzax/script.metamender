@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 import xbmc
 
@@ -25,17 +25,35 @@ from resources.lib.utils import get_logger, log_timing
 log = get_logger('sources')
 
 
-def _default_config() -> Dict[str, Any]:
-    """Return a fresh default config (no shared mutable state)."""
-    return {"sources": [], "default_language": "en-US"}
+# Used when Kodi does not report a usable UI language.
+_FALLBACK_UI_LANGUAGE = "en-US"
 
 
-def _default_match() -> Dict[str, Any]:
-    """Return a fresh default match result."""
-    return {"enabled": True, "language": "en-US"}
+def _default_config() -> dict[str, Any]:
+    """Return a fresh default config (no shared mutable state). It sets no
+    default_language: without one, a folder no source entry covers has no
+    known language (see the scan's fill-only rule)."""
+    return {"sources": []}
 
 
-def load_source_config(config_path: str) -> Dict[str, Any]:
+def _default_match() -> dict[str, Any]:
+    """Return a fresh default match result: enabled, with no language."""
+    return {"enabled": True}
+
+
+def kodi_ui_language() -> str:
+    """Kodi's interface language with its region (e.g. "nl-NL"), the best
+    guess for a folder whose language is not configured. "en-US" when Kodi
+    reports nothing usable."""
+    try:
+        code = xbmc.getLanguage(xbmc.ISO_639_1, region=True)
+    except Exception:
+        log.exception("Failed to read Kodi's UI language", event="sources.ui_language")
+        return _FALLBACK_UI_LANGUAGE
+    return code if isinstance(code, str) and code.strip() else _FALLBACK_UI_LANGUAGE
+
+
+def load_source_config(config_path: str) -> dict[str, Any]:
     """Load source configuration from a JSON file.
 
     Args:
@@ -43,8 +61,8 @@ def load_source_config(config_path: str) -> Dict[str, Any]:
 
     Returns:
         The parsed config dict. If the file does not exist or cannot
-        be read, returns a default config with an empty sources list
-        and "en-US" language.
+        be read, returns a default config with an empty sources list and
+        no default language.
     """
     if not os.path.exists(config_path):
         log.info(
@@ -74,7 +92,7 @@ def load_source_config(config_path: str) -> Dict[str, Any]:
     return config
 
 
-def save_source_config(config_path: str, config: Dict[str, Any]) -> None:
+def save_source_config(config_path: str, config: dict[str, Any]) -> None:
     """Write source configuration to a JSON file.
 
     Creates parent directories if they do not exist.
@@ -105,7 +123,7 @@ def save_source_config(config_path: str, config: Dict[str, Any]) -> None:
     )
 
 
-def discover_sources() -> List[Dict[str, str]]:
+def discover_sources() -> list[dict[str, str]]:
     """Discover video sources from Kodi via JSON-RPC.
 
     Calls Files.GetSources with media="video" and returns a list of
@@ -168,8 +186,8 @@ def _path_matches(file_path: str, source_path: str) -> bool:
 
 def match_source(
     file_path: str,
-    sources: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    sources: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Match a file path to the most specific configured source.
 
     Uses longest-prefix matching: the source whose path is the longest
@@ -181,9 +199,9 @@ def match_source(
 
     Returns:
         The matching source config dict, or a default dict with
-        enabled=True and language="en-US" if no source matches.
+        enabled=True and no language if no source matches.
     """
-    best_match = None  # type: Any
+    best_match: Any = None
     best_length = 0
 
     for source in sources:

@@ -70,7 +70,7 @@ from resources.lib.data.identity import compute_identity
 from resources.lib.data.kodi import get_all_items, get_item_by_id, update_item
 from resources.lib.data.media_types import EPISODE, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
-from resources.lib.data.sources import match_source
+from resources.lib.data.sources import kodi_ui_language, match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome, Step, run_chain
@@ -135,6 +135,12 @@ _KODI_TO_TMDB = {v: k for k, v in _TMDB_TO_KODI.items()}
 # fallback-language steps; every other field has a single TMDB step.
 _CHAIN_FIELDS = frozenset({"title", "plot"})
 _RATING_FIELDS = frozenset({"rating", "votes"})
+
+# Fields whose value is written in a language. In a folder with no configured
+# language they only fill an empty value (see _plan_writes): the language is a
+# guess, and replacing a library's text with another language's is what the
+# guess must never do.
+_LANGUAGE_FIELDS = frozenset({"title", "plot", "tagline", "genre"})
 # Key holding each chained field in a TVDB series record.
 _TVDB_SERIES_KEYS = {"title": "name", "plot": "overview"}
 
@@ -393,14 +399,15 @@ def _plan_writes(
     nfo_managed: bool,
     fs_map: dict[str, dict[str, Any]],
     identity: str,
+    fill_only: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], set[str]]:
     """Split extracted values into (fields to write, fields Kodi already holds).
 
     Under the maturity model a non-final field is refreshed overwrite-on-diff:
     a differing value overwrites the current one, an identical value is never
-    rewritten. On an NFO-managed item may_write decides with the field's
-    stored provenance; a field it forbids is in neither result, so it gets
-    no write and no source.
+    rewritten. On an NFO-managed item, and for a field in ``fill_only``,
+    may_write decides with the field's stored provenance; a field it forbids
+    is in neither result, so it gets no write and no source.
     """
     to_write: dict[str, Any] = {}
     held: set[str] = set()
@@ -409,7 +416,8 @@ def _plan_writes(
         if current is not None and current == value:
             held.add(f)
             continue
-        if not may_write(nfo_managed, current, fs_map.get(f, {}).get("written_value")):
+        protected = nfo_managed or f in fill_only
+        if not may_write(protected, current, fs_map.get(f, {}).get("written_value")):
             log.debug(
                 "Field protected, value left as it is",
                 event="scan.protected", identity=identity, field=f,
@@ -494,6 +502,9 @@ class _ScanCtx:
     pacer: _Pacer
     tmdb_api_key: str
     default_language: str
+    # Whether sources.json set default_language; without it a folder no
+    # source entry covers has no configured language.
+    default_language_set: bool
     sources: list[dict[str, Any]]
     enabled_fields: frozenset[str]
     show_id_map: dict[int, str]
@@ -1695,7 +1706,8 @@ def run_scan(
         breaker=breaker,
         pacer=_Pacer(settings.get("rate_limit", 0.25)),
         tmdb_api_key=tmdb_api_key,
-        default_language=source_config.get("default_language", "en-US"),
+        default_language=source_config.get("default_language") or kodi_ui_language(),
+        default_language_set=bool(source_config.get("default_language")),
         sources=source_config.get("sources", []),
         enabled_fields=enabled_fields,
         show_id_map=show_id_map or {},
@@ -1774,7 +1786,18 @@ def run_scan(
             stats["skipped"] += 1
             continue
 
-        language = source.get("language", ctx.default_language)
+        language = source.get("language") or ctx.default_language
+        fill_only = (
+            frozenset() if source.get("language") or ctx.default_language_set
+            else _LANGUAGE_FIELDS
+        )
+        if fill_only and "language_unconfigured" not in ctx.logged_once:
+            ctx.logged_once.add("language_unconfigured")
+            log.info(
+                "Folder without a configured language: text fills empty fields only",
+                event="scan.language_unconfigured", language=language,
+                media_type=media_type.name, source_path=item.get("file", ""),
+            )
 
         # Extract external IDs
         kodi_ids = _extract_ids(item)
@@ -1934,7 +1957,7 @@ def run_scan(
         answered = [f for f in nonfinal if f in outcomes and not outcomes[f].transient]
         extracted = _extract_fields(values, answered)
         fields_to_write, held = _plan_writes(
-            extracted, item, nfo_managed, fs_map, identity,
+            extracted, item, nfo_managed, fs_map, identity, fill_only,
         )
         stats["protected"] += len(extracted) - len(fields_to_write) - len(held)
 

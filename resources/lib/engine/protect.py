@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Optional
+from typing import Any
 
 from resources.lib.engine.textrules import is_empty_text
 
@@ -60,15 +60,17 @@ def _is_empty(value: Any) -> bool:
     return False
 
 
-def may_write(nfo_managed: bool, current: Any, written_value: Optional[str]) -> bool:
-    """May metamender overwrite ``current`` on this item?
+def may_write(protected: bool, current: Any, written_value: str | None) -> bool:
+    """May metamender overwrite ``current``?
 
-    Always for an item without an NFO. On an NFO-managed item only when the
-    current value is empty or a placeholder, or still equals what metamender
-    last wrote (``written_value`` is that value's fingerprint). Anything else
-    came from the NFO or was edited by the user and is left alone.
+    Always for an unprotected value. A protected one (any field of an
+    NFO-managed item, or a language field in a folder with no configured
+    language) only when it is empty or a placeholder, or still equals what
+    metamender last wrote (``written_value`` is that value's fingerprint).
+    Anything else came from the NFO, the scraper or the user and is left
+    alone.
     """
-    if not nfo_managed:
+    if not protected:
         return True
     if _is_empty(current):
         return True
