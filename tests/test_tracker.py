@@ -671,7 +671,7 @@ def test_reset_field_clock_records_source_votes_and_fallback(tmp_path):
     assert (inserted["from_fallback"], inserted["fallback_checks"]) == (1, 0)
 
 
-# =============================================================================
+# ======================================================================
 # Tests: adopt_identity
 # =============================================================================
 
@@ -735,4 +735,15 @@ def test_adopt_identity_ignores_identities_without_an_id(tmp_path):
     db.upsert_item("episode", "Show S01E01", kodi_id=3)
     assert db.adopt_identity("episode", "Show S01E02", 3) is None
     assert db.adopt_identity("movie", "Bar (1999)", 3) is None
+    db.close()
+
+
+def test_known_kodi_ids_per_media_type(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", kodi_id=3)
+    db.upsert_item("movie", "tmdb:2", kodi_id=5)
+    db.upsert_item("movie", "Foo (2001)")
+    db.upsert_item("tvshow", "tmdb:9", kodi_id=4)
+    assert db.known_kodi_ids("movie") == {3, 5}
+    assert db.known_kodi_ids("episode") == set()
     db.close()

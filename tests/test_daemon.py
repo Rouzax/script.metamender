@@ -35,12 +35,12 @@ def test_select_trigger_idle_when_nothing_due():
 
 
 def test_maybe_prune_orphans_full_scan_prunes_all_types():
-    """A full scan (kodi_filter=None) with retention > 0 prunes every type."""
+    """A full scan with retention > 0 prunes every type."""
     tracker = MagicMock()
     tracker.prune_orphans.return_value = 2
     settings = {"orphan_retention_days": 30}
 
-    daemon._maybe_prune_orphans(tracker, settings, kodi_filter=None)
+    daemon._maybe_prune_orphans(tracker, settings, targeted=False)
 
     expected_cutoff = (date.today() - timedelta(days=30)).isoformat()
     called = {
@@ -52,7 +52,7 @@ def test_maybe_prune_orphans_full_scan_prunes_all_types():
 
 
 def test_maybe_prune_orphans_targeted_scan_never_prunes():
-    """A targeted scan (kodi_filter set) must NEVER prune.
+    """A targeted (library-event) scan must NEVER prune.
 
     A targeted scan only stamps last_seen on the few items it sees, so
     pruning then would delete everything else in the library.
@@ -60,11 +60,7 @@ def test_maybe_prune_orphans_targeted_scan_never_prunes():
     tracker = MagicMock()
     settings = {"orphan_retention_days": 30}
 
-    daemon._maybe_prune_orphans(
-        tracker,
-        settings,
-        kodi_filter={"field": "dateadded", "operator": "after", "value": "x"},
-    )
+    daemon._maybe_prune_orphans(tracker, settings, targeted=True)
 
     tracker.prune_orphans.assert_not_called()
 
@@ -74,7 +70,7 @@ def test_maybe_prune_orphans_retention_zero_never_prunes():
     tracker = MagicMock()
     settings = {"orphan_retention_days": 0}
 
-    daemon._maybe_prune_orphans(tracker, settings, kodi_filter=None)
+    daemon._maybe_prune_orphans(tracker, settings, targeted=False)
 
     tracker.prune_orphans.assert_not_called()
 

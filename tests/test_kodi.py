@@ -231,27 +231,20 @@ def test_build_properties_episode():
     assert "tagline" not in props
 
 
-def test_get_all_items_with_filter(kodi_stubs):
+def test_get_all_items_ids_only_asks_for_no_properties(kodi_stubs):
     response = {
         "result": {
-            "movies": [
-                {"movieid": 1, "title": "Air"},
-            ],
+            "movies": [{"movieid": 1, "label": "Air"}],
             "limits": {"start": 0, "end": 1, "total": 1},
         }
     }
     kodi_stubs["xbmc"].executeJSONRPC = MagicMock(
         return_value=json.dumps(response)
     )
-    items = get_all_items(
-        MOVIE,
-        kodi_filter={"field": "title", "operator": "is", "value": "Air"},
-    )
-    assert len(items) == 1
-    call_args = kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0]
-    payload = json.loads(call_args)
-    assert "filter" in payload["params"]
-    assert payload["params"]["filter"]["value"] == "Air"
+    items = get_all_items(MOVIE, ids_only=True)
+    assert items == [{"movieid": 1, "label": "Air"}]
+    payload = json.loads(kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0])
+    assert payload["params"]["properties"] == []
 
 
 def test_get_all_items_with_tvshowid(kodi_stubs):

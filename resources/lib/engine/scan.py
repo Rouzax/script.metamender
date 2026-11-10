@@ -68,7 +68,7 @@ from resources.lib.constants import (
     parse_refetch_schedule,
 )
 from resources.lib.data.identity import compute_identity
-from resources.lib.data.kodi import get_all_items, update_item
+from resources.lib.data.kodi import get_all_items, get_item_by_id, update_item
 from resources.lib.data.media_types import EPISODE, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.sources import match_source
@@ -1572,6 +1572,23 @@ def _needed_providers(media_type: MediaType, candidates: list[str]) -> list[str]
     return needed
 
 
+def _new_items(tracker: TrackerDB, media_type: MediaType) -> list[dict[str, Any]]:
+    """The library's items whose Kodi id the tracker does not know yet, with
+    full details. An id listed but gone by the details call is skipped."""
+    known = tracker.known_kodi_ids(media_type.name)
+    listed = get_all_items(media_type, ids_only=True)
+    fresh = [
+        i[media_type.kodi_id_field] for i in listed
+        if i.get(media_type.kodi_id_field) not in known
+    ]
+    items = [d for d in (get_item_by_id(media_type, i) for i in fresh) if d]
+    log.info(
+        "New library items selected", event="scan.new_items",
+        media_type=media_type.name, listed=len(listed), new=len(items),
+    )
+    return items
+
+
 def run_scan(
     media_type: MediaType,
     tracker: TrackerDB,
@@ -1582,9 +1599,9 @@ def run_scan(
     monitor: Any = None,
     show_id_map: dict[int, str] | None = None,
     items: list[dict[str, Any]] | None = None,
-    kodi_filter: dict[str, str] | None = None,
     breaker: CircuitBreaker | None = None,
     reset: bool = False,
+    new_only: bool = False,
 ) -> dict[str, int]:
     """Run a single scan cycle for one media type.
 
@@ -1624,6 +1641,11 @@ def run_scan(
             the playback yield is skipped, and each field's clock is
             re-baselined (reset_field_clock) instead of advanced. Intended
             for items=[one_item].
+        new_only: Library-event scan: process only the items whose Kodi id
+            the tracker does not hold for this type. Kodi's dateadded is the
+            file's date, not when the item entered the library, so it cannot
+            pick out new items. A re-scraped item gets a new Kodi id and is
+            included.
 
     Returns:
         Stats dict with processed, skipped, updated, errors, and
@@ -1679,7 +1701,7 @@ def run_scan(
     )
 
     if items is None:
-        items = get_all_items(media_type, kodi_filter=kodi_filter)
+        items = _new_items(tracker, media_type) if new_only else get_all_items(media_type)
 
     for item in items:
         # Check for Kodi shutdown

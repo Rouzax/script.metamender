@@ -5026,3 +5026,36 @@ class TestIdentitySurvivesIdWriteBack:
         tracker.close()
         assert [r[0] for r in rows] == ["imdb:tt0086798"]
         assert fs is not None and fs["fetch_count"] == 1
+
+class TestNewOnlyScan:
+    """The library-event scan processes the items the tracker has not seen
+    under their current Kodi id. Kodi's dateadded is the file's date, so a
+    file older than the last scan is still new to the library."""
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    @patch("resources.lib.engine.scan.get_all_items")
+    def test_only_unknown_kodi_ids_are_processed(
+        self, mock_all, mock_by_id, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        known = _make_movie_item(movie_id=1, tmdb_id="11")
+        new = _make_movie_item(movie_id=2, tmdb_id="22")
+        new["dateadded"] = "2001-01-01 00:00:00"
+        mock_all.return_value = [{"movieid": 1}, {"movieid": 2}, {"movieid": 3}]
+        mock_by_id.side_effect = lambda mt, i: {2: new}.get(i)
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", compute_identity(known, MOVIE), kodi_id=1)
+        tracker.commit()
+
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+            _make_settings(), new_only=True,
+        )
+        tracker.close()
+
+        assert mock_all.call_args.kwargs == {"ids_only": True}
+        assert sorted(c.args[1] for c in mock_by_id.call_args_list) == [2, 3]
+        assert stats["processed"] == 1
+        assert [c.args[0] for c in mock_tmdb.call_args_list] == ["22"]

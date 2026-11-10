@@ -277,6 +277,14 @@ class TrackerDB:
         )
         return old  # type: ignore[no-any-return]
 
+    def known_kodi_ids(self, media_type: str) -> set[int]:
+        """Kodi ids of the tracked items of this type, as last scanned."""
+        rows = self._conn.execute(
+            "SELECT kodi_id FROM items WHERE media_type = ? AND kodi_id IS NOT NULL",
+            (media_type,),
+        )
+        return {int(r["kodi_id"]) for r in rows}
+
     def update_item_status(
         self, media_type: str, identity: str, status: str
     ) -> None:
