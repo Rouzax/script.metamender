@@ -116,6 +116,9 @@ _TEXT_ONLY = {
 MM: dict[str, dict[str, Any]] = {
     "M1": {},
     "M2": {"fallback_for": {"nl-NL": "en-US"}},
+    # Fills English episodes with Dutch titles, so C2 (no fallback) has fills
+    # to clear; the Dutch folders lack nothing an en-US fallback could add.
+    "M2b": {"fallback_for": {"en-US": "nl-NL"}},
     "M3": {"text_source_order": "1"},
     "M4": {"rating_source": "1"},
     "M4b": {"rating_source": "3"},
