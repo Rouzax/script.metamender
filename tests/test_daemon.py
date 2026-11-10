@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
+from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.service import daemon
 
 
@@ -364,3 +365,12 @@ def test_service_start_clears_a_lock_file_left_by_a_killed_kodi(kodi_stubs):
     _acquire, clear = _run_daemon_locked(ticks=1)
 
     clear.assert_called_once_with()
+
+
+def test_every_backfill_field_has_a_toggle():
+    """A field no toggle enables is never in enabled_fields, so the scan
+    never manages it. Votes are written with the rating."""
+    toggled = frozenset().union(*daemon._FIELD_TOGGLES.values())
+    for media_type in (MOVIE, TVSHOW, EPISODE):
+        missing = media_type.backfill_fields - toggled - {"votes"}
+        assert not missing, (media_type.name, sorted(missing))

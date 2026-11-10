@@ -118,7 +118,7 @@ _FIELD_TOGGLES = {
     "enable_credits": frozenset({"director", "writer"}),
     "enable_trailers": frozenset({"trailer"}),
     "enable_taglines": frozenset({"tagline"}),
-    "enable_details": frozenset({"genre", "studio", "country", "runtime"}),
+    "enable_details": frozenset({"genre", "studio", "country", "runtime", "firstaired"}),
 }
 
 
