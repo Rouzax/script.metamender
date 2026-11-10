@@ -4616,26 +4616,6 @@ class TestFallbackSettingChange:
 
     @patch("resources.lib.engine.scan.update_item", return_value=True)
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_native_answer_replaces_old_fallback_value(
-        self, mock_fetch, mock_update, tmp_path, kodi_stubs
-    ):
-        mock_fetch.side_effect = _plot_by_lang(
-            {"nl-NL": "Nederlandse plot", "de-DE": "Deutsche Handlung"},
-        )
-        tracker = _make_tracker(tmp_path)
-        _seed_fallback_plot(tracker, "English plot")
-        run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
-        )
-        row = _plot_row(tracker)
-        tracker.close()
-
-        assert _written(mock_update, "plot") == "Nederlandse plot"
-        assert row["from_fallback"] == 0
-
-    @patch("resources.lib.engine.scan.update_item", return_value=True)
-    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
     def test_edited_fallback_value_is_not_reopened(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
@@ -4678,6 +4658,90 @@ class TestFallbackSettingChange:
 
         assert _written(mock_update, "plot") is None
         assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_nfo_item_fallback_value_written_by_metamender_is_replaced(
+        self, mock_fetch, mock_update, _mock_nfo, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"de-DE": "Deutsche Handlung"})
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Deutsche Handlung"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_untrimmed_kodi_value_still_counts_as_written(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"de-DE": "Deutsche Handlung"})
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", self._german_settings(), items=[_old_movie(plot=" English plot ")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Deutsche Handlung"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_transient_fallback_step_keeps_value_and_old_settings(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        def fetch(tid, key, language):
+            if language == "de-DE":
+                raise TransientProviderError("http 503")
+            return _tmdb_movie_response(plot="")
+
+        mock_fetch.side_effect = fetch
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        before = _plot_row(tracker)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+        )
+        after = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") is None
+        # Not an answer: the field stays reopened for the next scan.
+        assert after["settings_fp"] == before["settings_fp"]
+        assert after["fetch_count"] == before["fetch_count"]
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_no_answer_under_new_setting_keeps_old_value(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.scan import settings_fingerprint
+
+        mock_fetch.side_effect = _plot_by_lang({})
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") is None
+        assert row["settings_fp"] == settings_fingerprint(
+            "plot", self._german_settings(), "nl-NL", "movie",
+        )
+        assert row["from_fallback"] == 1
 
 
 class TestFallbackRecheckCounting:
