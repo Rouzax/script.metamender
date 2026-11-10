@@ -124,15 +124,16 @@
                     </dependencies>
                     <constraints>
                         <options>
-                            <option label="32260">0</option>
-                            <option label="32261">1</option>
-                            <option label="32262">2</option>
-                            <option label="32263">3</option>
-                            <option label="32264">4</option>
-                            <option label="32265">5</option>
-                            <option label="32266">6</option>
-                            <option label="32267">7</option>
-                            <option label="32268">8</option>
+                            <option label="32269">0</option>
+                            <option label="32260">1</option>
+                            <option label="32261">2</option>
+                            <option label="32262">3</option>
+                            <option label="32263">4</option>
+                            <option label="32264">5</option>
+                            <option label="32265">6</option>
+                            <option label="32266">7</option>
+                            <option label="32267">8</option>
+                            <option label="32268">9</option>
                         </options>
                     </constraints>
                     <control type="list" format="string" />

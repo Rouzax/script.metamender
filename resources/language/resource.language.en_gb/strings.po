@@ -289,6 +289,10 @@ msgctxt "#32268"
 msgid "SE - Mediemyndigheten"
 msgstr ""
 
+msgctxt "#32269"
+msgid "Automatic (Kodi's region)"
+msgstr ""
+
 # --- General (32300-32349) ---
 
 msgctxt "#32300"
