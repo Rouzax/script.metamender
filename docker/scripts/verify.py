@@ -10,11 +10,13 @@ Commands:
     verify.py probe     Read-only. Library composition + identity-fallback
                         analysis (which items land on the bare-title key) +
                         per-field gap counts. Mutates nothing.
-    verify.py apikey    Read-only on Kodi. Demonstrates that an invalid TMDB key
-                        makes run_scan return normal stats instead of surfacing
-                        the error (the "silent success" path). Mutates nothing
-                        in Kodi (the bogus key aborts before any write; the
-                        tracker is a throwaway temp DB).
+    verify.py apikey    Read-only on Kodi. Regression check: an invalid TMDB key
+                        makes run_scan raise ApiKeyError instead of finishing
+                        as if nothing were wrong. Mutates nothing in Kodi (the
+                        bogus key aborts before any write; the tracker is a
+                        throwaway temp DB).
+    verify.py certs     No Kodi needed. Asks each certification site for a few
+                        known titles and compares the answers. Read-only.
 
 Env:
     KODI_URL        default http://localhost:8101/jsonrpc
@@ -130,7 +132,7 @@ def cmd_probe() -> int:
 
 
 def cmd_apikey() -> int:
-    """Demonstrate the invalid-key silent-success path (read-only on Kodi)."""
+    """An invalid TMDB key must surface as ApiKeyError (read-only on Kodi)."""
     from resources.lib.data.kodi import get_all_items
     from resources.lib.data.media_types import TVSHOW
     from resources.lib.data.tracker import TrackerDB
@@ -180,6 +182,31 @@ def cmd_apikey() -> int:
     return 1
 
 
+# (site module, title, original title, year, media type, expected rating)
+_CERT_CHECKS = [
+    ("fsk", "The Matrix", "", 1999, "movie", "16"),
+    ("fsk", "Dark", "", 2017, "tvshow", "12"),
+]
+
+
+def cmd_certs() -> int:
+    """Live answers of the certification sites for known titles."""
+    import importlib
+
+    failed = 0
+    for site, title, original, year, media, expected in _CERT_CHECKS:
+        module = importlib.import_module("resources.lib.providers." + site)
+        try:
+            got = module.lookup(title, original, year, media)
+        except Exception as exc:  # noqa: BLE001 - report every failure kind
+            got = "error: {}".format(exc)
+        ok = got == expected
+        failed += not ok
+        print("{:<12} {:<28} {:>6}  expected {:<5} got {!r}  {}".format(
+            site, title, media, expected, got, "OK" if ok else "FAIL"))
+    return 1 if failed else 0
+
+
 def main() -> int:
     _install_kodi_stubs()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "probe"
@@ -187,6 +214,8 @@ def main() -> int:
         return cmd_probe()
     if cmd == "apikey":
         return cmd_apikey()
+    if cmd == "certs":
+        return cmd_certs()
     print(__doc__)
     return 2
 

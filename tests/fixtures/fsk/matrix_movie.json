@@ -1,0 +1,101 @@
+{
+ "success": true,
+ "data": {
+  "totalRecords": 7,
+  "docs": [
+   {
+    "mainTitle": "Matrix",
+    "mainOriginalTitle": "THE MATRIX",
+    "__rating": 16,
+    "yearProduction": 1998,
+    "seasonNumber": null,
+    "subproducts": [
+     {
+      "imdbId": ""
+     }
+    ],
+    "__superType": "single"
+   },
+   {
+    "mainTitle": "Matrix",
+    "mainOriginalTitle": "THE MATRIX",
+    "__rating": 16,
+    "yearProduction": 1998,
+    "seasonNumber": null,
+    "subproducts": [
+     {
+      "imdbId": ""
+     }
+    ],
+    "__superType": "single"
+   },
+   {
+    "mainTitle": "Matrix",
+    "mainOriginalTitle": "THE MATRIX",
+    "__rating": 16,
+    "yearProduction": 1998,
+    "seasonNumber": null,
+    "subproducts": [
+     {
+      "imdbId": ""
+     }
+    ],
+    "__superType": "single"
+   },
+   {
+    "mainTitle": "MATRIX RESURRECTIONS",
+    "mainOriginalTitle": "THE MATRIX RESURRECTIONS",
+    "__rating": 16,
+    "yearProduction": 2021,
+    "seasonNumber": null,
+    "subproducts": [
+     {
+      "imdbId": ""
+     }
+    ],
+    "__superType": "single"
+   },
+   {
+    "mainTitle": "Matrix Revolutions",
+    "mainOriginalTitle": "THE MATRIX REVOLUTIONS",
+    "__rating": 16,
+    "yearProduction": 2003,
+    "seasonNumber": null,
+    "subproducts": [
+     {
+      "imdbId": ""
+     }
+    ],
+    "__superType": "single"
+   },
+   {
+    "mainTitle": "The Matrix",
+    "mainOriginalTitle": "THE MATRIX",
+    "__rating": 16,
+    "yearProduction": 1998,
+    "seasonNumber": null,
+    "subproducts": [
+     {
+      "imdbId": ""
+     }
+    ],
+    "__superType": "single"
+   },
+   {
+    "mainTitle": "Matrix Reloaded",
+    "mainOriginalTitle": "THE MATRIX RELOADED",
+    "__rating": 16,
+    "yearProduction": 2003,
+    "seasonNumber": null,
+    "subproducts": [
+     {
+      "imdbId": ""
+     }
+    ],
+    "__superType": "single"
+   }
+  ],
+  "pageNumber": 1,
+  "itemsPerPage": 500
+ }
+}

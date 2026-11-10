@@ -18,7 +18,7 @@ from resources.lib.engine.protect import is_blank
 _COUNTRY_PREFIX = re.compile(r"^\s*([A-Za-z]{2,3}):\s*")
 _RATED_PREFIX = re.compile(r"^\s*rated\s+", re.IGNORECASE)
 _US_RATED = "Rated "
-_TITLE_SEPARATORS = (" ", ":", "-")
+_SUBTITLE_SEPARATORS = (":", "-")
 # rating_prefix is free text in the settings; anything longer is a mistake.
 _MAX_PREFIX_LENGTH = 8
 
@@ -88,15 +88,16 @@ def normalize_title(text: str) -> str:
 
 def titles_match(site_title: str, item_title: str) -> bool:
     """The site's title names the item: equal, or the site title continues
-    the item title after a space, ":" or "-" ("Alien: Romulus" for "Alien",
-    never the reverse)."""
+    the item title with a subtitle after ":" or "-" ("Alien: Romulus",
+    "Avatar - Aufbruch nach Pandora" for "Avatar"), never the reverse. A plain
+    space is not enough: "Dark Blue" is another show than "Dark"."""
     site = normalize_title(site_title)
     item = normalize_title(item_title)
     if not site or not item:
         return False
     if site == item:
         return True
-    return site.startswith(item) and site[len(item)] in _TITLE_SEPARATORS
+    return site.startswith(item) and site[len(item):].lstrip().startswith(_SUBTITLE_SEPARATORS)
 
 
 def years_match(site_year: int | None, item_year: int | None) -> bool:
@@ -113,3 +114,41 @@ def sanitize_prefix(value: str, default: str) -> str:
     if len(value) > _MAX_PREFIX_LENGTH or any(ord(c) < 32 or ord(c) == 127 for c in value):
         return default
     return value
+
+
+# A site's search result: its titles (localized, original, ...), its year
+# when known, and its bare rating.
+Candidate = tuple[tuple[str, ...], int | None, str]
+
+
+def best_match(
+    item_titles: tuple[str, ...], item_year: int | None, candidates: list[Candidate],
+) -> str | None:
+    """The rating of the candidate that names the item, or None.
+
+    Sites search their full text and list sequels and namesakes, so an exact
+    title (normalized) within a year comes first, in the site's order. The
+    prefix form of titles_match ("Alien: Romulus" for "Alien") counts only
+    when both years are known and agree. Without an item year only exact
+    titles count, and only when they all carry the same rating.
+    """
+    wanted = {normalize_title(t) for t in item_titles if t}
+    wanted.discard("")
+    if not wanted:
+        return None
+
+    def exact(titles: tuple[str, ...]) -> bool:
+        return any(normalize_title(t) in wanted for t in titles)
+
+    hits = [c for c in candidates if exact(c[0]) and years_match(c[1], item_year)]
+    if item_year is None:
+        ratings = {c[2] for c in hits}
+        return ratings.pop() if len(ratings) == 1 else None
+    if hits:
+        return hits[0][2]
+    for titles, year, rating in candidates:
+        if year is not None and years_match(year, item_year) and any(
+            titles_match(t, w) for t in titles for w in item_titles if w
+        ):
+            return rating
+    return None

@@ -56,6 +56,8 @@ def test_titles_match():
     assert titles_match("Alien: Romulus", "Alien")
     assert titles_match("Alien - Director's Cut", "Alien")
     assert not titles_match("Aliens", "Alien")
+    assert titles_match("Avatar - Aufbruch nach Pandora", "Avatar")
+    assert not titles_match("Dark Blue", "Dark")
     assert not titles_match("Alien", "Alien: Romulus")
     assert not titles_match("", "Alien") and not titles_match("Alien", "")
 
@@ -71,3 +73,39 @@ def test_sanitize_prefix():
     assert sanitize_prefix("", "NL:") == ""
     assert sanitize_prefix("a\nb", "NL:") == "NL:"
     assert sanitize_prefix("123456789", "NL:") == "NL:"
+
+
+def test_best_match_prefers_exact_title():
+    from resources.lib.engine.certification import best_match
+
+    cands = [(("Matrix Reloaded",), 2003, "16"), (("The Matrix", "Matrix"), 1998, "16"),
+             (("The Matrix",), 1999, "12")]
+    assert best_match(("The Matrix",), 1999, cands) == "16"
+
+
+def test_best_match_prefix_needs_both_years():
+    from resources.lib.engine.certification import best_match
+
+    cands = [(("Alien: Romulus",), 2024, "16")]
+    assert best_match(("Alien",), 2024, cands) == "16"
+    assert best_match(("Alien",), 1979, cands) is None
+    assert best_match(("Alien",), None, cands) is None
+    assert best_match(("Alien",), 2024, [(("Alien: Romulus",), None, "16")]) is None
+
+
+def test_best_match_without_year_needs_one_exact_candidate():
+    from resources.lib.engine.certification import best_match
+
+    one = [(("Dark",), 2017, "16"), (("Dark Matter",), 2015, "12")]
+    assert best_match(("Dark",), None, one) == "16"
+    two = [(("Dark",), 2017, "16"), (("Dark",), 2005, "12")]
+    assert best_match(("Dark",), None, two) is None
+    same = [(("Dark",), 2017, "16"), (("Dark",), 2017, "16")]
+    assert best_match(("Dark",), None, same) == "16"
+
+
+def test_best_match_year_mismatch():
+    from resources.lib.engine.certification import best_match
+
+    assert best_match(("Dune",), 2021, [(("Dune",), 1984, "12")]) is None
+    assert best_match(("Dune", "Duin"), 2021, [(("Duin",), 2021, "12")]) == "12"
