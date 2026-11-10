@@ -5573,3 +5573,95 @@ class TestFollowTheScraper:
 
         assert _written(mock_update, "plot") == "TMDB plot"
         mock_tvdb.assert_not_called()
+
+
+class TestMainTitles:
+    """Show and movie titles, under their own toggle ("main_title"): fetched
+    in the folder language only, and only for items keyed on a provider id."""
+
+    def test_candidates(self):
+        from resources.lib.engine.scan import _candidate_fields
+
+        assert "title" not in _candidate_fields(MOVIE, frozenset({"title"}))
+        assert "title" in _candidate_fields(MOVIE, frozenset({"main_title"}))
+        assert "title" in _candidate_fields(TVSHOW, frozenset({"main_title"}))
+        assert "title" in _candidate_fields(EPISODE, frozenset({"title"}))
+        assert "title" not in _candidate_fields(EPISODE, frozenset({"main_title"}))
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_movie_title_in_folder_language(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(title="Het Monster van Parijs")
+        item = _make_movie_item(title="A Monster in Paris")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"main_title"}),
+            "k", _make_settings(), items=[item],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Het Monster van Parijs"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_no_fallback_for_main_titles(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        # No Dutch title: the English fallback would only be worse than the
+        # scraper's title, so nothing is written.
+        mock_fetch.side_effect = lambda tid, key, lang: _tmdb_movie_response(
+            title="" if lang == "nl-NL" else "A Monster in Paris")
+        item = _make_movie_item(title="")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"main_title"}),
+            "k", _make_settings(), items=[item],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.resolve_id", return_value="99999")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow_ids", return_value={})
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    def test_title_keyed_show_is_left_alone(
+        self, mock_tmdb, _ids, _resolve, mock_update, tmp_path, kodi_stubs
+    ):
+        # Keyed on "title (year)": a new title would be a new tracker item.
+        item = _make_tvshow_item(title="De Snorkels")
+        item["uniqueid"] = {"tvdb": "777"}
+        mock_tmdb.return_value = _tmdb_tvshow_response(title="The Snorks", plot="P")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _make_source_config(), frozenset({"main_title", "plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        assert _written(mock_update, "plot") == "P"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    def test_show_title_change_keeps_episode_rows(
+        self, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_tvshow_item(title="Test Show")
+        mock_tmdb.return_value = _tmdb_tvshow_response(title="Testserie")
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("episode", "Test Show S01E01", kodi_id=100)
+        tracker.commit()
+        run_scan(
+            TVSHOW, tracker, _make_source_config(), frozenset({"main_title"}),
+            "k", _make_settings(), items=[item],
+        )
+        names = [r[0] for r in tracker._conn.execute(
+            "SELECT identity FROM items WHERE media_type = 'episode'")]
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Testserie"
+        assert names == ["Testserie S01E01"]

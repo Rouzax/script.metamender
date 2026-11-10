@@ -14,6 +14,7 @@ Logging:
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 from datetime import date
 from typing import Any
@@ -27,6 +28,10 @@ log = get_logger('tracker')
 # A missing value means no cycle has ever been opened, which begin_cycle treats
 # as "not interrupted" so the first run starts fresh.
 _CYCLE_COMPLETE_KEY = "cycle_complete"
+
+# The part of an episode identity after its show title (see compute_identity
+# and the scan's duplicate key "<identity>|<file>").
+_EPISODE_SUFFIX = re.compile(r"S\d{2,}E\d{2,}(\|.*)?$")
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS items (
@@ -276,6 +281,47 @@ class TrackerDB:
             media_type=media_type, identity=identity, old_identity=old,
         )
         return old  # type: ignore[no-any-return]
+
+    def rename_show_episodes(self, old_title: str, new_title: str) -> int:
+        """Re-key a show's episode rows after metamender changed its title.
+
+        An episode is keyed "<show title> SxxEyy" (with "|<file>" for a
+        duplicate), so a new show title would otherwise orphan every episode
+        row and restart its clocks. A row whose new key is already taken keeps
+        its old one. Returns the number of rows renamed.
+        """
+        prefix = old_title + " "
+        rows = self._conn.execute(
+            "SELECT id, identity FROM items WHERE media_type = 'episode' "
+            "AND substr(identity, 1, ?) = ?",
+            (len(prefix), prefix),
+        ).fetchall()
+        renamed = 0
+        try:
+            for row in rows:
+                rest = row["identity"][len(prefix):]
+                if not _EPISODE_SUFFIX.match(rest):
+                    continue
+                new_identity = new_title + " " + rest
+                if self._get_item_id("episode", new_identity) is not None:
+                    continue
+                self._conn.execute(
+                    "UPDATE items SET identity = ? WHERE id = ?", (new_identity, row["id"]),
+                )
+                renamed += 1
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to re-key episode rows", event="tracker.error",
+                old_title=old_title, new_title=new_title,
+            )
+            return renamed
+        log.info(
+            "Episode rows re-keyed after a show title change",
+            event="tracker.episodes_renamed", old_title=old_title,
+            new_title=new_title, renamed=renamed,
+        )
+        return renamed
 
     def known_kodi_ids(self, media_type: str) -> set[int]:
         """Kodi ids of the tracked items of this type, as last scanned."""

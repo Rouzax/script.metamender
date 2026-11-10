@@ -826,3 +826,57 @@ class TestCrossReferences:
         mock_get.return_value = _mock_response(503)
         with pytest.raises(TransientProviderError):
             call()
+
+
+# =============================================================================
+# Tests: titles in the requested language
+# =============================================================================
+
+
+class TestTitles:
+    """TMDB answers with the original title when it has no translation in the
+    requested language; that is not a title in the language, so it is ""."""
+
+    @staticmethod
+    def _movie(**fields: Any) -> dict:
+        return dict(MOVIE_RESPONSE, **fields)
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_translated_movie_title(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, self._movie(
+            title="Het Monster van Parijs", original_title="Un monstre à Paris",
+            original_language="fr",
+        ))
+        result = fetch_movie("1", "k", language="nl-NL")
+        assert result is not None and result["title"] == "Het Monster van Parijs"
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_untranslated_movie_title_is_empty(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, self._movie(
+            title="Past Lives", original_title="Past Lives", original_language="en",
+        ))
+        result = fetch_movie("1", "k", language="nl-NL")
+        assert result is not None and result["title"] == ""
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_original_in_the_requested_language_counts(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, self._movie(
+            title="Zwartboek", original_title="Zwartboek", original_language="nl",
+        ))
+        result = fetch_movie("1", "k", language="nl-NL")
+        assert result is not None and result["title"] == "Zwartboek"
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_unknown_original_language_keeps_the_title(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, self._movie())
+        result = fetch_movie("1", "k", language="nl-NL")
+        assert result is not None and result["title"] == "Past Lives"
+
+    @patch("resources.lib.providers.http.requests.get")
+    def test_show_title(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, dict(
+            TVSHOW_RESPONSE, name="The Night Agent", original_name="The Night Agent",
+            original_language="en",
+        ))
+        assert fetch_tvshow("1", "k", language="nl-NL")["title"] == ""
+        assert fetch_tvshow("1", "k", language="en-US")["title"] == "The Night Agent"

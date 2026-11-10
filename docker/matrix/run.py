@@ -121,6 +121,7 @@ MM: dict[str, dict[str, Any]] = {
     "M4b": {"rating_source": "3"},
     "M5": {"sources": False},
     "M6": dict(_TEXT_ONLY),
+    "M7": {"enable_main_titles": "true"},
 }
 
 # Setting changed after the second scan, before a third.
@@ -133,7 +134,7 @@ CHANGES: dict[str, dict[str, Any]] = {
 PLAN = (
     [f"{k}-M1" for k in KODI]
     + [f"{k}-{m}" for m in ("M2", "M3", "M4", "M5", "M6") for k in ("K1", "K2")]
-    + ["K1-M4b"]
+    + ["K1-M4b", "K3-M7"]
     # M2 fills the English placeholder titles from its Dutch fallback, so
     # these start with values a setting change may reopen.
     + [f"K1-M2-{c}" for c in CHANGES]

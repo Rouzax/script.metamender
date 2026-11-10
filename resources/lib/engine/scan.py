@@ -1406,7 +1406,10 @@ def _text_chain(
     else:
         specs = [tmdb_step(False), tvdb_step(folder_lang, False)]
 
-    if _fallback_applies(fallback_lang, folder_lang):
+    # A show or movie title in another language would be worse than the one
+    # the scraper gave it, so main titles have no fallback steps.
+    main_title = field == "title" and ctx.media_type.name != "episode"
+    if not main_title and _fallback_applies(fallback_lang, folder_lang):
         if movie:
             specs.append(tmdb_step(True))
         elif ctx.fallback_order == FALLBACK_TMDB_FIRST:
@@ -1622,14 +1625,26 @@ def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
 
 def _candidate_fields(media_type: MediaType, enabled_fields: frozenset[str]) -> list[str]:
     """Fields this pass manages: enabled, backfilled for the media type, and
-    known to the providers. Titles are managed for episodes only."""
+    known to the providers. An episode's title is enabled as "title", a show's
+    or movie's as "main_title", since they have separate toggles."""
     fields = (
         {_TMDB_TO_KODI.get(k, k) for k in _TMDB_TO_KODI}
         & enabled_fields & media_type.backfill_fields
     )
     if media_type.name != "episode":
         fields.discard("title")
+        if "main_title" in enabled_fields and "title" in media_type.backfill_fields:
+            fields.add("title")
     return sorted(fields)
+
+
+def _item_fields(candidates: list[str], media_type: MediaType, identity: str) -> list[str]:
+    """The pass's fields for one item. A show or movie keyed on its title
+    ("title (year)", no tmdb or imdb id) does not get its title managed: a
+    new title would make it a new tracker item."""
+    if media_type.name == "episode" or identity.startswith(("tmdb:", "imdb:")):
+        return candidates
+    return [f for f in candidates if f != "title"]
 
 
 def _needed_providers(media_type: MediaType, candidates: list[str]) -> list[str]:
@@ -1909,15 +1924,16 @@ def run_scan(
         fs_map = tracker.get_field_status_map(media_type.name, identity)
         threshold = settings.get("stale_threshold_days", 365)
 
+        fields = _item_fields(candidates, media_type, identity)
         # A field sampled under other settings (or before fingerprints were
         # stored) is re-checked as if never sampled, and re-baselined once it
         # answers. A transient keeps the old fingerprint, so it stays due.
         fps = {
             f: settings_fingerprint(f, settings, language, media_type.name, fallback_lang)
-            for f in candidates
+            for f in fields
         }
         rebaseline = {
-            f for f in candidates
+            f for f in fields
             if reset or (f in fs_map and fs_map[f].get("settings_fp") != fps[f])
         }
 
@@ -1927,7 +1943,7 @@ def run_scan(
         rechecks: set[str] = set()
         # FINAL fields fetched once more because Kodi lost metamender's value.
         refills: set[str] = set()
-        for f in candidates:
+        for f in fields:
             if f in rebaseline:
                 # Update now, or changed settings: due regardless of the
                 # recorded maturity, so the clock re-baselines.
@@ -2072,6 +2088,9 @@ def run_scan(
         written = _write_fields(
             ctx, kodi_id, title, identity, fields_to_write, stats,
         )
+        if media_type.name == "tvshow" and "title" in written and item.get("title"):
+            # Episodes are keyed on their show's title; keep their rows.
+            tracker.rename_show_episodes(item["title"], fields_to_write["title"])
 
         # A field whose write was attempted and rejected by Kodi was NOT filled,
         # so its clock must not advance: otherwise aged content reaches FINAL on

@@ -371,5 +371,8 @@ def test_every_backfill_field_has_a_toggle():
     never manages it. Votes are written with the rating."""
     toggled = frozenset().union(*daemon._FIELD_TOGGLES.values())
     for media_type in (MOVIE, TVSHOW, EPISODE):
-        missing = media_type.backfill_fields - toggled - {"votes"}
+        # A movie or show title has its own toggle, apart from episode titles.
+        own = {"title": "main_title"} if media_type is not EPISODE else {}
+        needed = {own.get(f, f) for f in media_type.backfill_fields} - {"votes"}
+        missing = needed - toggled
         assert not missing, (media_type.name, sorted(missing))

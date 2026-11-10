@@ -132,7 +132,7 @@ A run name is `K<n>-M<n>`, optionally `-C<n>`; the tables at the top of
   whether each folder is scraped in its own language or in English.
 - `M`: metamender settings on top of the defaults (an en-US fallback for the
   Dutch folders, text source order, rating source, no `sources.json`, text
-  fields only).
+  fields only, show and movie titles managed).
 - `C`: a setting changed after the second scan, followed by a third scan
   (the Dutch folders' fallback becomes de-DE, or is removed, or the fallback
   order flips).

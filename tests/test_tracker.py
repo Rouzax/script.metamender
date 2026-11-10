@@ -747,3 +747,26 @@ def test_known_kodi_ids_per_media_type(tmp_path):
     assert db.known_kodi_ids("movie") == {3, 5}
     assert db.known_kodi_ids("episode") == set()
     db.close()
+
+
+def test_rename_show_episodes(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("episode", "Alfred J. Kwak S01E01", kodi_id=1)
+    db.upsert_item("episode", "Alfred J. Kwak S01E02|/media/a.mkv", kodi_id=2)
+    db.upsert_item("episode", "Alfred J. Kwak S01E03", kodi_id=3)
+    db.upsert_item("episode", "Alfred Jodocus Kwak S01E03", kodi_id=4)  # taken
+    db.upsert_item("episode", "Alfred J. Kwakkel S01E01", kodi_id=5)
+    db.upsert_item("tvshow", "Alfred J. Kwak S01E01", kodi_id=6)
+
+    assert db.rename_show_episodes("Alfred J. Kwak", "Alfred Jodocus Kwak") == 2
+
+    names = {r[0] for r in db._conn.execute(
+        "SELECT identity FROM items WHERE media_type = 'episode'")}
+    assert names == {
+        "Alfred Jodocus Kwak S01E01",
+        "Alfred Jodocus Kwak S01E02|/media/a.mkv",
+        "Alfred J. Kwak S01E03",
+        "Alfred Jodocus Kwak S01E03",
+        "Alfred J. Kwakkel S01E01",
+    }
+    db.close()

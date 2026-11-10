@@ -61,6 +61,9 @@
                 <setting id="enable_episode_titles" type="boolean" label="32106" help="32107">
                     <default>false</default>
                 </setting>
+                <setting id="enable_main_titles" type="boolean" label="32399" help="32400">
+                    <default>false</default>
+                </setting>
                 <setting id="enable_certifications" type="boolean" label="32108" help="32109">
                     <default>true</default>
                 </setting>

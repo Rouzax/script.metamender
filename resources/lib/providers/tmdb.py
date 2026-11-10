@@ -186,6 +186,24 @@ def _find(
     return None
 
 
+def _language_title(
+    title: str | None, original: str | None, original_language: str | None,
+    language: str,
+) -> str:
+    """The title in ``language``, or "" when TMDB has none.
+
+    Without a translation TMDB answers with the original title, which is not a
+    title in the requested language unless the original is in that language.
+    A translation that happens to equal the original reads as missing; the
+    caller then keeps the title the item has.
+    """
+    title = title or ""
+    wanted = language.split("-")[0].lower()
+    if original_language and title == (original or "") and original_language.lower() != wanted:
+        return ""
+    return title
+
+
 def fetch_movie(
     tmdb_id: str,
     api_key: str,
@@ -237,6 +255,10 @@ def fetch_movie(
         "runtime": data.get("runtime"),
         "premiered": data.get("release_date", ""),
         "original_title": data.get("original_title", ""),
+        "title": _language_title(
+            data.get("title"), data.get("original_title"),
+            data.get("original_language"), language,
+        ),
         "certifications": certifications,
         "imdb_id": data.get("imdb_id", ""),
     }
@@ -344,6 +366,10 @@ def fetch_tvshow(
         "rating": data.get("vote_average", 0.0),
         "votes": data.get("vote_count", 0),
         "plot": data.get("overview", ""),
+        "title": _language_title(
+            data.get("name"), data.get("original_name"),
+            data.get("original_language"), language,
+        ),
         "genres": [g["name"] for g in data.get("genres", []) if "name" in g],
         "certifications": certifications,
         "imdb_id": data.get("external_ids", {}).get("imdb_id", ""),

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import FrozenSet
 
 
 @dataclass(frozen=True)
@@ -15,7 +14,7 @@ class MediaType:
     kodi_id_field: str
     kodi_result_key: str
     kodi_detail_key: str
-    backfill_fields: FrozenSet[str]
+    backfill_fields: frozenset[str]
     date_field: str
 
 
@@ -30,7 +29,7 @@ MOVIE = MediaType(
     kodi_detail_key="moviedetails",
     backfill_fields=frozenset({
         "rating", "votes", "plot", "tagline", "director", "writer",
-        "genre", "studio", "country", "trailer", "runtime", "mpaa",
+        "genre", "studio", "country", "trailer", "runtime", "mpaa", "title",
     }),
     date_field="premiered",
 )
@@ -45,7 +44,7 @@ TVSHOW = MediaType(
     kodi_result_key="tvshows",
     kodi_detail_key="tvshowdetails",
     backfill_fields=frozenset({
-        "rating", "votes", "plot", "genre", "mpaa",
+        "rating", "votes", "plot", "genre", "mpaa", "title",
     }),
     date_field="premiered",
 )
