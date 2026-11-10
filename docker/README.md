@@ -12,6 +12,7 @@ library `testvideo131`). MetaMender is already bind-mounted there at
 |------|------|------|--------------|
 | **Host harness** | `scripts/verify.py` | Surgical engine checks: identity, gaps, a single field write, provider behaviour | None (bundled commands are read-only) |
 | **Flatpak service** | Flatpak Kodi, Omega or Piers (below) | End-to-end: the real addon service runs inside Kodi | Writes to the shared library |
+| **Matrix** | `matrix/run.py` (below) | The real service on small libraries built by different scrapers and settings | None: own container and sqlite library |
 
 Prefer the **host harness** for verifying specific behaviour. It runs the real
 engine modules on the host and proxies `xbmc.executeJSONRPC` to the container,
@@ -107,6 +108,63 @@ JSON-RPC on 8100, so run one at a time. Path substitution from
    also matches the shell running the command, so a `kill` built on it can
    kill that shell instead.
 6. Stop Kodi, restore the databases, and remove what steps 2 and 3 added.
+
+## Scraper and settings matrix: `matrix/run.py`
+
+Builds a small library with one of Kodi's TV scrapers, lets the real
+metamender service scan it twice, and checks what it wrote. It runs in its own
+container, `kodi-matrix` (`matrix/compose.yaml`, JSON-RPC on
+`127.0.0.1:8102`), whose library is a local sqlite file, so the shared
+MariaDB libraries are never touched and no backup is needed.
+
+```bash
+python3 docker/matrix/run.py --out /path/to/results K1-M1 K2-M3   # chosen runs
+python3 docker/matrix/run.py --out /path/to/results --plan         # every planned run
+python3 docker/matrix/run.py --out /path/to/results --reanalyse    # redo reports from saved files
+docker compose -f docker/matrix/compose.yaml down -v               # remove the rig afterwards
+```
+
+A run name is `K<n>-M<n>`, optionally `-C<n>`; the tables at the top of
+`run.py` define them:
+
+- `K`: the TV scraper (TMDB, TheTVDB or TVmaze; movies always use TMDB) and
+  whether each folder is scraped in its own language or in English.
+- `M`: metamender settings on top of the defaults (fallback language, text
+  source order, rating source, no `sources.json`, text fields only).
+- `C`: a setting changed after the second scan, followed by a third scan.
+  Before the change the driver edits one value metamender filled from the
+  fallback, as a user would, and checks that it survives.
+
+Each run starts from an empty volume: Kodi installs the TheTVDB and TVmaze
+scrapers and `script.module.imdbratings` from its repository, scrapes the
+subset (symlinks into the share, listed in `SUBSET`), and only then gets
+metamender, with `docker/.env`'s TMDB key. A run takes several minutes and
+writes, under `<out>/<run>/`:
+
+| File | Contents |
+|------|----------|
+| `A.json` | the library as Kodi's scraper left it |
+| `B.json`, `C.json`, `D.json` | the library after each metamender scan |
+| `B.db`, `C.db`, `D.db` | metamender's tracker after each scan |
+| `kodi-B.log` ... | `kodi.log` of each scan; `mm-logs/` holds the add-on's own logs |
+| `report.json` | the checks below, with every finding listed |
+
+`<out>/summary.md` has one row per run. A run fails when any check lists a
+finding:
+
+- `nfo_protected`: a field of an item with an NFO changed although it was not
+  empty or a placeholder.
+- `second_scan_quiet`: the second scan changed anything.
+- `no_errors`: a metamender error or warning, or a Python traceback, in
+  `kodi.log`.
+- `fallback_fill_only`: real text was replaced by a fallback-language value.
+- `change_reopens_only_fallback` (C runs): the setting change altered text
+  metamender did not fill from the fallback, or the hand edit.
+
+`notes` in the report are not failures but need a human look:
+`real_text_replaced` lists text the folder-language value replaced (expected
+when a folder was scraped in another language), and `still_blank` lists
+titles and plots still empty or a placeholder after the first scan.
 
 ## Host harness: `verify.py`
 

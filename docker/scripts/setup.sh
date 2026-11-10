@@ -14,12 +14,8 @@
 #   - docker/.env with TMDB_API_KEY
 #   - MetaMender mounted at /addon-metamender (already in the shared compose)
 #
-# NOTE: MetaMender's cross-process lock (service/lock.py) uses xbmcgui.Window
-#   properties. The headless image has no home window, so the lock raises
-#   "Window id does not exist" and the in-container service never scans. Run
-#   the service in the Flatpak Kodi (see docker/README.md); use this container
-#   with the host harness, docker/scripts/verify.py, which runs the real
-#   run_scan against it over JSON-RPC.
+# NOTE: once Kodi restarts, the service scans the whole shared library and
+#   writes to it; step 2's backup is what restore-db.sh rolls back to.
 
 set -euo pipefail
 

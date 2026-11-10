@@ -1,0 +1,42 @@
+<advancedsettings>
+    <!-- No videodatabase block: the library is a local sqlite file in the
+         volume. The image's own template points at MySQL with no host. -->
+    <services>
+        <devicename>Kodi-MATRIX</devicename>
+        <esenabled>true</esenabled>
+        <upnpannounce>false</upnpannounce>
+        <upnprenderer>false</upnprenderer>
+        <upnpserver>false</upnpserver>
+        <webserver>true</webserver>
+        <webserverport>8080</webserverport>
+        <webserverusername>kodi</webserverusername>
+        <webserverauthentication>false</webserverauthentication>
+        <zeroconf>false</zeroconf>
+    </services>
+    <jsonrpc>
+        <tcpport>9090</tcpport>
+    </jsonrpc>
+    <videolibrary>
+        <usefasthash>true</usefasthash>
+        <backgroundupdate>true</backgroundupdate>
+    </videolibrary>
+    <videoscanner>
+        <ignoreerrors>true</ignoreerrors>
+    </videoscanner>
+    <network>
+        <disableipv6>true</disableipv6>
+        <disablehttp2>true</disablehttp2>
+        <curlretries>2</curlretries>
+        <curlclienttimeout>30</curlclienttimeout>
+        <curllowspeedtime>30</curllowspeedtime>
+    </network>
+    <splash>false</splash>
+    <myvideos>
+        <extractflags>false</extractflags>
+        <extractthumb>false</extractthumb>
+    </myvideos>
+    <nodvdrom>true</nodvdrom>
+    <general>
+        <addonnotifications>false</addonnotifications>
+    </general>
+</advancedsettings>

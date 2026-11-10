@@ -1,0 +1,34 @@
+# Scraper and settings matrix rig, driven by run.py in this directory.
+#
+# A headless Kodi of its own, apart from the shared kodi-test container: no
+# advancedsettings.xml, so the video library is a local sqlite file in the
+# volume and a run never touches the shared MariaDB libraries. run.py drops
+# the volume to start a run from an empty library.
+#
+# Port and subnet are registered in ~/docker/stacks/README.md.
+
+name: kodi-matrix
+
+services:
+  kodi:
+    image: matthuisman/kodi-headless:Omega
+    container_name: kodi-matrix
+    ports:
+      - "127.0.0.1:8102:8080"
+      - "127.0.0.1:9096:9090"
+    volumes:
+      - kodi-data:/config/.kodi
+      - ../..:/addon-metamender:ro
+      - /mnt/media/Data:/media:ro
+    environment:
+      - TZ=Europe/Amsterdam
+    restart: "no"
+
+volumes:
+  kodi-data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.27.5.0/24
