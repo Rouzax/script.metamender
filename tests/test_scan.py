@@ -5515,6 +5515,13 @@ class TestFollowTheScraper:
         assert _scraper_provider(show, TVSHOW) == "tmdb"
         show["episodeguide"] = '<episodeguide>{"tvdb": "72668"}</episodeguide>'
         assert _scraper_provider(show, TVSHOW) == "tvdb"
+        # Both scrapers list every id they know, their own first.
+        show["episodeguide"] = ('<episodeguide>{"tvdb": "349946", "imdb": "tt10081702",'
+                                ' "tmdb": "95347"}</episodeguide>')
+        assert _scraper_provider(show, TVSHOW) == "tvdb"
+        show["episodeguide"] = ('<episodeguide>{"imdb": "tt1", "tmdb": "1570",'
+                                ' "tvdb": "72668"}</episodeguide>')
+        assert _scraper_provider(show, TVSHOW) == "tmdb"
         show["episodeguide"] = ""
         show["ratings"] = {"tvdb": {"rating": 7.0, "votes": 3, "default": True}}
         assert _scraper_provider(show, TVSHOW) == "tvdb"

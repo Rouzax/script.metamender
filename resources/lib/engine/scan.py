@@ -1340,9 +1340,10 @@ def _scraper_provider(item: dict[str, Any], media_type: MediaType) -> str | None
     when nothing tells.
 
     Kodi's JSON-RPC does not say which uniqueid is the default, so the
-    scraper's traces decide. A show's episodeguide holds its scraper's ids
-    (the TMDB scraper lists "tmdb"); failing that, the scraper marks its own
-    rating slot default. An episode carries the ids its scraper set: the TMDB
+    scraper's traces decide. A show's episodeguide is a JSON object of the
+    ids its scraper knows, the scraper's own first ({"tvdb": ..., "tmdb": ...}
+    from TheTVDB's, {"tmdb": ..., "tvdb": ...} from TMDB's); failing that,
+    the scraper marks its own rating slot default. An episode carries the ids its scraper set: the TMDB
     scraper always sets "tmdb", TheTVDB's never does.
     """
     if media_type.name == "episode":
@@ -1356,9 +1357,10 @@ def _scraper_provider(item: dict[str, Any], media_type: MediaType) -> str | None
     except ValueError:
         guide_ids = {}
     if isinstance(guide_ids, dict):
-        for provider in ("tmdb", "tvdb"):
-            if guide_ids.get(provider):
-                return provider
+        # Both scrapers list every id they know; their own comes first.
+        for key, value in guide_ids.items():
+            if key in ("tmdb", "tvdb") and value:
+                return key
     for slot, entry in (item.get("ratings") or {}).items():
         if isinstance(entry, dict) and entry.get("default"):
             if slot in ("tmdb", "themoviedb"):
