@@ -34,7 +34,6 @@ DEFAULT_SCAN_INTERVAL_HOURS = 24
 SERVICE_SLEEP_INTERVAL_SEC = 1
 
 # Days to retry unresolved items before applying fallback
-DEFAULT_RETRY_DAYS = 30
 
 # Seconds to wait after library scan/clean finishes before triggering a rating scan
 LIBRARY_SCAN_DEBOUNCE_SEC = 300
@@ -46,18 +45,9 @@ SCAN_FAILURE_BACKOFF_SEC = 300
 SCAN_LOCKED_RETRY_SEC = 60
 
 # =============================================================================
-# Rating Defaults
-# =============================================================================
-
-DEFAULT_FALLBACK_RATING = "NR"
-KNOWN_RATING_PREFIXES = ("Rated ",)
-
-# =============================================================================
 # Country Presets
 # =============================================================================
 
-PRESETS_DIR = "presets"
-DEFAULT_COUNTRY_CODE = "NL"
 COUNTRY_CODES = ("NL", "BE", "DE", "AT", "GB", "US", "FR", "DK", "SE")
 
 # =============================================================================
@@ -107,9 +97,6 @@ TVDB_BASE_URL = "https://api4.thetvdb.com/v4"
 # Project key issued to this add-on; TVDB intends project keys to ship
 # inside the client, unlike the user-supplied TMDB key.
 TVDB_API_KEY = "1719dbbf-0572-40ed-8c66-87fb97925dea"
-FSK_API_URL = "https://www.fsk.de/fskapi/ReleaseSearch"
-BBFC_SEARCH_URL = "https://www.bbfc.co.uk/search"
-KIJKWIJZER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
 # Explicit User-Agent for provider API calls: some provider front ends reject
 # a bare urllib UA, while a browser-like UA is reliably accepted.
@@ -117,14 +104,3 @@ METAMENDER_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
-
-# =============================================================================
-# Scraper Canaries
-# =============================================================================
-
-SCRAPER_CANARIES = {
-    "fsk": {"title": "The Matrix", "expected": "16", "year": 1999},
-    "bbfc": {"title": "Interstellar", "expected": "12", "year": 2014},
-    "medieraadet": {"title": "Interstellar", "expected": "11", "year": 2014},
-    "kijkwijzer": {"title": "Interstellar", "expected": "12", "year": 2014},
-}

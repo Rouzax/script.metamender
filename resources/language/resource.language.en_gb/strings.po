@@ -98,7 +98,7 @@ msgid "Enable certifications"
 msgstr ""
 
 msgctxt "#32109"
-msgid "Backfill missing age certifications using TMDB, IMDb, and country-specific scrapers. Configure the target country and scraper options in the Certifications tab."
+msgid "Fill and correct age certifications of movies and TV shows from TMDB and the national rating sites (FSK, BBFC, Medieraadet), in the rating system of the country chosen in the Certifications tab."
 msgstr ""
 
 msgctxt "#32110"
@@ -219,14 +219,6 @@ msgctxt "#32216"
 msgid "Look up certifications from the Danish Media Council (Medieraadet) API. Only useful when the target country is Denmark."
 msgstr ""
 
-msgctxt "#32217"
-msgid "Enable Kijkwijzer lookup"
-msgstr ""
-
-msgctxt "#32218"
-msgid "Look up certifications from the Dutch Kijkwijzer website. Only useful when the target country is the Netherlands or Belgium. This scraper may be blocked by bot protection on some networks."
-msgstr ""
-
 msgctxt "#32220"
 msgid "Correction"
 msgstr ""
@@ -257,14 +249,6 @@ msgstr ""
 
 msgctxt "#32234"
 msgid "The certification value to apply when no source can provide a result and the retry window has expired. Common values: NR, Not Rated, Unrated."
-msgstr ""
-
-msgctxt "#32235"
-msgid "Retry window (days)"
-msgstr ""
-
-msgctxt "#32236"
-msgid "How many days to keep retrying before applying the fallback certification. Items are retried with exponential backoff during this window."
 msgstr ""
 
 # Country names

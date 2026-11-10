@@ -12,20 +12,14 @@ Logging:
 """
 from __future__ import annotations
 
-import json
 import os
 import re
-import ssl
 import threading
 import time
 import traceback
-import unicodedata
 from contextlib import contextmanager
 from datetime import datetime as dt
-from typing import TYPE_CHECKING, Any, Dict, Generator, Optional, TextIO, Union
-
-if TYPE_CHECKING:
-    import requests
+from typing import Any, Dict, Generator, Optional, TextIO
 
 import xbmc
 import xbmcaddon
@@ -42,8 +36,6 @@ from resources.lib.constants import (
     LOG_TIMESTAMP_FORMAT,
     LOG_TIMESTAMP_TRIM,
 )
-
-_TITLE_SEPARATORS = frozenset((" ", ":", "-"))
 
 # TMDB v3 takes its key as a query parameter, and requests puts the full URL
 # into its exception messages, so a key reaches log text through error= values
@@ -68,72 +60,6 @@ def is_empty(value: Any) -> bool:
     if isinstance(value, (int, float)) and value == 0:
         return True
     return isinstance(value, list) and len(value) == 0
-
-
-def normalize_for_compare(text: str) -> str:
-    """Strip diacritics and lowercase for accent-insensitive comparison."""
-    return "".join(
-        c for c in unicodedata.normalize("NFD", text)
-        if unicodedata.category(c) != "Mn"
-    ).lower()
-
-
-def title_matches(result_title: str, search_title: str) -> bool:
-    """Check if result_title matches search_title.
-
-    Tries exact match first (preserving diacritics), then prefix match
-    with separator awareness (space, colon, dash). Falls back to
-    accent-normalized comparison for both.
-    """
-    s_lower = search_title.lower()
-    r_lower = result_title.lower()
-
-    if r_lower == s_lower:
-        return True
-
-    if (
-        len(r_lower) > len(s_lower)
-        and r_lower.startswith(s_lower)
-        and r_lower[len(s_lower)] in _TITLE_SEPARATORS
-    ):
-        return True
-
-    s_norm = normalize_for_compare(search_title)
-    r_norm = normalize_for_compare(result_title)
-
-    if r_norm == s_norm:
-        return True
-
-    return (
-        len(r_norm) > len(s_norm)
-        and r_norm.startswith(s_norm)
-        and r_norm[len(s_norm)] in _TITLE_SEPARATORS
-    )
-
-
-def create_scraper_session() -> "requests.Session":
-    """Create a requests session with browser-like TLS settings.
-
-    OpenSSL 3.0 SECLEVEL=2 restricts the cipher list to ~17 entries,
-    producing a JA3 fingerprint that Akamai flags as non-browser.
-    SECLEVEL=1 restores the full ~60-cipher set.
-    """
-    import requests
-    from requests.adapters import HTTPAdapter
-
-    class _BrowserTLSAdapter(HTTPAdapter):
-        def init_poolmanager(self, *args, **kwargs):  # type: ignore[override]
-            try:
-                ctx = ssl.create_default_context()
-                ctx.set_ciphers("DEFAULT:@SECLEVEL=1")
-                kwargs["ssl_context"] = ctx
-            except (ssl.SSLError, ValueError):
-                pass
-            return super().init_poolmanager(*args, **kwargs)
-
-    session = requests.Session()
-    session.mount("https://", _BrowserTLSAdapter())
-    return session
 
 
 # Singleton addon instance
@@ -180,15 +106,6 @@ def get_float_setting(setting_id: str, default: float = 0.0) -> float:
 def lang(string_id: int) -> str:
     """Get localized string."""
     return get_addon().getLocalizedString(string_id)
-
-
-def get_country_code() -> str:
-    """Get the selected country code from the settings dropdown."""
-    from resources.lib.constants import COUNTRY_CODES, DEFAULT_COUNTRY_CODE
-    index = get_int_setting('country', 0)
-    if 0 <= index < len(COUNTRY_CODES):
-        return COUNTRY_CODES[index]
-    return DEFAULT_COUNTRY_CODE
 
 
 class ApiKeyError(Exception):
@@ -552,21 +469,3 @@ def log_timing(
 # =============================================================================
 
 
-def json_query(query: Union[Dict[str, Any], str], return_result: bool = True) -> Dict[str, Any]:
-    """
-    Execute a JSON-RPC query against Kodi.
-
-    Args:
-        query: The JSON-RPC query dict (or pre-serialized string).
-        return_result: If True, return only the 'result' key.
-    """
-    try:
-        request = json.dumps(query) if isinstance(query, dict) else query
-        response = xbmc.executeJSONRPC(request)
-        data = json.loads(response)
-
-        if return_result:
-            return data.get('result', {})
-        return data
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return {}

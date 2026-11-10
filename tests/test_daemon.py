@@ -376,3 +376,15 @@ def test_every_backfill_field_has_a_toggle():
         needed = {own.get(f, f) for f in media_type.backfill_fields} - {"votes"}
         missing = needed - toggled
         assert not missing, (media_type.name, sorted(missing))
+
+
+def test_certification_settings_hidden_until_phase8():
+    import xml.etree.ElementTree as ET  # the repo's own settings.xml
+
+    root = ET.parse("resources/settings.xml").getroot()
+    ids = {s.get("id"): s for s in root.iter("setting")}
+    assert "retry_days" not in ids and "enable_kijkwijzer" not in ids
+    assert ids["enable_fallback"].findtext("default") == "false"
+    assert ids["enable_certifications"].findtext("default") == "false"
+    for sid in ("enable_certifications", "country", "enable_fsk"):
+        assert ids[sid].findtext("visible") == "false"
