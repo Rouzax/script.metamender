@@ -2168,6 +2168,7 @@ def _nl_source_config():
     return {
         "sources": [{"path": _SHOWS, "language": "nl-NL", "enabled": True}],
         "default_language": "en-US",
+        "fallback_language": "en-US",
     }
 
 
@@ -2176,6 +2177,7 @@ def _nl_movie_source_config():
     return {
         "sources": [{"path": "smb://server/movies/", "language": "nl-NL", "enabled": True}],
         "default_language": "en-US",
+        "fallback_language": "en-US",
     }
 
 
@@ -2351,7 +2353,7 @@ class TestTextChain:
     @patch("resources.lib.engine.scan.update_item", return_value=True)
     @patch("resources.lib.engine.scan.tvdb_fetch_series_episodes")
     @patch("resources.lib.engine.scan.tmdb_fetch_season")
-    def test_fallback_language_setting_used(
+    def test_folder_fallback_language_used(
         self, mock_season, mock_tvdb_eps, mock_update, tmp_path, kodi_stubs
     ):
         item = _nl_episode()
@@ -2359,14 +2361,14 @@ class TestTextChain:
         mock_tvdb_eps.side_effect = lambda tid, lang: (
             _tvdb_episode("Die Folge") if lang == "deu" else _tvdb_episode("")
         )
-        settings = _make_settings()
-        settings["fallback_language"] = "de-DE"
+        config = _nl_source_config()
+        config["fallback_language"] = "de-DE"
         tracker = _make_tracker(tmp_path)
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
-            "k", settings, items=[item], show_id_map={10: "55555"},
+            EPISODE, tracker, config, frozenset({"title"}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         tracker.close()
 
@@ -3891,7 +3893,7 @@ def _seed_fallback_plot(tracker, value, checks=0, next_retry="2020-01-01", setti
     from resources.lib.engine.scan import settings_fingerprint
 
     tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
-    fp = settings_fingerprint("plot", settings or _make_settings(), "nl-NL", "movie")
+    fp = settings_fingerprint("plot", settings or _make_settings(), "nl-NL", "movie", "en-US")
     tracker.record_field_fetch(
         "movie", _MOVIE_IDENTITY, "plot", next_retry=next_retry, source="tmdb",
         written_value=fingerprint(value), from_fallback=True, settings_fp=fp,
@@ -4121,7 +4123,7 @@ class TestFallbackRecheck:
         assert (row["from_fallback"], row["fallback_checks"]) == (1, 0)
         assert row["written_value"] == fingerprint("English plot")
         assert row["settings_fp"] == settings_fingerprint(
-            "plot", _make_settings(), "nl-NL", "movie",
+            "plot", _make_settings(), "nl-NL", "movie", "en-US",
         )
         assert row["next_retry"] <= _today_plus(FALLBACK_RECHECK_DAYS)
 
@@ -4166,10 +4168,12 @@ class TestSettingsFingerprint:
     def test_inputs_per_field(self):
         from resources.lib.engine.scan import settings_fingerprint as sfp
 
-        base = {"rating_source": 0, "text_source_order": 0, "fallback_order": 0,
-                "fallback_language": "en-US"}
+        base = {"rating_source": 0, "text_source_order": 0, "fallback_order": 0}
 
         def changed(field, media, key, value):
+            if key == "fallback_language":
+                return (sfp(field, base, "nl-NL", media, "en-US")
+                        != sfp(field, base, "nl-NL", media, value))
             other = dict(base)
             other[key] = value
             return sfp(field, base, "nl-NL", media) != sfp(field, other, "nl-NL", media)
@@ -4195,8 +4199,7 @@ class TestSettingsFingerprint:
     def test_missing_settings_use_scan_defaults(self):
         from resources.lib.engine.scan import settings_fingerprint as sfp
 
-        explicit = {"rating_source": 0, "text_source_order": 0, "fallback_order": 0,
-                    "fallback_language": "en-US"}
+        explicit = {"rating_source": 0, "text_source_order": 0, "fallback_order": 0}
         for field in ("rating", "plot", "genre"):
             assert sfp(field, {}, "nl-NL", "episode") == sfp(field, explicit, "nl-NL", "episode")
 
@@ -4486,9 +4489,9 @@ class TestUnmappedLanguage:
         config = {
             "sources": [{"path": _SHOWS, "language": "dutch", "enabled": True}],
             "default_language": "en-US",
+            "fallback_language": "dutch",
         }
         settings = _make_settings()
-        settings["fallback_language"] = "dutch"
         tracker = _make_tracker(tmp_path)
         _register_show(tracker)
 
@@ -4619,10 +4622,10 @@ class TestFallbackSettingChange:
     old fallback, so the new setting can replace it; nothing else."""
 
     @staticmethod
-    def _german_settings():
-        settings = _make_settings()
-        settings["fallback_language"] = "de-DE"
-        return settings
+    def _german_config():
+        config = _nl_movie_source_config()
+        config["fallback_language"] = "de-DE"
+        return config
 
     @patch("resources.lib.engine.scan.update_item", return_value=True)
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
@@ -4635,8 +4638,8 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         row = _plot_row(tracker)
         tracker.close()
@@ -4655,8 +4658,8 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", self._german_settings(), items=[_old_movie(plot="My own plot")],
+            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="My own plot")],
         )
         tracker.close()
 
@@ -4677,12 +4680,12 @@ class TestFallbackSettingChange:
         tracker.record_field_fetch(
             "movie", _MOVIE_IDENTITY, "plot", next_retry="2020-01-01", source="tmdb",
             written_value=fingerprint("Nederlandse plot"), from_fallback=False,
-            settings_fp=settings_fingerprint("plot", _make_settings(), "nl-NL", "movie"),
+            settings_fp=settings_fingerprint("plot", _make_settings(), "nl-NL", "movie", "en-US"),
         )
         tracker.commit()
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", self._german_settings(), items=[_old_movie(plot="Nederlandse plot")],
+            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="Nederlandse plot")],
         )
         tracker.close()
 
@@ -4699,8 +4702,8 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         tracker.close()
 
@@ -4715,8 +4718,8 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", self._german_settings(), items=[_old_movie(plot=" English plot ")],
+            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot=" English plot ")],
         )
         tracker.close()
 
@@ -4739,8 +4742,8 @@ class TestFallbackSettingChange:
         _seed_fallback_plot(tracker, "English plot")
         before = _plot_row(tracker)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         after = _plot_row(tracker)
         tracker.close()
@@ -4752,26 +4755,102 @@ class TestFallbackSettingChange:
 
     @patch("resources.lib.engine.scan.update_item", return_value=True)
     @patch("resources.lib.engine.scan.tmdb_fetch_movie")
-    def test_no_answer_under_new_setting_keeps_old_value(
+    def test_no_answer_under_new_setting_clears_old_fallback_value(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
+        # The value was only there because of the old fallback language.
+        from resources.lib.engine.protect import fingerprint
         from resources.lib.engine.scan import settings_fingerprint
 
         mock_fetch.side_effect = _plot_by_lang({})
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
-            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         row = _plot_row(tracker)
         tracker.close()
 
-        assert _written(mock_update, "plot") is None
+        assert _written(mock_update, "plot") == ""
         assert row["settings_fp"] == settings_fingerprint(
-            "plot", self._german_settings(), "nl-NL", "movie",
+            "plot", _make_settings(), "nl-NL", "movie", "de-DE",
         )
-        assert row["from_fallback"] == 1
+        assert row["from_fallback"] == 0
+        assert row["written_value"] == fingerprint("")
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_removed_fallback_clears_its_value(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+        config = _nl_movie_source_config()
+        del config["fallback_language"]
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        run_scan(
+            MOVIE, tracker, config, frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="English plot")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") == ""
+        assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_removed_fallback_keeps_an_edited_value(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+        config = _nl_movie_source_config()
+        del config["fallback_language"]
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        run_scan(
+            MOVIE, tracker, config, frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="My own plot")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") is None
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_source_fallback_overrides_the_default(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"de-DE": "Deutsche Handlung",
+                                               "en-US": "English plot"})
+        config = _nl_movie_source_config()
+        config["sources"][0]["fallback_language"] = "de-DE"
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, config, frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Deutsche Handlung"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_no_fallback_by_default(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+        config = _nl_movie_source_config()
+        del config["fallback_language"]
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            MOVIE, tracker, config, frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") is None
+        assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]
 
 
 class TestFallbackRecheckCounting:
@@ -5305,3 +5384,22 @@ class TestUnconfiguredLanguage:
         tracker.close()
 
         assert mock_update.call_args.kwargs["plot"] == "Nieuwe plot"
+
+
+@patch("resources.lib.engine.scan.update_item", return_value=True)
+@patch("resources.lib.engine.scan.tmdb_fetch_movie")
+def test_empty_source_fallback_turns_off_the_default(
+    mock_fetch, mock_update, tmp_path, kodi_stubs
+):
+    mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
+    config = _nl_movie_source_config()
+    config["sources"][0]["fallback_language"] = ""
+    tracker = _make_tracker(tmp_path)
+    run_scan(
+        MOVIE, tracker, config, frozenset({"plot"}),
+        "k", _make_settings(), items=[_old_movie(plot="")],
+    )
+    tracker.close()
+
+    assert _written(mock_update, "plot") is None
+    assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]

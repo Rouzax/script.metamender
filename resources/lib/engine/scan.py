@@ -149,7 +149,6 @@ TEXT_TMDB_FIRST = 0
 TEXT_TVDB_FIRST = 1
 FALLBACK_TVDB_FIRST = 0
 FALLBACK_TMDB_FIRST = 1
-DEFAULT_FALLBACK_LANGUAGE = "en-US"
 
 
 def settings_fingerprint(
@@ -157,21 +156,23 @@ def settings_fingerprint(
     settings: dict[str, Any],
     folder_language: str,
     media_type: str,
+    fallback_language: str = "",
 ) -> str:
     """The settings a field's answer depends on, as a stable string.
 
     A field whose stored fingerprint differs is re-checked as if never
     sampled, so the inputs are exactly what changes the answer: rating_source
-    for ratings; for title and plot the folder and fallback languages, plus
-    the provider and fallback orders on shows and episodes (movies ask TMDB
-    only); for every other field, one TMDB step, the folder language.
+    for ratings; for title and plot the folder's language and fallback
+    language ("" when it has none), plus the provider and fallback orders on
+    shows and episodes (movies ask TMDB only); for every other field, one
+    TMDB step, the folder language.
     """
     if field in _RATING_FIELDS:
         inputs: dict[str, Any] = {"rating_source": settings.get("rating_source", 0)}
     elif field in _CHAIN_FIELDS:
         inputs = {
             "folder_language": folder_language,
-            "fallback_language": settings.get("fallback_language", DEFAULT_FALLBACK_LANGUAGE),
+            "fallback_language": fallback_language.strip(),
         }
         if media_type != "movie":
             inputs["text_source_order"] = settings.get("text_source_order", TEXT_TMDB_FIRST)
@@ -525,7 +526,9 @@ class _ScanCtx:
     rating_pref: int
     text_order: int
     fallback_order: int
-    fallback_language: str
+    # sources.json's fallback_language, for folders whose entry sets none;
+    # "" means no fallback.
+    default_fallback: str
     imdb_ready: bool
 
 
@@ -1232,12 +1235,14 @@ class _TextSources:
         identity: str,
         primary: _Primary,
         ids: _Ids,
+        fallback_lang: str,
     ) -> None:
         self._ctx = ctx
         self._item = item
         self._identity = identity
         self._primary = primary
         self._ids = ids
+        self._fallback_lang = fallback_lang
         self._tmdb_fallback: Any = _UNFETCHED
 
     def tmdb(self, field: str, fallback: bool) -> Any:
@@ -1254,7 +1259,7 @@ class _TextSources:
     def _fetch_tmdb_fallback(self) -> Any:
         ctx = self._ctx
         p = self._primary
-        lang = tmdb_language(ctx.fallback_language)
+        lang = tmdb_language(self._fallback_lang)
         if p.tmdb is TRANSIENT:
             return TRANSIENT
         tmdb_id = p.tmdb_id
@@ -1320,10 +1325,10 @@ class _TextSources:
         return None
 
 
-def _fallback_applies(ctx: _ScanCtx, folder_lang: str) -> bool:
-    """The fallback steps run only when the fallback language is set and is
-    not the folder's own language."""
-    fallback = ctx.fallback_language.strip()
+def _fallback_applies(fallback_lang: str, folder_lang: str) -> bool:
+    """The fallback steps run only when the folder has a fallback language and
+    it is not the folder's own language."""
+    fallback = fallback_lang.strip()
     return bool(fallback) and tmdb_language(fallback) != tmdb_language(folder_lang)
 
 
@@ -1332,14 +1337,15 @@ def _text_chain(
     sources: _TextSources,
     field: str,
     folder_lang: str,
+    fallback_lang: str,
     current: Any,
 ) -> tuple[FieldOutcome, str | None]:
     """Run the title/plot chain. Returns the outcome and the provider whose
     step produced the value (None when there is no value).
 
     Shows and episodes ask TMDB and TVDB in the folder language in the
-    text_source_order, then (when the fallback language differs) both in the
-    fallback language in the fallback_order. Movies ask TMDB only.
+    text_source_order, then (when the folder has a fallback language that
+    differs) both in the fallback language in the fallback_order. Movies ask TMDB only.
     """
     def tmdb_step(fallback: bool) -> tuple[str, Callable[[], Any], bool]:
         return ("tmdb", lambda: sources.tmdb(field, fallback), fallback)
@@ -1355,13 +1361,13 @@ def _text_chain(
     else:
         specs = [tmdb_step(False), tvdb_step(folder_lang, False)]
 
-    if _fallback_applies(ctx, folder_lang):
+    if _fallback_applies(fallback_lang, folder_lang):
         if movie:
             specs.append(tmdb_step(True))
         elif ctx.fallback_order == FALLBACK_TMDB_FIRST:
-            specs += [tmdb_step(True), tvdb_step(ctx.fallback_language, True)]
+            specs += [tmdb_step(True), tvdb_step(fallback_lang, True)]
         else:
-            specs += [tvdb_step(ctx.fallback_language, True), tmdb_step(True)]
+            specs += [tvdb_step(fallback_lang, True), tmdb_step(True)]
 
     heard: list[str] = []
 
@@ -1455,6 +1461,7 @@ def _resolve_fields(
     primary: _Primary,
     ids: _Ids,
     folder_lang: str,
+    fallback_lang: str,
     fields: list[str],
     reopened: set[str],
 ) -> tuple[dict[str, FieldOutcome], dict[str, Any], dict[str, str | None]]:
@@ -1469,7 +1476,7 @@ def _resolve_fields(
     outcomes: dict[str, FieldOutcome] = {}
     values: dict[str, Any] = {}
     providers: dict[str, str | None] = {}
-    text = _TextSources(ctx, item, identity, primary, ids)
+    text = _TextSources(ctx, item, identity, primary, ids, fallback_lang)
     tmdb_transient = primary.tmdb is TRANSIENT
     tmdb_data = {} if tmdb_transient or not primary.tmdb else primary.tmdb
 
@@ -1479,7 +1486,7 @@ def _resolve_fields(
         key = _KODI_TO_TMDB.get(f, f)
         if f in _CHAIN_FIELDS:
             current = None if f in reopened else item.get(f)
-            outcome, provider = _text_chain(ctx, text, f, folder_lang, current)
+            outcome, provider = _text_chain(ctx, text, f, folder_lang, fallback_lang, current)
         else:
             value = None if tmdb_transient else tmdb_data.get(key)
             outcome = FieldOutcome(transient=tmdb_transient, value=value, from_fallback=False)
@@ -1651,12 +1658,13 @@ def run_scan(
     Args:
         media_type: MOVIE, TVSHOW, or EPISODE.
         tracker: Open TrackerDB instance.
-        source_config: Loaded source config dict with "sources" list
-            and "default_language".
+        source_config: Loaded source config dict with a "sources" list and
+            optionally "default_language" and "fallback_language"; a source
+            entry may set its own "language" and "fallback_language".
         enabled_fields: Set of field names the user wants backfilled.
         tmdb_api_key: TMDB API key.
         settings: Dict with stale_threshold_days, rate_limit, rating_source,
-            text_source_order, fallback_order, fallback_language, imdb_ready
+            text_source_order, fallback_order, imdb_ready
             (whether the IMDb ratings store is loaded this cycle; an IMDb
             rating is transient while it is False) and optionally
             refetch_schedule.
@@ -1726,7 +1734,7 @@ def run_scan(
         rating_pref=settings.get("rating_source", 0),
         text_order=settings.get("text_source_order", TEXT_TMDB_FIRST),
         fallback_order=settings.get("fallback_order", FALLBACK_TVDB_FIRST),
-        fallback_language=settings.get("fallback_language", DEFAULT_FALLBACK_LANGUAGE),
+        default_fallback=str(source_config.get("fallback_language") or ""),
         imdb_ready=bool(settings.get("imdb_ready", False)),
     )
     candidates = _candidate_fields(media_type, enabled_fields)
@@ -1787,6 +1795,11 @@ def run_scan(
             continue
 
         language = source.get("language") or ctx.default_language
+        # A source's own fallback_language wins, "" included (no fallback for
+        # that folder even when sources.json sets a default).
+        fallback_lang = str(
+            source.get("fallback_language", ctx.default_fallback) or ""
+        ).strip()
         fill_only = (
             frozenset() if source.get("language") or ctx.default_language_set
             else _LANGUAGE_FIELDS
@@ -1838,7 +1851,7 @@ def run_scan(
         # stored) is re-checked as if never sampled, and re-baselined once it
         # answers. A transient keeps the old fingerprint, so it stays due.
         fps = {
-            f: settings_fingerprint(f, settings, language, media_type.name)
+            f: settings_fingerprint(f, settings, language, media_type.name, fallback_lang)
             for f in candidates
         }
         rebaseline = {
@@ -1950,12 +1963,21 @@ def run_scan(
 
         # Non-final fields are refreshed (overwrite-on-diff); final ones are not.
         nonfinal = [f for f, d in decisions.items() if d != FINAL]
+        reopened = _reopened_fallbacks(item, fs_map, rebaseline)
         outcomes, values, providers = _resolve_fields(
-            ctx, item, identity, primary, ids, language, nonfinal,
-            _reopened_fallbacks(item, fs_map, rebaseline),
+            ctx, item, identity, primary, ids, language, fallback_lang, nonfinal,
+            reopened,
         )
         answered = [f for f in nonfinal if f in outcomes and not outcomes[f].transient]
         extracted = _extract_fields(values, answered)
+        # A reopened fallback value whose chain now has nothing (the folder's
+        # fallback was removed, or the new one has no text either) is cleared:
+        # it was only ever there because of the old setting. Only a value Kodi
+        # still holds exactly as metamender wrote it is reopened, so a user's
+        # edit is never cleared.
+        for f in reopened:
+            if f in answered and outcomes[f].value is None:
+                extracted[f] = ""
         fields_to_write, held = _plan_writes(
             extracted, item, nfo_managed, fs_map, identity, fill_only,
         )

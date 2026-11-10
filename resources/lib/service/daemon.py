@@ -129,7 +129,7 @@ def _load_settings() -> dict[str, Any]:
 
     Returns:
         Dict with tmdb_api_key, rating_source, text_source_order,
-        fallback_order, fallback_language, enabled_fields (FrozenSet),
+        fallback_order, enabled_fields (FrozenSet),
         stale_threshold_days, refetch_schedule, rate_limit, scan_interval,
         show_notifications, resume_interrupted and orphan_retention_days.
     """
@@ -144,7 +144,6 @@ def _load_settings() -> dict[str, Any]:
         "rating_source": get_int_setting("rating_source", 0),
         "text_source_order": get_int_setting("text_source_order", 0),
         "fallback_order": get_int_setting("fallback_order", 0),
-        "fallback_language": get_setting("fallback_language").strip() or "en-US",
         "enabled_fields": frozenset(fields),
         "stale_threshold_days": get_int_setting("stale_threshold_days", 365),
         "refetch_schedule": get_setting("refetch_schedule"),

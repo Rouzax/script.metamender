@@ -88,8 +88,9 @@ JSON-RPC on 8100, so run one at a time. Path substitution from
    (requests, urllib3, chardet, idna, certifi). Enable each new add-on with a
    row in `userdata/Database/Addons33.db` (`installed`, `enabled=1`).
 3. Put `settings.xml` (TMDB key, `logging` on, the field toggles) and
-   `sources.json` (one entry per library root with its language, e.g.
-   `smb://NAS/Data/Kids/TV/` as `nl-NL`) in
+   `sources.json` (one entry per library root with its `language`, e.g.
+   `smb://NAS/Data/Kids/TV/` as `nl-NL`, and optionally a
+   `fallback_language` for text that language lacks) in
    `userdata/addon_data/script.metamender/`. Delete an old `backfill.db`
    there: the tracker has no migrations.
 4. Start Kodi. The service scans on start; the first scan downloads IMDb's
@@ -129,9 +130,12 @@ A run name is `K<n>-M<n>`, optionally `-C<n>`; the tables at the top of
 
 - `K`: the TV scraper (TMDB, TheTVDB or TVmaze; movies always use TMDB) and
   whether each folder is scraped in its own language or in English.
-- `M`: metamender settings on top of the defaults (fallback language, text
-  source order, rating source, no `sources.json`, text fields only).
-- `C`: a setting changed after the second scan, followed by a third scan.
+- `M`: metamender settings on top of the defaults (an en-US fallback for the
+  Dutch folders, text source order, rating source, no `sources.json`, text
+  fields only).
+- `C`: a setting changed after the second scan, followed by a third scan
+  (the Dutch folders' fallback becomes de-DE, or is removed, or the fallback
+  order flips).
   Before the change the driver edits one value metamender filled from the
   fallback, as a user would, and checks that it survives.
 

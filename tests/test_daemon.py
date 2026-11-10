@@ -83,10 +83,9 @@ def test_load_settings_has_new_keys_not_old(kodi_stubs, settings_mock):
 
     assert s["text_source_order"] == 0
     assert s["fallback_order"] == 0
-    assert s["fallback_language"] == "en-US"
     assert isinstance(s["refetch_schedule"], str)
 
-    for retired in ("plot_source", "default_source", "max_retries",
+    for retired in ("plot_source", "default_source", "max_retries", "fallback_language",
                     "min_votes_movie", "min_votes_episode"):
         assert retired not in s
 

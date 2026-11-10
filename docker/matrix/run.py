@@ -111,10 +111,11 @@ _TEXT_ONLY = {
     "enable_trailers": "false", "enable_taglines": "false", "enable_details": "false",
 }
 # metamender side: settings on top of BASE_SETTINGS; "sources" False drops
-# sources.json.
+# sources.json, and "fallback_for" maps a folder language to the
+# fallback_language its sources.json entries get.
 MM: dict[str, dict[str, Any]] = {
     "M1": {},
-    "M2": {"fallback_language": "nl-NL"},
+    "M2": {"fallback_for": {"nl-NL": "en-US"}},
     "M3": {"text_source_order": "1"},
     "M4": {"rating_source": "1"},
     "M4b": {"rating_source": "3"},
@@ -124,8 +125,8 @@ MM: dict[str, dict[str, Any]] = {
 
 # Setting changed after the second scan, before a third.
 CHANGES: dict[str, dict[str, Any]] = {
-    "C1": {"fallback_language": "de-DE"},
-    "C2": {"fallback_language": "en-US"},
+    "C1": {"fallback_for": {"nl-NL": "de-DE"}},
+    "C2": {"fallback_for": {}},
     "C3": {"fallback_order": "1"},
 }
 
@@ -377,12 +378,14 @@ def _tmdb_key() -> str:
 
 def write_mm_settings(settings: dict[str, Any]) -> None:
     values = dict(BASE_SETTINGS, tmdb_api_key=_tmdb_key())
-    values.update({k: v for k, v in settings.items() if k != "sources"})
+    values.update({k: v for k, v in settings.items() if k not in ("sources", "fallback_for")})
     body = "".join(f'    <setting id="{k}">{v}</setting>\n' for k, v in values.items())
     put_file(f"{ADDON_DATA}/settings.xml", f'<settings version="2">\n{body}</settings>\n')
     if settings.get("sources", True):
+        fallback_for = settings.get("fallback_for", {})
         sources = {"default_language": "en-US", "sources": [
-            {"path": f"{SUBSET_DIR}/{root}/", "language": lang, "enabled": True}
+            {"path": f"{SUBSET_DIR}/{root}/", "language": lang, "enabled": True,
+             **({"fallback_language": fallback_for[lang]} if lang in fallback_for else {})}
             for root, (_s, lang, _c, _f) in SUBSET.items()]}
         put_file(f"{ADDON_DATA}/sources.json", json.dumps(sources, indent=2))
     else:

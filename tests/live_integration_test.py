@@ -210,7 +210,6 @@ def _default_settings(**overrides: Any) -> Dict[str, Any]:
         rating_source:       0=prefer TMDB, 1=prefer IMDb, 2=TMDB only, 3=IMDb only
         text_source_order:   0=TMDB then TVDB, 1=TVDB then TMDB
         fallback_order:      0=TVDB then TMDB, 1=TMDB then TVDB
-        fallback_language:   TMDB-style code of the fallback language
         imdb_ready:          whether the IMDb ratings store is loaded this cycle
         refetch_schedule:    comma-separated string (e.g. "7,30,90")
         stale_threshold_days: integer; content older than this is treated as stable
@@ -220,7 +219,6 @@ def _default_settings(**overrides: Any) -> Dict[str, Any]:
         "rating_source": 0,
         "text_source_order": 0,
         "fallback_order": 0,
-        "fallback_language": "en-US",
         "imdb_ready": _imdb_ready(),
         "refetch_schedule": "7,30,90",
         "stale_threshold_days": 365,
@@ -247,7 +245,7 @@ def run_targeted_scan(
     return run_scan(
         media_type=media_type,
         tracker=tracker,
-        source_config={"sources": [], "default_language": "en-US"},
+        source_config={"sources": [], "default_language": "en-US", "fallback_language": "en-US"},
         enabled_fields=_ALL_FIELDS if enabled_fields is None else enabled_fields,
         tmdb_api_key=TMDB_KEY,
         settings=_default_settings(),
@@ -274,7 +272,8 @@ def run_scan_with_settings(
     return run_scan(
         media_type=media_type,
         tracker=tracker,
-        source_config={"sources": [], "default_language": language},
+        source_config={"sources": [], "default_language": language,
+                       "fallback_language": "en-US"},
         enabled_fields=_ALL_FIELDS if enabled_fields is None else enabled_fields,
         tmdb_api_key=TMDB_KEY,
         settings=_default_settings(
@@ -1893,7 +1892,7 @@ def test_34_resume_interrupted_scan(t):
         stats1 = run_scan(
             media_type=MOVIE,
             tracker=tracker,
-            source_config={"sources": [], "default_language": "en-US"},
+            source_config={"sources": [], "default_language": "en-US", "fallback_language": "en-US"},
             enabled_fields=frozenset({"plot"}),
             tmdb_api_key=TMDB_KEY,
             settings=_default_settings(rate_limit=0.0),
@@ -1920,7 +1919,7 @@ def test_34_resume_interrupted_scan(t):
         stats2 = run_scan(
             media_type=MOVIE,
             tracker=tracker,
-            source_config={"sources": [], "default_language": "en-US"},
+            source_config={"sources": [], "default_language": "en-US", "fallback_language": "en-US"},
             enabled_fields=frozenset({"plot"}),
             tmdb_api_key=TMDB_KEY,
             settings=_default_settings(rate_limit=0.0),
