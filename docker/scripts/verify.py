@@ -186,6 +186,8 @@ def cmd_apikey() -> int:
 _CERT_CHECKS = [
     ("fsk", "The Matrix", "", 1999, "movie", "16"),
     ("fsk", "Dark", "", 2017, "tvshow", "12"),
+    ("bbfc", "Interstellar", "", 2014, "movie", "12"),
+    ("bbfc", "Sherlock", "", 2010, "tvshow", "15"),
 ]
 
 
