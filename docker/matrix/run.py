@@ -88,6 +88,14 @@ REPO_ADDONS = [
     "script.module.requests", "script.module.imdbratings",
 ]
 
+# The image bundles older TMDB scrapers that read a different language
+# setting; Kodi replaces them from its repository at some point after start,
+# so a run waits for these versions before it scrapes.
+MIN_VERSIONS = {
+    "metadata.tvshows.themoviedb.org.python": (1, 7, 13),
+    MOVIE_SCRAPER: (3, 2, 2),
+}
+
 # Kodi side: TV scraper, and the scraper language ("folder" follows the
 # root's language, "en" scrapes every root in English).
 KODI: dict[str, tuple[str, str]] = {
@@ -117,7 +125,7 @@ MM: dict[str, dict[str, Any]] = {
 # Setting changed after the second scan, before a third.
 CHANGES: dict[str, dict[str, Any]] = {
     "C1": {"fallback_language": "de-DE"},
-    "C2": {"fallback_language": "nl-NL"},
+    "C2": {"fallback_language": "en-US"},
     "C3": {"fallback_order": "1"},
 }
 
@@ -125,7 +133,9 @@ PLAN = (
     [f"{k}-M1" for k in KODI]
     + [f"{k}-{m}" for m in ("M2", "M3", "M4", "M5", "M6") for k in ("K1", "K2")]
     + ["K1-M4b"]
-    + [f"K1-M1-{c}" for c in CHANGES]
+    # M2 fills the English placeholder titles from its Dutch fallback, so
+    # these start with values a setting change may reopen.
+    + [f"K1-M2-{c}" for c in CHANGES]
 )
 
 BASE_SETTINGS = {
@@ -190,6 +200,9 @@ def _engine_rules() -> tuple[Any, Any, Any]:
 
     def blank(field: str, value: Any) -> bool:
         if field == "title" and is_placeholder_title(value):
+            return True
+        if field == "votes" and str(value).strip() in ("", "0"):
+            # Kodi reports votes as a string, "0" when there are none.
             return True
         return bool(_is_empty(value))
 
@@ -266,6 +279,26 @@ def addon_ready(addon_id: str) -> bool:
     return True
 
 
+def _version(addon_id: str) -> tuple[int, ...]:
+    try:
+        text = rpc("Addons.GetAddonDetails",
+                   {"addonid": addon_id, "properties": ["version"]})["addon"]["version"]
+    except RuntimeError:
+        return ()
+    return tuple(int(n) for n in re.findall(r"\d+", text)[:3])
+
+
+def update_scrapers() -> None:
+    """Ask Kodi to update from its repository until the scrapers are current."""
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        if all(_version(a) >= v for a, v in MIN_VERSIONS.items()):
+            return
+        sh("docker", "exec", CONTAINER, "kodi-send", "--action=UpdateAddonRepos")
+        time.sleep(30)
+    raise RuntimeError(f"scrapers not updated: { {a: _version(a) for a in MIN_VERSIONS} }")
+
+
 def fresh_kodi() -> None:
     sh(*COMPOSE, "down", "-v")
     sh(*COMPOSE, "up", "-d")
@@ -276,6 +309,7 @@ def fresh_kodi() -> None:
     sh("docker", "exec", CONTAINER, "install_addon", *REPO_ADDONS)
     for addon_id in REPO_ADDONS:
         wait_until(lambda a=addon_id: addon_ready(a), 300, f"add-on {addon_id}")
+    update_scrapers()
 
 
 # --- Library build ----------------------------------------------------------
@@ -401,7 +435,8 @@ def tracker_fields(db: Path) -> dict[str, dict[str, Any]]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         "SELECT i.media_type, i.kodi_id, f.field, f.source, f.fetch_count,"
-        " f.from_fallback, f.written_value FROM field_status f"
+        " f.from_fallback, f.written_value, f.next_retry, f.fallback_checks,"
+        " f.settings_fp, i.identity FROM field_status f"
         " JOIN items i ON i.id = f.item_id").fetchall()
     conn.close()
     return {f"{r['media_type'].lower()}:{r['kodi_id']}:{r['field']}": dict(r) for r in rows}
@@ -438,6 +473,7 @@ def run_one(name: str, out: Path) -> None:
     started = time.time()
     print(f"[{name}] fresh Kodi", flush=True)
     fresh_kodi()
+    scrapers = {a: ".".join(map(str, _version(a))) for a in MIN_VERSIONS}
     print(f"[{name}] building library with {KODI[kodi_id]}", flush=True)
     build_library(kodi_id)
     (run_dir / "A.json").write_text(json.dumps(snapshot(), indent=1, ensure_ascii=False))
@@ -462,6 +498,7 @@ def run_one(name: str, out: Path) -> None:
     sh("docker", "cp", f"{CONTAINER}:{ADDON_DATA}/logs", str(run_dir / "mm-logs"),
        check=False)
     report = analyse(name, run_dir)
+    report["scrapers"] = scrapers
     report["duration_min"] = round((time.time() - started) / 60, 1)
     (run_dir / "report.json").write_text(json.dumps(report, indent=1, ensure_ascii=False))
     print(f"[{name}] done: {report['verdict']}", flush=True)
@@ -581,8 +618,10 @@ def analyse(name: str, run_dir: Path) -> dict[str, Any]:
         for key, fields in _diff(c, snaps["D"]).items():
             for field in fields:
                 filled = trackers["C"].get(f"{key}:{field}", {}).get("from_fallback")
-                edited = edit and edit["key"] == key and edit["field"] == field
-                if field in TEXT_FIELDS and (edited or not filled):
+                if edit and edit["key"] == key and edit["field"] == field:
+                    continue  # the edit itself; checked against its value below
+                was_blank = blank(field, c[key].get(field))
+                if field in TEXT_FIELDS and not (filled or was_blank):
                     checks["change_reopens_only_fallback"].append(
                         f"{_label(c[key])}: {field} {fields[field]}")
         if edit and snaps["D"][edit["key"]].get(edit["field"]) != edit["value"]:

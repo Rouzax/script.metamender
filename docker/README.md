@@ -166,6 +166,36 @@ finding:
 when a folder was scraped in another language), and `still_blank` lists
 titles and plots still empty or a placeholder after the first scan.
 
+### Timeline scenarios: `matrix/scenarios.py`
+
+Takes one matrix library through a series of steps, with a metamender scan
+after each, to see behaviour over time and under changing data:
+
+```bash
+python3 docker/matrix/scenarios.py --out /path/to/results TIME CHANGES OUTLIERS
+```
+
+- `TIME`: the tracker's dates are moved back in jumps (8, 31, 91, 401 days,
+  then monthly) to stand in for time passing. Content does not age with it:
+  a 2026 show stays young.
+- `CHANGES`: a user edits, empties or blanks out values, the provider's
+  rating and plot change since the last run (Kodi gets an older value and the
+  tracker records it as metamender's own), Kodi re-scrapes an episode, an
+  episode is removed and later pruned, a movie gets another movie's id.
+- `OUTLIERS`: odd ids, text and dates; a show folder that disappears; the
+  providers blocked in the container's hosts file (the step checks they are
+  really unreachable); an invalid TMDB key; Kodi killed during a full rescan;
+  a show added while the service runs (waits for the library-event scan).
+
+Every step is checked: a field's fetch count rises by at most one and only
+when the item had a due field, the scan's logged decisions match
+metamender's maturity rules for the tracker before the scan, NFO values that
+are not metamender's stay, and nothing unexpected is logged. A step that
+needs provider traffic first drops items from the tracker and fails when its
+scan processed nothing. `<out>/scenarios.md` has one table per scenario;
+`<out>/<scenario>/report.json` lists each step's failures and the values it
+changed.
+
 ## Host harness: `verify.py`
 
 ```bash
