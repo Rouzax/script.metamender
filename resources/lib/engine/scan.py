@@ -31,7 +31,6 @@ Logging:
         - scan.updated (INFO): Item metadata written to Kodi
         - scan.breaker (WARNING): A provider tripped, or every provider the
           enabled fields need is down so the pass stops (scope="all")
-        - scan.apikey (ERROR): TMDB rejected the API key (terminal)
         - scan.tvdb_auth (ERROR): TVDB rejected the add-on's credentials;
           TVDB is disabled for the cycle, the scan continues
         - scan.imdb_lookup_failed (ERROR): The IMDb ratings store raised
@@ -54,9 +53,10 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any
 
 import xbmc
 
@@ -67,7 +67,7 @@ from resources.lib.constants import (
     parse_refetch_schedule,
 )
 from resources.lib.data.identity import compute_identity
-from resources.lib.data.kodi import get_all_items, update_item
+from resources.lib.data.kodi import get_all_items, get_item_by_id, update_item
 from resources.lib.data.media_types import EPISODE, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.sources import match_source
@@ -148,7 +148,7 @@ DEFAULT_FALLBACK_LANGUAGE = "en-US"
 
 def settings_fingerprint(
     field: str,
-    settings: Dict[str, Any],
+    settings: dict[str, Any],
     folder_language: str,
     media_type: str,
 ) -> str:
@@ -161,7 +161,7 @@ def settings_fingerprint(
     only); for every other field, one TMDB step, the folder language.
     """
     if field in _RATING_FIELDS:
-        inputs = {"rating_source": settings.get("rating_source", 0)}  # type: Dict[str, Any]
+        inputs: dict[str, Any] = {"rating_source": settings.get("rating_source", 0)}
     elif field in _CHAIN_FIELDS:
         inputs = {
             "folder_language": folder_language,
@@ -175,7 +175,7 @@ def settings_fingerprint(
     return json.dumps(inputs, sort_keys=True)
 
 
-def _make_stats() -> Dict[str, Any]:
+def _make_stats() -> dict[str, Any]:
     """Return a fresh stats dict."""
     return {
         "processed": 0,
@@ -199,8 +199,8 @@ def _make_stats() -> Dict[str, Any]:
 
 
 def _content_age_days(
-    item: Dict[str, Any], media_type: MediaType, today: str
-) -> Optional[int]:
+    item: dict[str, Any], media_type: MediaType, today: str
+) -> int | None:
     """Age of the content in days from its release date, or None if unknown.
 
     Uses the release date (premiered/firstaired), never dateadded. Returns None
@@ -215,7 +215,7 @@ def _content_age_days(
         return None
 
 
-def _item_title(item: Dict[str, Any], media_type: MediaType) -> str:
+def _item_title(item: dict[str, Any], media_type: MediaType) -> str:
     """Build the display title for an item (logging/UI, not the tracker key).
 
     The tracker key is produced separately by compute_identity. Movies and TV
@@ -238,7 +238,7 @@ _IMDB_ID = re.compile(r"tt[0-9]+")
 _NUMERIC_ID = re.compile(r"[0-9]{1,12}")
 
 
-def _clean_id(raw: Any, imdb: bool = False) -> Optional[str]:
+def _clean_id(raw: Any, imdb: bool = False) -> str | None:
     """A uniqueid value as an id, or None when it cannot be one.
 
     Scrapers leave values such as "", "None" and "0" behind. Ids are stored
@@ -255,8 +255,8 @@ def _clean_id(raw: Any, imdb: bool = False) -> Optional[str]:
 
 
 def _extract_ids(
-    item: Dict[str, Any],
-) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    item: dict[str, Any],
+) -> tuple[str | None, str | None, str | None, str | None]:
     """Extract (tmdb_id, imdb_id, tvdb_id, unknown_id) from a Kodi item's
     uniqueid dict, dropping values that cannot be an id (_clean_id).
     ``unknown_id`` is an id of type `unknown`, a TVDB id candidate that is
@@ -275,8 +275,8 @@ def _get_season_data(
     season_number: int,
     api_key: str,
     language: str,
-    cache: Dict[str, Optional[List[Dict[str, Any]]]],
-) -> Optional[List[Dict[str, Any]]]:
+    cache: dict[str, list[dict[str, Any]] | None],
+) -> list[dict[str, Any]] | None:
     """Fetch season data from TMDB with caching.
 
     Caches by show_tmdb_id, season_number, and language to avoid
@@ -289,9 +289,9 @@ def _get_season_data(
 
 
 def _find_episode_by_tmdb_id(
-    season_data: List[Dict[str, Any]],
+    season_data: list[dict[str, Any]],
     tmdb_episode_id: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Find an episode by TMDB episode ID in a season's episode list."""
     for ep in season_data:
         if ep.get("tmdb_id") == tmdb_episode_id:
@@ -316,7 +316,7 @@ def _kodi_form(value: Any) -> Any:
     if isinstance(value, str):
         return value.strip()
     if isinstance(value, list):
-        parts = []  # type: List[Any]
+        parts: list[Any] = []
         for entry in value:
             if not isinstance(entry, str):
                 parts.append(entry)
@@ -330,9 +330,9 @@ def _kodi_form(value: Any) -> Any:
 
 
 def _extract_fields(
-    provider_data: Dict[str, Any],
-    gap_fields: List[str],
-) -> Dict[str, Any]:
+    provider_data: dict[str, Any],
+    gap_fields: list[str],
+) -> dict[str, Any]:
     """Provider values for the requested fields, in the form Kodi stores.
 
     Skips "mpaa" (Phase 8) and the named-slot rating/votes (handled by
@@ -346,7 +346,7 @@ def _extract_fields(
     provenance fingerprint is taken of. Whether a value is written at all is
     _plan_writes' decision.
     """
-    fields = {}  # type: Dict[str, Any]
+    fields: dict[str, Any] = {}
 
     for tmdb_key, kodi_key in _TMDB_TO_KODI.items():
         if kodi_key not in gap_fields:
@@ -388,12 +388,12 @@ def _extract_fields(
 
 
 def _plan_writes(
-    values: Dict[str, Any],
-    item: Dict[str, Any],
+    values: dict[str, Any],
+    item: dict[str, Any],
     nfo_managed: bool,
-    fs_map: Dict[str, Dict[str, Any]],
+    fs_map: dict[str, dict[str, Any]],
     identity: str,
-) -> Tuple[Dict[str, Any], Set[str]]:
+) -> tuple[dict[str, Any], set[str]]:
     """Split extracted values into (fields to write, fields Kodi already holds).
 
     Under the maturity model a non-final field is refreshed overwrite-on-diff:
@@ -402,8 +402,8 @@ def _plan_writes(
     stored provenance; a field it forbids is in neither result, so it gets
     no write and no source.
     """
-    to_write = {}  # type: Dict[str, Any]
-    held = set()  # type: Set[str]
+    to_write: dict[str, Any] = {}
+    held: set[str] = set()
     for f, value in values.items():
         current = item.get(f)
         if current is not None and current == value:
@@ -419,7 +419,7 @@ def _plan_writes(
     return to_write, held
 
 
-def _parse_slots(raw: Any) -> Dict[str, str]:
+def _parse_slots(raw: Any) -> dict[str, str]:
     """A rating row's JSON provenance; anything unreadable owns nothing."""
     if not raw:
         return {}
@@ -435,9 +435,9 @@ def _parse_slots(raw: Any) -> Dict[str, str]:
 
 
 def _owned_slots(
-    fs_map: Dict[str, Dict[str, Any]],
-    current_ratings: Dict[str, Any],
-) -> Dict[str, str]:
+    fs_map: dict[str, dict[str, Any]],
+    current_ratings: dict[str, Any],
+) -> dict[str, str]:
     """Rating slots metamender wrote, from the JSON provenance on the rating
     and votes rows.
 
@@ -448,7 +448,7 @@ def _owned_slots(
     nothing, which protects every slot it would have named.
     """
     rows = [_parse_slots(fs_map.get(f, {}).get("written_value")) for f in ("rating", "votes")]
-    owned = {}  # type: Dict[str, str]
+    owned: dict[str, str] = {}
     for slot in set(rows[0]) | set(rows[1]):
         claims = [r[slot] for r in rows if slot in r]
         entry = current_ratings.get(slot)
@@ -494,23 +494,23 @@ class _ScanCtx:
     pacer: _Pacer
     tmdb_api_key: str
     default_language: str
-    sources: List[Dict[str, Any]]
-    enabled_fields: FrozenSet[str]
-    show_id_map: Dict[int, str]
-    show_tvdb_map: Dict[int, str]
+    sources: list[dict[str, Any]]
+    enabled_fields: frozenset[str]
+    show_id_map: dict[int, str]
+    show_tvdb_map: dict[int, str]
     # Kodi ids of the shows whose id lookups have answered (see
     # TrackerDB.get_checked_show_ids); episode passes only.
-    checked_shows: FrozenSet[int]
-    season_cache: Dict[str, Optional[List[Dict[str, Any]]]]
+    checked_shows: frozenset[int]
+    season_cache: dict[str, list[dict[str, Any]] | None]
     # (kind, tvdb_id, tvdb_lang) -> fetched record. Only real answers are
     # cached, so a transient failure is retried by the next item.
-    tvdb_cache: Dict[Tuple[str, str, str], Any]
+    tvdb_cache: dict[tuple[str, str, str], Any]
     # Events already logged in full this scan, so a persistent failure does
     # not repeat its traceback for every item.
-    logged_once: Set[str]
+    logged_once: set[str]
     # Per-item outcomes logged at DEBUG, summed for scan.complete.
-    counts: Dict[str, int]
-    schedule: Tuple[int, ...]
+    counts: dict[str, int]
+    schedule: tuple[int, ...]
     rating_pref: int
     text_order: int
     fallback_order: int
@@ -552,10 +552,7 @@ def _call_provider(
                 event="scan.error", provider=provider, identity=identity,
             )
             return TRANSIENT
-        log.exception(
-            "Provider API key invalid",
-            event="scan.apikey", provider=provider, identity=identity,
-        )
+        # Terminal: the caller that stops the scan logs it, once.
         raise
     except TransientProviderError:
         if best_effort:
@@ -577,7 +574,7 @@ def _call_provider(
 
 def _enrich_imdb_id(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
+    item: dict[str, Any],
     kodi_id: Any,
     title: str,
     identity: str,
@@ -606,11 +603,11 @@ class _Ids:
 
     def __init__(
         self,
-        tmdb: Optional[str],
-        imdb: Optional[str],
-        tvdb: Optional[str],
+        tmdb: str | None,
+        imdb: str | None,
+        tvdb: str | None,
         may_look_up: bool,
-        tmdb_season: Optional[int] = None,
+        tmdb_season: int | None = None,
     ) -> None:
         self.tmdb = tmdb
         self.imdb = imdb
@@ -637,7 +634,7 @@ class _Ids:
 
 
 def _lookup_allowed(
-    checked: Optional[str], today: str, due: bool, is_show: bool,
+    checked: str | None, today: str, due: bool, is_show: bool,
 ) -> bool:
     """Whether an item's id lookups may run this scan.
 
@@ -659,25 +656,25 @@ def _lookup_allowed(
     return age >= FALLBACK_RECHECK_DAYS
 
 
-def _show_kodi_id(item: Dict[str, Any]) -> int:
+def _show_kodi_id(item: dict[str, Any]) -> int:
     """The episode's show Kodi id, the key of the per-show maps."""
     value = item.get("tvshowid")
     return value if isinstance(value, int) else -1
 
 
-def _tmdb_season(item: Dict[str, Any], ids: _Ids) -> int:
+def _tmdb_season(item: dict[str, Any], ids: _Ids) -> int:
     """Season number to fetch the episode's TMDB record through."""
     if ids.tmdb_season is not None:
         return ids.tmdb_season
     return int(item.get("season", 0) or 0)
 
 
-def _premiered_year(item: Dict[str, Any]) -> Optional[int]:
+def _premiered_year(item: dict[str, Any]) -> int | None:
     raw = str(item.get("premiered") or "")[:4]
     return int(raw) if len(raw) == 4 and raw.isdigit() else None
 
 
-def _show_checked(ctx: _ScanCtx, item: Dict[str, Any]) -> bool:
+def _show_checked(ctx: _ScanCtx, item: dict[str, Any]) -> bool:
     """True when the episode's show has answered its id lookups, so a show id
     it lacks is an answer rather than not known yet."""
     return _show_kodi_id(item) in ctx.checked_shows
@@ -710,7 +707,7 @@ def _tvdb_cached(
     return result
 
 
-def _tvdb_lang(ctx: _ScanCtx, kodi_lang: str) -> Optional[str]:
+def _tvdb_lang(ctx: _ScanCtx, kodi_lang: str) -> str | None:
     """TVDB language id for a Kodi language code, or None when TVDB has none.
 
     TVDB then has nothing for that language, which is an answer, so a code
@@ -773,7 +770,7 @@ _MIN_CONFIRMING_EPISODES = 2
 
 
 def _verify_unknown_show(
-    ctx: _ScanCtx, item: Dict[str, Any], identity: str, ids: _Ids,
+    ctx: _ScanCtx, item: dict[str, Any], identity: str, ids: _Ids,
     unknown_id: str, folder_lang: str,
 ) -> None:
     """Accept the show's unknown id when the TVDB series it names carries the
@@ -808,7 +805,7 @@ def _verify_unknown_show(
 
 
 def _confirmed_by_episodes(
-    ctx: _ScanCtx, item: Dict[str, Any], identity: str, unknown_id: str,
+    ctx: _ScanCtx, item: dict[str, Any], identity: str, unknown_id: str,
     folder_lang: str,
 ) -> Any:
     """Whether the show's untyped episode ids confirm ``unknown_id`` as its
@@ -843,7 +840,7 @@ def _confirmed_by_episodes(
 
 
 def _verify_unknown_episode(
-    ctx: _ScanCtx, item: Dict[str, Any], identity: str, ids: _Ids,
+    ctx: _ScanCtx, item: dict[str, Any], identity: str, ids: _Ids,
     unknown_id: str, folder_lang: str,
 ) -> None:
     """Accept the episode's unknown id when it is in the show's TVDB episode
@@ -908,7 +905,7 @@ def _show_tvdb_from_tmdb(ctx: _ScanCtx, identity: str, ids: _Ids) -> None:
 
 
 def _episode_tmdb_from_tvdb(
-    ctx: _ScanCtx, item: Dict[str, Any], identity: str, ids: _Ids,
+    ctx: _ScanCtx, item: dict[str, Any], identity: str, ids: _Ids,
 ) -> None:
     """Episode TMDB id from its TVDB id via TMDB /find.
 
@@ -946,10 +943,10 @@ def _episode_tmdb_from_tvdb(
 
 def _resolve_ids(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
+    item: dict[str, Any],
     identity: str,
-    kodi_ids: Tuple[Optional[str], Optional[str], Optional[str], Optional[str]],
-    stored: Dict[str, Any],
+    kodi_ids: tuple[str | None, str | None, str | None, str | None],
+    stored: dict[str, Any],
     folder_lang: str,
     may_look_up: bool,
 ) -> _Ids:
@@ -1005,10 +1002,10 @@ class _Primary:
     # TMDB record, None (TMDB answered "nothing", or no TMDB id), or TRANSIENT.
     tmdb: Any
     # Movie/show TMDB id or the episode's own TMDB id.
-    tmdb_id: Optional[str]
+    tmdb_id: str | None
     # The episode's show TMDB id; None for movies and shows.
-    show_tmdb_id: Optional[str]
-    imdb_id: Optional[str]
+    show_tmdb_id: str | None
+    imdb_id: str | None
     # The IMDb id is missing and the lookup that could have found it did not
     # answer, so an IMDb rating cannot be known this scan.
     imdb_id_transient: bool
@@ -1016,7 +1013,7 @@ class _Primary:
 
 def _fetch_movie_or_show(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
+    item: dict[str, Any],
     kodi_id: Any,
     title: str,
     identity: str,
@@ -1030,7 +1027,7 @@ def _fetch_movie_or_show(
     the id lookup failed transiently) yields ``TRANSIENT``, never None: None
     means TMDB answered "nothing", which would advance the maturity clock.
     """
-    tmdb_data = None  # type: Any
+    tmdb_data: Any = None
     tmdb_id = ids.tmdb
     imdb_id = ids.imdb
 
@@ -1060,7 +1057,7 @@ def _fetch_movie_or_show(
 
 def _episode_cross_ids(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
+    item: dict[str, Any],
     kodi_id: Any,
     title: str,
     identity: str,
@@ -1102,7 +1099,7 @@ def _episode_cross_ids(
 
 def _fetch_episode_tmdb(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
+    item: dict[str, Any],
     kodi_id: Any,
     title: str,
     identity: str,
@@ -1110,7 +1107,7 @@ def _fetch_episode_tmdb(
     ep_show_tmdb_id: str,
     season_number: int,
     language: str,
-) -> Tuple[Any, bool]:
+) -> tuple[Any, bool]:
     """TMDB episode path: look up the season (cached), match by episode ID,
     and fill missing IMDb/TVDB ids. Returns (tmdb_episode_data,
     imdb_id_transient).
@@ -1119,7 +1116,7 @@ def _fetch_episode_tmdb(
     the pacer on a cache miss; breaker success is recorded once at the end;
     ApiKeyError propagates and a transient failure trips the breaker.
     """
-    tmdb_data = None  # type: Any
+    tmdb_data: Any = None
     imdb_id_transient = False
     try:
         cache_key = "{}:{}:{}".format(ep_show_tmdb_id, season_number, language)
@@ -1139,12 +1136,6 @@ def _fetch_episode_tmdb(
         if is_cache_miss:
             ctx.pacer.arm()
         ctx.breaker.record_success("tmdb")
-    except ApiKeyError:
-        log.exception(
-            "Provider API key invalid",
-            event="scan.apikey", provider="tmdb", identity=identity,
-        )
-        raise
     except TransientProviderError:
         tmdb_data = TRANSIENT
         if ctx.breaker.record_failure("tmdb"):
@@ -1158,7 +1149,7 @@ def _fetch_episode_tmdb(
 
 def _fetch_episode(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
+    item: dict[str, Any],
     kodi_id: Any,
     title: str,
     identity: str,
@@ -1171,7 +1162,7 @@ def _fetch_episode(
     open, show not resolved yet) yields ``TRANSIENT`` rather than None. A show
     whose lookups answered that TMDB does not have it yields None.
     """
-    tmdb_data = None  # type: Any
+    tmdb_data: Any = None
     imdb_id_transient = False
     tmdb_id = ids.tmdb
     ep_show_tmdb_id = ctx.show_id_map.get(_show_kodi_id(item))
@@ -1226,7 +1217,7 @@ class _TextSources:
     def __init__(
         self,
         ctx: _ScanCtx,
-        item: Dict[str, Any],
+        item: dict[str, Any],
         identity: str,
         primary: _Primary,
         ids: _Ids,
@@ -1236,7 +1227,7 @@ class _TextSources:
         self._identity = identity
         self._primary = primary
         self._ids = ids
-        self._tmdb_fallback = _UNFETCHED  # type: Any
+        self._tmdb_fallback: Any = _UNFETCHED
 
     def tmdb(self, field: str, fallback: bool) -> Any:
         if fallback:
@@ -1273,7 +1264,7 @@ class _TextSources:
         show_id = p.show_tmdb_id or ""
         cache_key = "{}:{}:{}".format(show_id, season_number, lang)
         if cache_key in ctx.season_cache:
-            season = ctx.season_cache[cache_key]  # type: Any
+            season: Any = ctx.season_cache[cache_key]
         else:
             season = _call_provider(
                 "tmdb",
@@ -1331,7 +1322,7 @@ def _text_chain(
     field: str,
     folder_lang: str,
     current: Any,
-) -> Tuple[FieldOutcome, Optional[str]]:
+) -> tuple[FieldOutcome, str | None]:
     """Run the title/plot chain. Returns the outcome and the provider whose
     step produced the value (None when there is no value).
 
@@ -1339,10 +1330,10 @@ def _text_chain(
     text_source_order, then (when the fallback language differs) both in the
     fallback language in the fallback_order. Movies ask TMDB only.
     """
-    def tmdb_step(fallback: bool) -> Tuple[str, Callable[[], Any], bool]:
+    def tmdb_step(fallback: bool) -> tuple[str, Callable[[], Any], bool]:
         return ("tmdb", lambda: sources.tmdb(field, fallback), fallback)
 
-    def tvdb_step(lang: str, fallback: bool) -> Tuple[str, Callable[[], Any], bool]:
+    def tvdb_step(lang: str, fallback: bool) -> tuple[str, Callable[[], Any], bool]:
         return ("tvdb", lambda: sources.tvdb(field, lang), fallback)
 
     movie = ctx.media_type.name == "movie"
@@ -1361,7 +1352,7 @@ def _text_chain(
         else:
             specs += [tvdb_step(ctx.fallback_language, True), tmdb_step(True)]
 
-    heard = []  # type: List[str]
+    heard: list[str] = []
 
     def step(provider: str, fetch: Callable[[], Any], fallback: bool) -> Step:
         def run() -> Any:
@@ -1397,12 +1388,12 @@ def _imdb_rating(ctx: _ScanCtx, primary: _Primary, identity: str) -> Any:
 
 def _resolve_ratings(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
+    item: dict[str, Any],
     primary: _Primary,
     identity: str,
     nfo_managed: bool,
-    owned_slots: Dict[str, str],
-) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str], Optional[int], Dict[str, str]]:
+    owned_slots: dict[str, str],
+) -> tuple[bool, dict[str, Any] | None, str | None, int | None, dict[str, str]]:
     """Ratings verdict and map. Returns (transient, new_ratings_map,
     default_source, default_votes, slot_fingerprints of the slots written).
 
@@ -1422,10 +1413,10 @@ def _resolve_ratings(
 
 
 def _reopened_fallbacks(
-    item: Dict[str, Any],
-    fs_map: Dict[str, Dict[str, Any]],
-    rebaseline: Set[str],
-) -> Set[str]:
+    item: dict[str, Any],
+    fs_map: dict[str, dict[str, Any]],
+    rebaseline: set[str],
+) -> set[str]:
     """Chain fields whose current value metamender filled from the fallback
     language and that are re-checked under changed settings.
 
@@ -1434,7 +1425,7 @@ def _reopened_fallbacks(
     Kodi still holds exactly as written is reopened; one the user edited
     stays fill-only.
     """
-    reopened = set()  # type: Set[str]
+    reopened: set[str] = set()
     for f in rebaseline & _CHAIN_FIELDS:
         fs = fs_map.get(f) or {}
         written = fs.get("written_value")
@@ -1448,14 +1439,14 @@ def _reopened_fallbacks(
 
 def _resolve_fields(
     ctx: _ScanCtx,
-    item: Dict[str, Any],
+    item: dict[str, Any],
     identity: str,
     primary: _Primary,
     ids: _Ids,
     folder_lang: str,
-    fields: List[str],
-    reopened: Set[str],
-) -> Tuple[Dict[str, FieldOutcome], Dict[str, Any], Dict[str, Optional[str]]]:
+    fields: list[str],
+    reopened: set[str],
+) -> tuple[dict[str, FieldOutcome], dict[str, Any], dict[str, str | None]]:
     """Per-field verdicts for the non-rating fields.
 
     A field in ``reopened`` runs its chain as if empty, so a fallback step may
@@ -1464,9 +1455,9 @@ def _resolve_fields(
     Returns (outcomes keyed by Kodi field, provider values keyed by TMDB key
     for _extract_fields, winning provider per Kodi field).
     """
-    outcomes = {}  # type: Dict[str, FieldOutcome]
-    values = {}  # type: Dict[str, Any]
-    providers = {}  # type: Dict[str, Optional[str]]
+    outcomes: dict[str, FieldOutcome] = {}
+    values: dict[str, Any] = {}
+    providers: dict[str, str | None] = {}
     text = _TextSources(ctx, item, identity, primary, ids)
     tmdb_transient = primary.tmdb is TRANSIENT
     tmdb_data = {} if tmdb_transient or not primary.tmdb else primary.tmdb
@@ -1494,8 +1485,8 @@ def _write_fields(
     kodi_id: Any,
     title: str,
     identity: str,
-    fields_to_write: Dict[str, Any],
-    stats: Dict[str, Any],
+    fields_to_write: dict[str, Any],
+    stats: dict[str, Any],
 ) -> set:
     """Write fields to Kodi and count stats. Returns the set of fields written
     this pass (empty if the write failed or there was nothing to write).
@@ -1521,7 +1512,7 @@ def _write_fields(
         else:
             stats["errors"] += 1
 
-    written = set()  # type: set
+    written: set[str] = set()
     if write_succeeded:
         written = set(fields_to_write.keys())
         if ratings_written:
@@ -1549,7 +1540,7 @@ def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
         )
 
 
-def _candidate_fields(media_type: MediaType, enabled_fields: FrozenSet[str]) -> List[str]:
+def _candidate_fields(media_type: MediaType, enabled_fields: frozenset[str]) -> list[str]:
     """Fields this pass manages: enabled, backfilled for the media type, and
     known to the providers. Titles are managed for episodes only."""
     fields = (
@@ -1561,7 +1552,7 @@ def _candidate_fields(media_type: MediaType, enabled_fields: FrozenSet[str]) -> 
     return sorted(fields)
 
 
-def _needed_providers(media_type: MediaType, candidates: List[str]) -> List[str]:
+def _needed_providers(media_type: MediaType, candidates: list[str]) -> list[str]:
     """Providers the pass can still make progress with. TMDB always; TVDB
     when a show or episode text field it supplies is managed. The IMDb store
     has no breaker, so it never stops a pass."""
@@ -1571,20 +1562,74 @@ def _needed_providers(media_type: MediaType, candidates: List[str]) -> List[str]
     return needed
 
 
+def _tracker_identity(
+    tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: Any,
+) -> str:
+    """The tracker key for this Kodi item: compute_identity's, unless another
+    Kodi item in the library holds that row.
+
+    Two items can compute one identity, such as two files of a movie that
+    both carry its tmdb id. Sharing a row would let the first mark it
+    processed for the cycle and the second never be scanned, so the item
+    that does not hold the row gets ``<identity>|<file>``, and keeps it.
+    The holder is the item whose Kodi id the row records. Whether that item
+    still exists is asked from Kodi, and only when the ids differ: after a
+    file is replaced or the library rebuilt, the recorded id is gone or
+    names another item, and this item takes the row over.
+    """
+    identity = compute_identity(item, media_type)
+    own = "{}|{}".format(identity, item.get("file", ""))
+    if tracker.get_item(media_type.name, own) is not None:
+        return own
+    # An id written back to Kodi (_enrich_imdb_id) changes the identity the
+    # item computes; keep its tracker row under the new one.
+    tracker.adopt_identity(media_type.name, identity, kodi_id)
+    row = tracker.get_item(media_type.name, identity)
+    holder = row.get("kodi_id") if row else None
+    if holder is None or holder == kodi_id:
+        return identity
+    other = get_item_by_id(media_type, holder)
+    if other and compute_identity(other, media_type) == identity:
+        log.debug(
+            "Duplicate identity, item tracked under its file",
+            event="scan.duplicate_identity", identity=identity,
+            kodi_id=kodi_id, holder=holder,
+        )
+        return own
+    return identity
+
+
+def _new_items(tracker: TrackerDB, media_type: MediaType) -> list[dict[str, Any]]:
+    """The library's items whose Kodi id the tracker does not know yet, with
+    full details. An id listed but gone by the details call is skipped."""
+    known = tracker.known_kodi_ids(media_type.name)
+    listed = get_all_items(media_type, ids_only=True)
+    fresh = [
+        i[media_type.kodi_id_field] for i in listed
+        if i.get(media_type.kodi_id_field) not in known
+    ]
+    items = [d for d in (get_item_by_id(media_type, i) for i in fresh) if d]
+    log.info(
+        "New library items selected", event="scan.new_items",
+        media_type=media_type.name, listed=len(listed), new=len(items),
+    )
+    return items
+
+
 def run_scan(
     media_type: MediaType,
     tracker: TrackerDB,
-    source_config: Dict[str, Any],
-    enabled_fields: FrozenSet[str],
+    source_config: dict[str, Any],
+    enabled_fields: frozenset[str],
     tmdb_api_key: str,
-    settings: Dict[str, Any],
+    settings: dict[str, Any],
     monitor: Any = None,
-    show_id_map: Optional[Dict[int, str]] = None,
-    items: Optional[List[Dict[str, Any]]] = None,
-    kodi_filter: Optional[Dict[str, str]] = None,
-    breaker: Optional[CircuitBreaker] = None,
+    show_id_map: dict[int, str] | None = None,
+    items: list[dict[str, Any]] | None = None,
+    breaker: CircuitBreaker | None = None,
     reset: bool = False,
-) -> Dict[str, int]:
+    new_only: bool = False,
+) -> dict[str, int]:
     """Run a single scan cycle for one media type.
 
     Queries Kodi for all items (or uses a pre-built list), computes a per-field
@@ -1623,6 +1668,11 @@ def run_scan(
             the playback yield is skipped, and each field's clock is
             re-baselined (reset_field_clock) instead of advanced. Intended
             for items=[one_item].
+        new_only: Library-event scan: process only the items whose Kodi id
+            the tracker does not hold for this type. Kodi's dateadded is the
+            file's date, not when the item entered the library, so it cannot
+            pick out new items. A re-scraped item gets a new Kodi id and is
+            included.
 
     Returns:
         Stats dict with processed, skipped, updated, errors, and
@@ -1678,7 +1728,7 @@ def run_scan(
     )
 
     if items is None:
-        items = get_all_items(media_type, kodi_filter=kodi_filter)
+        items = _new_items(tracker, media_type) if new_only else get_all_items(media_type)
 
     for item in items:
         # Check for Kodi shutdown
@@ -1697,9 +1747,9 @@ def run_scan(
         if not reset:
             _yield_to_playback(ctx, monitor, stats["processed"])
 
-        identity = compute_identity(item, media_type)
         title = _item_title(item, media_type)
         kodi_id = item.get(media_type.kodi_id_field, 0)
+        identity = _tracker_identity(tracker, media_type, item, kodi_id)
 
         # Resume: skip items already processed in this cycle. The reset path
         # (Update now) bypasses this so a just-scanned item can still be
@@ -1773,10 +1823,10 @@ def run_scan(
             if reset or (f in fs_map and fs_map[f].get("settings_fp") != fps[f])
         }
 
-        decisions = {}  # type: Dict[str, str]
+        decisions: dict[str, str] = {}
         # Fields due only because a fallback value holds back FINAL: their
         # sample is a monthly recheck and spends one of FALLBACK_RECHECKS.
-        rechecks = set()  # type: Set[str]
+        rechecks: set[str] = set()
         for f in candidates:
             if f in rebaseline:
                 # Update now, or changed settings: due regardless of the
@@ -1888,10 +1938,10 @@ def run_scan(
         )
         stats["protected"] += len(extracted) - len(fields_to_write) - len(held)
 
-        ratings_source = None  # type: Optional[str]
-        ratings_votes = None  # type: Optional[int]
+        ratings_source: str | None = None
+        ratings_votes: int | None = None
         owned_slots = _owned_slots(fs_map, item.get("ratings") or {})
-        slot_fps = {}  # type: Dict[str, str]
+        slot_fps: dict[str, str] = {}
         rating_due = [f for f in nonfinal if f in _RATING_FIELDS]
         if rating_due:
             (transient, new_ratings, ratings_source, ratings_votes,
@@ -1924,10 +1974,10 @@ def run_scan(
         # Provenance: the fingerprint of each value as written to Kodi. Rating
         # rows hold the per-slot fingerprints as JSON, merged over the slots
         # owned before so a slot not rewritten this scan stays owned.
-        provenance = {
+        provenance: dict[str, str] = {
             f: fingerprint(fields_to_write[f])
             for f in written if f in fields_to_write
-        }  # type: Dict[str, str]
+        }
         if slot_fps and _RATING_FIELDS & written:
             merged = dict(owned_slots)
             merged.update(slot_fps)
@@ -1953,7 +2003,7 @@ def run_scan(
                 # record the chosen slot and its votes for staleness.
                 source = ratings_source
                 vote_count = ratings_votes
-                from_fallback = None  # type: Optional[bool]
+                from_fallback: bool | None = None
             else:
                 # Source describes the value Kodi now holds, so it is recorded
                 # only when the answer is in Kodi (written now, or already

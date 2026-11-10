@@ -12,11 +12,11 @@ Logging:
     name: the answer under the label itself (INFO for a record, DEBUG for a
     per-episode lookup), and failures from providers/http.py as
     `<label>.transient` (WARNING) or `<label>.nodata` (404 at DEBUG). An HTTP
-    401 raises ApiKeyError, which the scan logs as scan.apikey.
+    401 raises ApiKeyError, which stops the scan; its caller logs it.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from resources.lib.constants import TMDB_BASE_URL
 from resources.lib.providers.http import provider_get
@@ -41,7 +41,7 @@ _CERT_NORMALIZE = {
 # =============================================================================
 
 
-def _parse_directors(credits: Dict) -> List[str]:
+def _parse_directors(credits: dict) -> list[str]:
     """Extract director names from credits.crew where job is Director."""
     return [
         member["name"]
@@ -50,10 +50,10 @@ def _parse_directors(credits: Dict) -> List[str]:
     ]
 
 
-def _parse_writers(credits: Dict) -> List[str]:
+def _parse_writers(credits: dict) -> list[str]:
     """Extract deduplicated writer names from credits.crew in the Writing department."""
-    seen = set()  # type: set
-    writers = []  # type: List[str]
+    seen: set[str] = set()
+    writers: list[str] = []
     for member in credits.get("crew", []):
         if member.get("department") == "Writing":
             name = member.get("name", "")
@@ -63,7 +63,7 @@ def _parse_writers(credits: Dict) -> List[str]:
     return writers
 
 
-def _parse_trailer(videos: Dict) -> Optional[str]:
+def _parse_trailer(videos: dict) -> str | None:
     """Find the first YouTube trailer and return a Kodi plugin URL."""
     for video in videos.get("results", []):
         if video.get("type") == "Trailer" and video.get("site") == "YouTube":
@@ -73,12 +73,12 @@ def _parse_trailer(videos: Dict) -> Optional[str]:
     return None
 
 
-def _parse_movie_certifications(release_dates: Dict) -> Dict[str, str]:
+def _parse_movie_certifications(release_dates: dict) -> dict[str, str]:
     """Extract {country: rating} from movie release_dates.results.
 
     Takes the first non-empty certification per country.
     """
-    certs = {}  # type: Dict[str, str]
+    certs: dict[str, str] = {}
     for entry in release_dates.get("results", []):
         country = entry.get("iso_3166_1", "")
         if not country or country in certs:
@@ -91,9 +91,9 @@ def _parse_movie_certifications(release_dates: Dict) -> Dict[str, str]:
     return certs
 
 
-def _parse_tv_certifications(content_ratings: Dict) -> Dict[str, str]:
+def _parse_tv_certifications(content_ratings: dict) -> dict[str, str]:
     """Extract {country: rating} from TV content_ratings.results."""
-    certs = {}  # type: Dict[str, str]
+    certs: dict[str, str] = {}
     for entry in content_ratings.get("results", []):
         country = entry.get("iso_3166_1", "")
         rating = entry.get("rating", "")
@@ -102,7 +102,7 @@ def _parse_tv_certifications(content_ratings: Dict) -> Dict[str, str]:
     return certs
 
 
-def _normalize_certs(certs: Dict[str, str]) -> Dict[str, str]:
+def _normalize_certs(certs: dict[str, str]) -> dict[str, str]:
     """Normalize country-specific certification aliases to canonical values."""
     for country, table in _CERT_NORMALIZE.items():
         if country in certs:
@@ -118,9 +118,9 @@ def _normalize_certs(certs: Dict[str, str]) -> Dict[str, str]:
 def resolve_id(
     api_key: str,
     media_type: str,
-    tvdb_id: Optional[str] = None,
-    imdb_id: Optional[str] = None,
-) -> Optional[str]:
+    tvdb_id: str | None = None,
+    imdb_id: str | None = None,
+) -> str | None:
     """Resolve a movie's or show's TMDB ID from its external ids via /find.
 
     Only the results of the asking media type count ("movie_results" for a
@@ -144,7 +144,7 @@ def resolve_id(
 
 def _find(
     api_key: str, external_id: str, source: str, results_key: str,
-) -> Optional[str]:
+) -> str | None:
     """One /find call: the first result under ``results_key``, or None."""
     url = "{}/find/{}".format(TMDB_BASE_URL, external_id)
 
@@ -190,7 +190,7 @@ def fetch_movie(
     tmdb_id: str,
     api_key: str,
     language: str = "en-US",
-) -> Optional[Dict]:
+) -> dict | None:
     """Fetch full movie metadata from TMDB.
 
     Uses append_to_response to get credits, videos, and release_dates
@@ -257,7 +257,7 @@ def fetch_season(
     season_number: int,
     api_key: str,
     language: str = "en-US",
-) -> Optional[List[Dict]]:
+) -> list[dict] | None:
     """Fetch season metadata from TMDB, returning a list of episode dicts.
 
     Each episode dict contains title, rating, votes, plot, directors,
@@ -281,7 +281,7 @@ def fetch_season(
         return None
 
 
-    episodes = []  # type: List[Dict]
+    episodes: list[dict] = []
     for ep in data.get("episodes", []):
         crew = {"crew": ep.get("crew", [])}
         ep_id = ep.get("id")
@@ -314,7 +314,7 @@ def fetch_tvshow(
     tmdb_id: str,
     api_key: str,
     language: str = "en-US",
-) -> Optional[Dict]:
+) -> dict | None:
     """Fetch TV show metadata from TMDB.
 
     Uses append_to_response to get content_ratings in a single call.
@@ -360,12 +360,12 @@ def fetch_tvshow(
     return result
 
 
-def _clean_ids(data: Dict[str, Any]) -> Dict[str, str]:
+def _clean_ids(data: dict[str, Any]) -> dict[str, str]:
     """Pick imdb_id and tvdb_id from an external_ids payload as strings.
 
     TMDB returns tvdb_id as an int; keys with empty values are left out.
     """
-    ids = {}  # type: Dict[str, str]
+    ids: dict[str, str] = {}
     for key in ("imdb_id", "tvdb_id"):
         value = data.get(key)
         if value:
@@ -378,7 +378,7 @@ def fetch_episode_external_ids(
     season_number: int,
     episode_number: int,
     api_key: str,
-) -> Optional[Dict[str, str]]:
+) -> dict[str, str] | None:
     """Fetch the IMDb and TVDB IDs for a specific episode from TMDB.
 
     Returns a dict with "imdb_id" and/or "tvdb_id" (only non-empty ones), or
@@ -416,7 +416,7 @@ def fetch_episode_external_ids(
 def find_episode_by_tvdb(
     api_key: str,
     tvdb_episode_id: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Find a TMDB episode from its TVDB episode ID via /find.
 
     Returns {"tmdb_id", "show_tmdb_id", "season", "episode"} or None when TMDB
@@ -458,7 +458,7 @@ def find_episode_by_tvdb(
 def fetch_tvshow_external_ids(
     api_key: str,
     tmdb_id: str,
-) -> Optional[Dict[str, str]]:
+) -> dict[str, str] | None:
     """Fetch the IMDb and TVDB IDs of a show from TMDB.
 
     Returns a dict with "imdb_id" and/or "tvdb_id" (only non-empty ones), or

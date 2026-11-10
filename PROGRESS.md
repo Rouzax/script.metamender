@@ -49,7 +49,7 @@
 - [x] 7b.1 Check everything on first encounter (no field_status = needs provider call)
 - [x] 7b.2 Playback yield (pause scan when video starts, resume when stops)
 - [x] 7b.3 cycle_processed resume (skip already-checked items on resume)
-- [x] 7b.4 Targeted library-event scans (dateadded filter for new items only)
+- [x] 7b.4 Targeted library-event scans (only items whose Kodi id the tracker does not know)
 - [x] 7b.5 Increase debounce to 5 minutes (300s)
 - [x] 7b.6 Tests and validation
 - [x] 7b.7 Live Kodi validation: first-encounter, resume, playback yield, targeted scan

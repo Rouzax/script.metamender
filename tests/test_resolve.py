@@ -193,3 +193,63 @@ def test_rating_sources_per_preference():
     assert rating_sources(PREFER_IMDB) == (True, True)
     assert rating_sources(TMDB_ONLY) == (True, False)
     assert rating_sources(IMDB_ONLY) == (False, True)
+
+
+# =============================================================================
+# Tests: the TMDB slot name
+# =============================================================================
+
+
+def test_tmdb_rating_goes_into_existing_tmdb_slot():
+    # Kodi's TMDB TV scraper names its slot "tmdb", the movie scraper
+    # "themoviedb"; a second TMDB slot would show the same rating twice.
+    current = {"tmdb": {"rating": 6.5, "votes": 100, "default": True}}
+    m, src, votes, fps = build_ratings(
+        {"rating": 7.2, "votes": 150}, None, current, PREFER_TMDB,
+    )
+    assert set(m) == {"tmdb"}
+    assert m["tmdb"] == {"rating": 7.2, "votes": 150, "default": True}
+    assert src == "tmdb"
+    assert votes == 150
+    assert set(fps) == {"tmdb"}
+
+
+def test_tmdb_slot_unchanged_when_tmdb_slot_already_current():
+    current = {"tmdb": {"rating": 7.2, "votes": 150, "default": True}}
+    assert build_ratings(
+        {"rating": 7.2, "votes": 150}, None, current, TMDB_ONLY,
+    ) == (None, None, None, {})
+
+
+def test_themoviedb_slot_wins_when_both_exist():
+    current = {
+        "themoviedb": {"rating": 6.0, "votes": 10, "default": False},
+        "tmdb": {"rating": 6.0, "votes": 10, "default": True},
+    }
+    m, src, _votes, _fps = build_ratings(
+        {"rating": 7.0, "votes": 20}, None, current, PREFER_TMDB,
+    )
+    assert src == "themoviedb"
+    assert m["themoviedb"]["rating"] == 7.0
+    assert m["tmdb"] == {"rating": 6.0, "votes": 10, "default": False}
+
+
+def test_nfo_owned_tmdb_slot_is_updated():
+    current = {"tmdb": {"rating": 6.5, "votes": 100, "default": True}}
+    owned = {"tmdb": slot_fingerprint(current["tmdb"])}
+    m, src, _votes, fps = build_ratings(
+        {"rating": 7.2, "votes": 150}, None, current, PREFER_TMDB,
+        nfo_managed=True, owned_slots=owned,
+    )
+    assert set(m) == {"tmdb"}
+    assert m["tmdb"]["rating"] == 7.2
+    assert src is None
+    assert set(fps) == {"tmdb"}
+
+
+def test_nfo_tmdb_slot_from_nfo_is_never_touched():
+    current = {"tmdb": {"rating": 6.5, "votes": 100, "default": True}}
+    assert build_ratings(
+        {"rating": 7.2, "votes": 150}, None, current, PREFER_TMDB,
+        nfo_managed=True, owned_slots={},
+    ) == (None, None, None, {})

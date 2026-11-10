@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from typing import Any, Dict, FrozenSet, Optional
+from typing import Any
 
 from resources.lib.constants import SCHEMA_VERSION
 from resources.lib.utils import get_logger
@@ -163,7 +163,7 @@ class TrackerDB:
     # ------------------------------------------------------------------
 
     def upsert_item(
-        self, media_type: str, identity: str, title: Optional[str] = None, **kwargs: Any
+        self, media_type: str, identity: str, title: str | None = None, **kwargs: Any
     ) -> int:
         """Insert or update an item keyed on (media_type, identity).
 
@@ -220,7 +220,7 @@ class TrackerDB:
         log.debug("Item upserted", event="tracker.upsert", media_type=media_type, identity=identity)
         return cursor.lastrowid  # type: ignore[return-value]
 
-    def get_item(self, media_type: str, identity: str) -> Optional[Dict[str, Any]]:
+    def get_item(self, media_type: str, identity: str) -> dict[str, Any] | None:
         """Get an item by (media_type, identity), or None if not found."""
         cursor = self._conn.execute(
             "SELECT * FROM items WHERE media_type = ? AND identity = ?",
@@ -230,6 +230,60 @@ class TrackerDB:
         if row is None:
             return None
         return dict(row)
+
+    def adopt_identity(
+        self, media_type: str, identity: str, kodi_id: Any
+    ) -> str | None:
+        """Rename this Kodi item's row to ``identity`` when that identity is
+        new because the item gained the external id it names.
+
+        An item keyed on "title (year)" or "imdb:<id>" becomes "imdb:<id>" or
+        "tmdb:<id>" once that id is in Kodi's uniqueid, for instance after
+        metamender wrote back an IMDb id it found. Without the rename the next
+        scan starts a fresh row and the old one, with its fetch clocks and
+        provenance, is orphaned. The row is adopted only when it belongs to
+        the same Kodi item and already carries the id, so another item that
+        resolved to the same id keeps its own row. Returns the old identity,
+        or None when nothing was renamed.
+        """
+        prefix, _, ext_id = identity.partition(":")
+        column = {"tmdb": "tmdb_id", "imdb": "imdb_id"}.get(prefix)
+        if column is None or not ext_id or kodi_id is None:
+            return None
+        if self._get_item_id(media_type, identity) is not None:
+            return None
+        rows = self._conn.execute(
+            "SELECT id, identity FROM items WHERE media_type = ? AND kodi_id = ? "
+            "AND {} = ?".format(column),
+            (media_type, kodi_id, ext_id),
+        ).fetchall()
+        if len(rows) != 1:
+            return None
+        old = rows[0]["identity"]
+        try:
+            self._conn.execute(
+                "UPDATE items SET identity = ? WHERE id = ?", (identity, rows[0]["id"]),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to adopt identity", event="tracker.error",
+                media_type=media_type, identity=identity, old_identity=old,
+            )
+            return None
+        log.info(
+            "Item identity adopted", event="tracker.identity_adopted",
+            media_type=media_type, identity=identity, old_identity=old,
+        )
+        return old  # type: ignore[no-any-return]
+
+    def known_kodi_ids(self, media_type: str) -> set[int]:
+        """Kodi ids of the tracked items of this type, as last scanned."""
+        rows = self._conn.execute(
+            "SELECT kodi_id FROM items WHERE media_type = ? AND kodi_id IS NOT NULL",
+            (media_type,),
+        )
+        return {int(r["kodi_id"]) for r in rows}
 
     def update_item_status(
         self, media_type: str, identity: str, status: str
@@ -315,7 +369,7 @@ class TrackerDB:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _get_item_id(self, media_type: str, identity: str) -> Optional[int]:
+    def _get_item_id(self, media_type: str, identity: str) -> int | None:
         """Look up the row id for an item by (media_type, identity)."""
         cursor = self._conn.execute(
             "SELECT id FROM items WHERE media_type = ? AND identity = ?",
@@ -332,7 +386,7 @@ class TrackerDB:
 
     def get_field_status(
         self, media_type: str, identity: str, field: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Get a single field_status row, or None if not found."""
         item_id = self._get_item_id(media_type, identity)
         if item_id is None:
@@ -355,7 +409,7 @@ class TrackerDB:
 
     def get_field_status_map(
         self, media_type: str, identity: str
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         """Return {field: row_dict} for all field_status rows of an item."""
         item_id = self._get_item_id(media_type, identity)
         if item_id is None:
@@ -370,12 +424,12 @@ class TrackerDB:
         media_type: str,
         identity: str,
         field: str,
-        next_retry: Optional[str],
-        source: Optional[str] = None,
-        vote_count: Optional[int] = None,
-        written_value: Optional[str] = None,
-        from_fallback: Optional[bool] = None,
-        settings_fp: Optional[str] = None,
+        next_retry: str | None,
+        source: str | None = None,
+        vote_count: int | None = None,
+        written_value: str | None = None,
+        from_fallback: bool | None = None,
+        settings_fp: str | None = None,
         fallback_recheck: bool = False,
     ) -> None:
         """Record a successful sample: bump fetch_count, stamp fetched_at, set the
@@ -441,12 +495,12 @@ class TrackerDB:
         media_type: str,
         identity: str,
         field: str,
-        next_retry: Optional[str],
-        settings_fp: Optional[str] = None,
-        written_value: Optional[str] = None,
-        source: Optional[str] = None,
-        vote_count: Optional[int] = None,
-        from_fallback: Optional[bool] = None,
+        next_retry: str | None,
+        settings_fp: str | None = None,
+        written_value: str | None = None,
+        source: str | None = None,
+        vote_count: int | None = None,
+        from_fallback: bool | None = None,
     ) -> None:
         """Re-baseline a field to its first sample ('Update now', or a change
         in the settings the field depends on).
@@ -510,7 +564,7 @@ class TrackerDB:
         """Commit the current transaction (callers batch one item's writes)."""
         self._conn.commit()
 
-    def get_show_id_map(self) -> Dict[int, str]:
+    def get_show_id_map(self) -> dict[int, str]:
         """Map a TV show's Kodi id to its show-level TMDB ID.
 
         Built from the tvshow items recorded during the show scan so the
@@ -518,7 +572,7 @@ class TrackerDB:
         Keyed by Kodi id (an episode's ``tvshowid``), not title, because
         distinct shows can share a title.
         """
-        show_map = {}  # type: Dict[int, str]
+        show_map: dict[int, str] = {}
         cursor = self._conn.execute(
             "SELECT kodi_id, tmdb_id FROM items "
             "WHERE media_type = 'tvshow' AND tmdb_id IS NOT NULL "
@@ -528,7 +582,7 @@ class TrackerDB:
             show_map[row["kodi_id"]] = row["tmdb_id"]
         return show_map
 
-    def get_show_tvdb_map(self) -> Dict[int, str]:
+    def get_show_tvdb_map(self) -> dict[int, str]:
         """Map a TV show's Kodi id to its TVDB series ID.
 
         The episode scan needs the series ID to fetch a show's episode list
@@ -541,7 +595,7 @@ class TrackerDB:
         )
         return {row["kodi_id"]: row["tvdb_id"] for row in cursor.fetchall()}
 
-    def get_checked_show_ids(self) -> FrozenSet[int]:
+    def get_checked_show_ids(self) -> frozenset[int]:
         """Kodi ids of the TV shows whose id cross-reference lookups have
         answered at least once.
 
@@ -639,7 +693,7 @@ class TrackerDB:
                 key=key,
             )
 
-    def get_scan_state(self, key: str) -> Optional[str]:
+    def get_scan_state(self, key: str) -> str | None:
         """Get a value from the scan_state table, or None if not found."""
         cursor = self._conn.execute(
             "SELECT value FROM scan_state WHERE key = ?",

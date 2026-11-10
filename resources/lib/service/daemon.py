@@ -12,6 +12,8 @@ Logging:
         - service.scan_trigger (INFO): Scan triggered (scheduled or library event)
         - service.scan_complete (INFO): Scan finished with summary
         - service.scan_error (ERROR): Scan failed
+        - service.scan_apikey (ERROR): A provider rejected the API key; the
+          scan stops and backs off
         - service.skip_playback (DEBUG): Scan skipped because video is playing
         - service.library_scan_finished (INFO): Library scan event received
         - service.orphans_pruned (INFO/DEBUG): Orphan prune result (INFO when >0)
@@ -23,8 +25,9 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Iterable
 from datetime import date, timedelta
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any
 
 import xbmc
 import xbmcvfs
@@ -117,11 +120,11 @@ _FIELD_TOGGLES = {
     "enable_credits": frozenset({"director", "writer"}),
     "enable_trailers": frozenset({"trailer"}),
     "enable_taglines": frozenset({"tagline"}),
-    "enable_details": frozenset({"genre", "studio", "country", "runtime"}),
+    "enable_details": frozenset({"genre", "studio", "country", "runtime", "firstaired"}),
 }
 
 
-def _load_settings() -> Dict[str, Any]:
+def _load_settings() -> dict[str, Any]:
     """Read all settings needed by the scan engine.
 
     Returns:
@@ -173,7 +176,7 @@ def _get_sources_config_path() -> str:
 
 
 
-def _prepare_imdb_ratings(settings: Dict[str, Any], monitor: Any) -> bool:
+def _prepare_imdb_ratings(settings: dict[str, Any], monitor: Any) -> bool:
     """Load or refresh the IMDb ratings store once per cycle; True when ready.
 
     Skipped (False) when ratings are off or rating_source never consults IMDb.
@@ -201,7 +204,7 @@ def _prepare_imdb_ratings(settings: Dict[str, Any], monitor: Any) -> bool:
         return False
 
 
-def tvdb_auth_failed(all_stats: Iterable[Dict[str, Any]]) -> bool:
+def tvdb_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
     """True when any pass of a cycle reports that TheTVDB rejected the
     add-on's credentials. The callers notify once per cycle on it: the key
     ships with the add-on, so the user cannot fix it, but TVDB titles and
@@ -211,12 +214,13 @@ def tvdb_auth_failed(all_stats: Iterable[Dict[str, Any]]) -> bool:
 
 def _run_scan(
     tracker: TrackerDB,
-    source_config: Dict[str, Any],
-    settings: Dict[str, Any],
+    source_config: dict[str, Any],
+    settings: dict[str, Any],
     monitor: MetaMendMonitor,
-    kodi_filter: Optional[Dict[str, str]] = None,
-) -> Dict[str, Dict[str, int]]:
-    """Run scan for MOVIE, TVSHOW, and EPISODE in order.
+    new_only: bool = False,
+) -> dict[str, dict[str, int]]:
+    """Run scan for MOVIE, TVSHOW, and EPISODE in order; with ``new_only``
+    only the items new to the tracker (run_scan's new_only).
 
     TV shows are scanned before episodes so their TMDB IDs are
     available for the episode season lookups.
@@ -228,7 +232,7 @@ def _run_scan(
     enabled_fields = settings["enabled_fields"]
     settings = dict(settings, imdb_ready=_prepare_imdb_ratings(settings, monitor))
 
-    all_stats = {}  # type: Dict[str, Dict[str, int]]
+    all_stats: dict[str, dict[str, int]] = {}
 
     # One breaker for the whole cycle: a provider that fails repeatedly
     # stays disabled across the movie/tvshow/episode passes.
@@ -243,7 +247,7 @@ def _run_scan(
             tmdb_api_key=tmdb_api_key,
             settings=settings,
             monitor=monitor,
-            kodi_filter=kodi_filter,
+            new_only=new_only,
             breaker=breaker,
         )
         all_stats[media_type.name] = stats
@@ -264,7 +268,7 @@ def _run_scan(
         settings=settings,
         monitor=monitor,
         show_id_map=show_id_map,
-        kodi_filter=kodi_filter,
+        new_only=new_only,
         breaker=breaker,
     )
     all_stats[EPISODE.name] = episode_stats
@@ -274,21 +278,20 @@ def _run_scan(
 
 def _maybe_prune_orphans(
     tracker: TrackerDB,
-    settings: Dict[str, Any],
-    kodi_filter: Optional[Dict[str, str]],
+    settings: dict[str, Any],
+    targeted: bool,
 ) -> None:
     """Prune orphaned tracker rows, but ONLY after a full scan.
 
     CRITICAL CORRECTNESS GUARD: pruning compares each item's `last_seen`
-    stamp against a retention cutoff. A targeted/library-event scan
-    (kodi_filter is not None) only stamps `last_seen` on the few new items
-    it touches, so pruning after one would wrongly delete EVERYTHING not in
-    that small set. Only a full scan (kodi_filter is None) refreshes
-    `last_seen` for the whole library, so pruning is safe only then.
+    stamp against a retention cutoff. A targeted (library-event) scan only
+    stamps `last_seen` on the few new items it touches, so pruning after one
+    would wrongly delete EVERYTHING not in that small set. Only a full scan
+    refreshes `last_seen` for the whole library, so pruning is safe only then.
 
     A retention of 0 disables pruning entirely.
     """
-    if kodi_filter is not None:
+    if targeted:
         # Targeted scan: last_seen was only refreshed for a subset of items.
         # Pruning here would delete the rest of the library. Never prune.
         log.debug(
@@ -335,7 +338,7 @@ def _select_trigger(
     last_scan: float,
     interval_sec: float,
     has_pending_event: bool,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Decide whether to scan this tick and why.
 
     A due scheduled scan takes precedence over a library event in the same
@@ -371,7 +374,7 @@ def run() -> None:
     clear_file_lock()
 
     monitor = MetaMendMonitor()
-    tracker: Optional[TrackerDB] = None
+    tracker: TrackerDB | None = None
     last_scan = 0.0  # Force scan on first loop iteration
     next_retry_after = 0.0  # Backoff gate after a failed scan (both triggers)
 
@@ -406,7 +409,7 @@ def run() -> None:
                         event="service.skip_playback",
                     )
 
-                settings = None  # type: Optional[Dict[str, Any]]
+                settings: dict[str, Any] | None = None
                 if should_scan:
                     settings = _load_settings()
                     if not settings.get("tmdb_api_key"):
@@ -435,23 +438,17 @@ def run() -> None:
                     try:
                         StructuredLogger.start_scan_log()
 
-                        kodi_filter = None  # type: Optional[Dict[str, str]]
-                        if reason == "library_event":
-                            last_completed = tracker.get_scan_state(
-                                "last_scan_completed"
-                            )
-                            if last_completed:
-                                kodi_filter = {
-                                    "field": "dateadded",
-                                    "operator": "after",
-                                    "value": last_completed,
-                                }
+                        # A library event scans only the items new to the
+                        # tracker, once a full scan has seen the library.
+                        targeted = reason == "library_event" and bool(
+                            tracker.get_scan_state("last_scan_completed")
+                        )
 
                         log.info(
                             "Scan triggered",
                             event="service.scan_trigger",
                             reason=reason,
-                            targeted=kodi_filter is not None,
+                            targeted=targeted,
                         )
 
                         source_config = load_source_config(
@@ -464,7 +461,7 @@ def run() -> None:
                         try:
                             all_stats = _run_scan(
                                 tracker, source_config, settings, monitor,
-                                kodi_filter=kodi_filter,
+                                new_only=targeted,
                             )
                         except KodiQueryError:
                             # A Kodi library query failed (RPC/parse error),
@@ -483,16 +480,17 @@ def run() -> None:
                                 time.time() + SCAN_FAILURE_BACKOFF_SEC
                             )
                             continue
-                        except ApiKeyError:
+                        except ApiKeyError as exc:
                             # A provider rejected the API key. This is terminal
                             # for the cycle: notify the user, do NOT advance the
                             # watermark or clear a library-event request, and back
                             # off so we do not re-attempt every loop while the key
-                            # stays invalid.
-                            log.warning(
+                            # stays invalid. The scan leaves the logging to here.
+                            log.exception(
                                 "Scan stopped: invalid API key",
                                 event="service.scan_apikey",
                                 reason=reason,
+                                provider=exc.provider,
                             )
                             notify(lang(32341))  # Invalid TMDB API key
                             next_retry_after = (
@@ -541,10 +539,10 @@ def run() -> None:
                             )
 
                             # Prune orphaned tracker rows. Guarded to run only
-                            # after a FULL scan (kodi_filter is None); see
+                            # after a FULL scan (not targeted); see
                             # _maybe_prune_orphans for why a targeted scan must
                             # never prune.
-                            _maybe_prune_orphans(tracker, settings, kodi_filter)
+                            _maybe_prune_orphans(tracker, settings, targeted)
 
                         # Shown even with notifications off, like the invalid
                         # TMDB key: otherwise the only trace of a provider

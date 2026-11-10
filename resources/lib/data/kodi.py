@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import xbmc
 
@@ -45,7 +45,7 @@ _EXTRA_PROPERTIES = {
 }
 
 
-def _build_properties(media_type: MediaType) -> List[str]:
+def _build_properties(media_type: MediaType) -> list[str]:
     """Build the JSON-RPC property list for a media type.
 
     Combines the base properties with media-type-specific extras
@@ -60,33 +60,26 @@ def _build_properties(media_type: MediaType) -> List[str]:
 
 def get_all_items(
     media_type: MediaType,
-    kodi_filter: Optional[Dict[str, Any]] = None,
-    tvshowid: Optional[int] = None,
-    season: Optional[int] = None,
-) -> List[Dict[str, Any]]:
+    tvshowid: int | None = None,
+    season: int | None = None,
+    ids_only: bool = False,
+) -> list[dict[str, Any]]:
     """Query Kodi library for items of the given media type.
-
-    Without filter arguments, returns all items. With filters, returns
-    only matching items (efficient for targeted scans).
 
     Args:
         media_type: The media type to query (MOVIE, TVSHOW, or EPISODE).
-        kodi_filter: Kodi JSON-RPC filter dict, e.g.
-            ``{"field": "title", "operator": "is", "value": "Air"}``.
         tvshowid: For episodes, limit to this TV show (Kodi param, not filter).
         season: For episodes, limit to this season (requires tvshowid).
+        ids_only: Ask for no properties: each item carries only its Kodi id
+            and label, which keeps a listing of a large library cheap.
 
     Returns:
         List of item dicts from the Kodi library.
     """
-    properties = _build_properties(media_type)
-    params = {
-        "properties": properties,
+    params: dict[str, Any] = {
+        "properties": [] if ids_only else _build_properties(media_type),
         "limits": {"start": 0, "end": 99999},
-    }  # type: Dict[str, Any]
-
-    if kodi_filter is not None:
-        params["filter"] = kodi_filter
+    }
     if tvshowid is not None:
         params["tvshowid"] = tvshowid
     if season is not None:
@@ -154,7 +147,7 @@ def get_all_items(
 def get_item_by_id(
     media_type: MediaType,
     item_id: int,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Fetch a single library item by its Kodi database ID.
 
     Uses GetXDetails with the same property set as get_all_items, so the
@@ -170,10 +163,10 @@ def get_item_by_id(
         The item dict, or None when not found / on error.
     """
     properties = _build_properties(media_type)
-    params = {
+    params: dict[str, Any] = {
         media_type.kodi_id_field: item_id,
         "properties": properties,
-    }  # type: Dict[str, Any]
+    }
 
     query = {
         "jsonrpc": "2.0",

@@ -12,7 +12,7 @@ Logging:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from resources.lib.engine.protect import fingerprint
 from resources.lib.utils import get_logger
@@ -26,7 +26,7 @@ TMDB_ONLY = 2
 IMDB_ONLY = 3
 
 
-def rating_sources(rating_pref: int) -> Tuple[bool, bool]:
+def rating_sources(rating_pref: int) -> tuple[bool, bool]:
     """(consults TMDB, consults IMDb) under a rating_source preference."""
     return (
         rating_pref in (PREFER_TMDB, PREFER_IMDB, TMDB_ONLY),
@@ -34,8 +34,11 @@ def rating_sources(rating_pref: int) -> Tuple[bool, bool]:
     )
 
 
-# Kodi rating slot names for our two managed providers
+# Kodi rating slot names for our two managed providers. Kodi's TMDB movie
+# scraper names its slot "themoviedb" and its TMDB TV scraper "tmdb"; both
+# hold the TMDB rating, so an item that already has either keeps that name.
 _TMDB_SLOT = "themoviedb"
+_TMDB_SLOT_ALIASES = (_TMDB_SLOT, "tmdb")
 _IMDB_SLOT = "imdb"
 
 # Decimal places used to compare ratings (Kodi stores its own float; compare
@@ -43,7 +46,7 @@ _IMDB_SLOT = "imdb"
 _RATING_PRECISION = 2
 
 
-def _norm_rating(value: Any) -> Optional[float]:
+def _norm_rating(value: Any) -> float | None:
     """Round a rating for comparison/storage, or None if not a valid number."""
     try:
         return round(float(value), _RATING_PRECISION)
@@ -51,7 +54,7 @@ def _norm_rating(value: Any) -> Optional[float]:
         return None
 
 
-def _ratings_equal(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+def _ratings_equal(a: dict[str, Any], b: dict[str, Any]) -> bool:
     """Compare two ratings maps by slot set, normalized rating, votes, default."""
     if set(a.keys()) != set(b.keys()):
         return False
@@ -66,7 +69,7 @@ def _ratings_equal(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     return True
 
 
-def slot_fingerprint(entry: Dict[str, Any]) -> str:
+def slot_fingerprint(entry: dict[str, Any]) -> str:
     """Fingerprint of a rating slot's value (rating and votes, not `default`).
 
     The default flag is excluded because moving it is not a change of what the
@@ -79,19 +82,25 @@ def slot_fingerprint(entry: Dict[str, Any]) -> str:
     })
 
 
+def _tmdb_slot(current: dict[str, Any]) -> str:
+    """The slot the TMDB rating goes into: the first TMDB slot the item
+    already has, else _TMDB_SLOT."""
+    return next((s for s in _TMDB_SLOT_ALIASES if s in current), _TMDB_SLOT)
+
+
 def build_ratings(
-    tmdb_data: Dict[str, Any],
-    imdb_rating: Optional[Tuple[float, int]],
-    current_ratings: Optional[Dict[str, Any]],
+    tmdb_data: dict[str, Any],
+    imdb_rating: tuple[float, int] | None,
+    current_ratings: dict[str, Any] | None,
     rating_pref: int,
     nfo_managed: bool = False,
-    owned_slots: Optional[Dict[str, str]] = None,
-) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[int], Dict[str, str]]:
+    owned_slots: dict[str, str] | None = None,
+) -> tuple[dict[str, Any] | None, str | None, int | None, dict[str, str]]:
     """Build the Kodi ratings map to write.
 
     Returns (map, default_source, default_votes, slot_fingerprints); the map is
-    None when nothing changes. Writes the TMDB rating into the `themoviedb`
-    slot and the IMDb (rating, votes) into the `imdb` slot (subject to
+    None when nothing changes. Writes the TMDB rating into the item's TMDB
+    slot (`themoviedb`, or the `tmdb` slot Kodi's TV scraper made) and the IMDb (rating, votes) into the `imdb` slot (subject to
     rating_pref), preserves all other existing slots (e.g. trakt, user), and
     sets `default` on the preferred source's slot. Kodi rejects ratings <= 0 or
     > 10, so those candidates are dropped. The map is the full merge (for a
@@ -110,11 +119,12 @@ def build_ratings(
 
     # Collect in-range candidates honoring the preference's source filter
     use_tmdb, use_imdb = rating_sources(rating_pref)
-    candidates = {}  # type: Dict[str, Tuple[float, int]]
+    tmdb_slot = _tmdb_slot(current)
+    candidates: dict[str, tuple[float, int]] = {}
     if use_tmdb:
         r = _norm_rating(tmdb_data.get("rating"))
         if r is not None and 0 < r <= 10:
-            candidates[_TMDB_SLOT] = (r, int(tmdb_data.get("votes") or 0))
+            candidates[tmdb_slot] = (r, int(tmdb_data.get("votes") or 0))
     if use_imdb and imdb_rating is not None:
         r = _norm_rating(imdb_rating[0])
         if r is not None and 0 < r <= 10:
@@ -132,7 +142,7 @@ def build_ratings(
 
     # Build the new map: copy existing slots, then overlay ours. An NFO-managed
     # item keeps its default flags; otherwise the default moves to our slot.
-    new_map = {}  # type: Dict[str, Any]
+    new_map: dict[str, Any] = {}
     for name, entry in current.items():
         new_map[name] = {
             "rating": entry.get("rating"),
@@ -143,11 +153,11 @@ def build_ratings(
         keep_default = nfo_managed and bool(current.get(name, {}).get("default"))
         new_map[name] = {"rating": r, "votes": v, "default": keep_default}
 
-    default_source = None  # type: Optional[str]
+    default_source: str | None = None
     if not nfo_managed:
         # Choose the default slot by preference, falling back to whichever exists
-        order = [_IMDB_SLOT, _TMDB_SLOT] if rating_pref in (PREFER_IMDB, IMDB_ONLY) \
-            else [_TMDB_SLOT, _IMDB_SLOT]
+        order = [_IMDB_SLOT, tmdb_slot] if rating_pref in (PREFER_IMDB, IMDB_ONLY) \
+            else [tmdb_slot, _IMDB_SLOT]
         default_source = next((s for s in order if s in candidates), None)
         if default_source is not None:
             new_map[default_source]["default"] = True

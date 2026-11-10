@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 from unittest.mock import MagicMock
 
+from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.service import daemon
 
 
@@ -35,12 +36,12 @@ def test_select_trigger_idle_when_nothing_due():
 
 
 def test_maybe_prune_orphans_full_scan_prunes_all_types():
-    """A full scan (kodi_filter=None) with retention > 0 prunes every type."""
+    """A full scan with retention > 0 prunes every type."""
     tracker = MagicMock()
     tracker.prune_orphans.return_value = 2
     settings = {"orphan_retention_days": 30}
 
-    daemon._maybe_prune_orphans(tracker, settings, kodi_filter=None)
+    daemon._maybe_prune_orphans(tracker, settings, targeted=False)
 
     expected_cutoff = (date.today() - timedelta(days=30)).isoformat()
     called = {
@@ -52,7 +53,7 @@ def test_maybe_prune_orphans_full_scan_prunes_all_types():
 
 
 def test_maybe_prune_orphans_targeted_scan_never_prunes():
-    """A targeted scan (kodi_filter set) must NEVER prune.
+    """A targeted (library-event) scan must NEVER prune.
 
     A targeted scan only stamps last_seen on the few items it sees, so
     pruning then would delete everything else in the library.
@@ -60,11 +61,7 @@ def test_maybe_prune_orphans_targeted_scan_never_prunes():
     tracker = MagicMock()
     settings = {"orphan_retention_days": 30}
 
-    daemon._maybe_prune_orphans(
-        tracker,
-        settings,
-        kodi_filter={"field": "dateadded", "operator": "after", "value": "x"},
-    )
+    daemon._maybe_prune_orphans(tracker, settings, targeted=True)
 
     tracker.prune_orphans.assert_not_called()
 
@@ -74,7 +71,7 @@ def test_maybe_prune_orphans_retention_zero_never_prunes():
     tracker = MagicMock()
     settings = {"orphan_retention_days": 0}
 
-    daemon._maybe_prune_orphans(tracker, settings, kodi_filter=None)
+    daemon._maybe_prune_orphans(tracker, settings, targeted=False)
 
     tracker.prune_orphans.assert_not_called()
 
@@ -368,3 +365,12 @@ def test_service_start_clears_a_lock_file_left_by_a_killed_kodi(kodi_stubs):
     _acquire, clear = _run_daemon_locked(ticks=1)
 
     clear.assert_called_once_with()
+
+
+def test_every_backfill_field_has_a_toggle():
+    """A field no toggle enables is never in enabled_fields, so the scan
+    never manages it. Votes are written with the rating."""
+    toggled = frozenset().union(*daemon._FIELD_TOGGLES.values())
+    for media_type in (MOVIE, TVSHOW, EPISODE):
+        missing = media_type.backfill_fields - toggled - {"votes"}
+        assert not missing, (media_type.name, sorted(missing))
