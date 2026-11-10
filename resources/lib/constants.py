@@ -1,8 +1,6 @@
 """Centralized constants for MetaMender addon."""
 from __future__ import annotations
 
-from typing import Tuple
-
 # =============================================================================
 # Addon Identity
 # =============================================================================
@@ -71,10 +69,10 @@ FALLBACK_RECHECK_DAYS = 30
 FALLBACK_RECHECKS = 12
 
 # Default refetch schedule in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
-DEFAULT_REFETCH_SCHEDULE = (7, 30, 90)  # type: Tuple[int, ...]
+DEFAULT_REFETCH_SCHEDULE: tuple[int, ...] = (7, 30, 90)
 
 
-def parse_refetch_schedule(value: str) -> Tuple[int, ...]:
+def parse_refetch_schedule(value: str) -> tuple[int, ...]:
     """Parse a 'comma,separated,days' schedule string, dropping non-positive
     entries. Falls back to DEFAULT_REFETCH_SCHEDULE on empty or malformed input."""
     try:
@@ -91,6 +89,14 @@ PROVIDER_CIRCUIT_BREAKER_THRESHOLD = 5
 # =============================================================================
 # External APIs
 # =============================================================================
+
+# Outbound HTTP limits (providers/http): a read timeout bounds one stalled
+# read, not a body that trickles in, so a whole-response deadline and a size
+# cap back it up.
+HTTP_CONNECT_TIMEOUT = 5
+HTTP_READ_TIMEOUT = 15
+HTTP_DEADLINE_SEC = 30
+HTTP_MAX_BODY_BYTES = 5_000_000
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TVDB_BASE_URL = "https://api4.thetvdb.com/v4"

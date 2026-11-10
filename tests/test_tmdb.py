@@ -351,7 +351,7 @@ class TestNormalizeCerts:
 
 
 class TestFetchMovie:
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_all_fields(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
 
@@ -372,14 +372,14 @@ class TestFetchMovie:
             "South Korea",
         ]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_directors_parsed(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         result = fetch_movie("666277", "fake_key")
         assert result is not None
         assert result["directors"] == ["Celine Song"]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_writers_parsed_and_deduplicated(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         result = fetch_movie("666277", "fake_key")
@@ -387,7 +387,7 @@ class TestFetchMovie:
         # Celine Song appears once in fixture with job=Writer, department=Writing
         assert result["writers"] == ["Celine Song"]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_trailer_formatted_as_youtube_url(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         result = fetch_movie("666277", "fake_key")
@@ -395,7 +395,7 @@ class TestFetchMovie:
         expected = "plugin://plugin.video.youtube/?action=play_video&videoid=kA244xewjcI"
         assert result["trailer"] == expected
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_trailer_none_when_no_trailer(self, mock_get: MagicMock) -> None:
         response = dict(MOVIE_RESPONSE)
         response["videos"] = {"results": []}
@@ -404,7 +404,7 @@ class TestFetchMovie:
         assert result is not None
         assert result["trailer"] is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_certifications_parsed(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         result = fetch_movie("666277", "fake_key")
@@ -415,7 +415,7 @@ class TestFetchMovie:
             "DE": "6",
         }
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         import requests as req
 
@@ -423,33 +423,33 @@ class TestFetchMovie:
         with pytest.raises(TransientProviderError):
             fetch_movie("666277", "fake_key")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(401)
         with pytest.raises(ApiKeyError) as exc_info:
             fetch_movie("666277", "fake_key")
         assert exc_info.value.provider == "tmdb"
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
         result = fetch_movie("666277", "fake_key")
         assert result is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_transient_on_invalid_json(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, raise_for_json=True)
         with pytest.raises(TransientProviderError):
             fetch_movie("666277", "fake_key")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_passes_language_param(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, MOVIE_RESPONSE)
         fetch_movie("666277", "fake_key", language="nl-NL")
         call_kwargs = mock_get.call_args
         assert call_kwargs[1]["params"]["language"] == "nl-NL"
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_se_certifications_normalized(self, mock_get: MagicMock) -> None:
         response = dict(MOVIE_RESPONSE)
         response["release_dates"] = {
@@ -474,7 +474,7 @@ class TestFetchMovie:
 
 
 class TestFetchSeason:
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_episode_list(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
 
@@ -494,7 +494,7 @@ class TestFetchSeason:
         assert ep1["firstaired"] == "2025-01-23"
         assert ep1["runtime"] == 51
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_tmdb_id_per_episode(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
 
@@ -504,7 +504,7 @@ class TestFetchSeason:
         assert result[0]["tmdb_id"] == "4014249"
         assert result[1]["tmdb_id"] == "4053246"
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_episode_directors_and_writers(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, SEASON_RESPONSE)
 
@@ -519,7 +519,7 @@ class TestFetchSeason:
         assert ep2["directors"] == ["Guy Ferland"]
         assert ep2["writers"] == ["Tiffany Shaw Ho"]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_handles_empty_episodes(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {"episodes": []})
 
@@ -528,7 +528,7 @@ class TestFetchSeason:
         assert result is not None
         assert result == []
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         import requests as req
 
@@ -536,13 +536,13 @@ class TestFetchSeason:
         with pytest.raises(TransientProviderError):
             fetch_season("129552", 2, "fake_key")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(401)
         with pytest.raises(ApiKeyError):
             fetch_season("129552", 2, "fake_key")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
         result = fetch_season("129552", 2, "fake_key")
@@ -555,7 +555,7 @@ class TestFetchSeason:
 
 
 class TestFetchTvshow:
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_metadata(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, TVSHOW_RESPONSE)
 
@@ -567,7 +567,7 @@ class TestFetchTvshow:
         assert result["plot"] == "An FBI agent unravels a conspiracy."
         assert result["genres"] == ["Action & Adventure", "Drama"]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_certifications_parsed(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, TVSHOW_RESPONSE)
 
@@ -580,25 +580,25 @@ class TestFetchTvshow:
             "NL": "16",
         }
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(401)
         with pytest.raises(ApiKeyError):
             fetch_tvshow("129552", "fake_key")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_none_on_non_200(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
         result = fetch_tvshow("129552", "fake_key")
         assert result is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_transient_on_invalid_json(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, raise_for_json=True)
         with pytest.raises(TransientProviderError):
             fetch_tvshow("129552", "fake_key")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_se_tv_certs_normalized(self, mock_get: MagicMock) -> None:
         response = dict(TVSHOW_RESPONSE)
         response["content_ratings"] = {
@@ -625,7 +625,7 @@ class TestResolveId:
     JSON raise TransientProviderError and count toward the circuit breaker.
     """
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_resolves_from_tvdb_id(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_TVDB)
 
@@ -635,7 +635,7 @@ class TestResolveId:
         call_kwargs = mock_get.call_args
         assert "tvdb_id" in call_kwargs[1]["params"]["external_source"]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_resolves_from_imdb_id(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_IMDB)
 
@@ -645,7 +645,7 @@ class TestResolveId:
         call_kwargs = mock_get.call_args
         assert "imdb_id" in call_kwargs[1]["params"]["external_source"]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_prefers_tvdb_over_imdb(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_TVDB)
 
@@ -655,7 +655,7 @@ class TestResolveId:
         assert "tvdb_id" in call_kwargs[1]["params"]["external_source"]
         assert "/find/395557" in call_kwargs[0][0]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_none_when_not_found(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_EMPTY)
 
@@ -663,25 +663,25 @@ class TestResolveId:
 
         assert result is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_none_when_no_ids_given(self, mock_get: MagicMock) -> None:
         result = resolve_id("fake_key", "movie")
         assert result is None
         mock_get.assert_not_called()
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_returns_none_on_404(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
         result = resolve_id("fake_key", "tvshow", tvdb_id="395557")
         assert result is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_api_key_error_on_401(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(401)
         with pytest.raises(ApiKeyError):
             resolve_id("fake_key", "tvshow", tvdb_id="395557")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_transient_on_network_error(self, mock_get: MagicMock) -> None:
         import requests as req
 
@@ -689,37 +689,37 @@ class TestResolveId:
         with pytest.raises(TransientProviderError):
             resolve_id("fake_key", "tvshow", tvdb_id="395557")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_transient_on_5xx(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(500)
         with pytest.raises(TransientProviderError):
             resolve_id("fake_key", "tvshow", tvdb_id="395557")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_raises_transient_on_invalid_json(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, raise_for_json=True)
         with pytest.raises(TransientProviderError):
             resolve_id("fake_key", "tvshow", tvdb_id="395557")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_movie_reads_only_movie_results(self, mock_get: MagicMock) -> None:
         """A TVDB id names a show on TMDB; a movie must not take its id."""
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_TVDB)
         assert resolve_id("fake_key", "movie", tvdb_id="395557") is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_show_reads_only_tv_results(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, FIND_RESPONSE_IMDB)
         assert resolve_id("fake_key", "tvshow", imdb_id="tt13238346") is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_show_ignores_movie_result_listed_first(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {
             "movie_results": [{"id": 1}], "tv_results": [{"id": 2}],
         })
         assert resolve_id("fake_key", "tvshow", tvdb_id="395557") == "2"
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_imdb_tried_when_tvdb_answers_nothing(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = [
             _mock_response(200, FIND_RESPONSE_EMPTY),
@@ -730,7 +730,7 @@ class TestResolveId:
         sources = [c[1]["params"]["external_source"] for c in mock_get.call_args_list]
         assert sources == ["tvdb_id", "imdb_id"]
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_imdb_tried_when_tvdb_is_404(self, mock_get: MagicMock) -> None:
         mock_get.side_effect = [
             _mock_response(404),
@@ -738,7 +738,7 @@ class TestResolveId:
         ]
         assert resolve_id("fake_key", "tvshow", tvdb_id="1", imdb_id="tt9") == "129552"
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_tvdb_transient_does_not_fall_through(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(500)
         with pytest.raises(TransientProviderError):
@@ -747,7 +747,7 @@ class TestResolveId:
 
 
 class TestCrossReferences:
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_episode_external_ids_returns_both(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(
             200, {"imdb_id": "tt123", "tvdb_id": 4567},
@@ -756,14 +756,14 @@ class TestCrossReferences:
             "imdb_id": "tt123", "tvdb_id": "4567",
         }
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_episode_external_ids_omits_empty(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(
             200, {"imdb_id": "", "tvdb_id": None},
         )
         assert fetch_episode_external_ids("1", 1, 2, "k") is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_find_episode_by_tvdb_maps_fields(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {
             "tv_episode_results": [
@@ -776,7 +776,7 @@ class TestCrossReferences:
         assert mock_get.call_args[1]["params"]["external_source"] == "tvdb_id"
         assert mock_get.call_args[0][0].endswith("/find/340249")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_find_episode_by_tvdb_empty_is_none(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {"tv_episode_results": []})
         assert find_episode_by_tvdb("k", "1") is None
@@ -786,7 +786,7 @@ class TestCrossReferences:
         {"season_number": 3},
         {"episode_number": 4},
     ])
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_find_episode_by_tvdb_without_numbers_is_none(
         self, mock_get: MagicMock, numbers: Dict[str, Any],
     ) -> None:
@@ -796,12 +796,12 @@ class TestCrossReferences:
         mock_get.return_value = _mock_response(200, {"tv_episode_results": [result]})
         assert find_episode_by_tvdb("k", "340249") is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_find_episode_by_tvdb_404_is_none(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(404)
         assert find_episode_by_tvdb("k", "1") is None
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_tvshow_external_ids(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(
             200, {"imdb_id": "tt9", "tvdb_id": 80767},
@@ -811,7 +811,7 @@ class TestCrossReferences:
         }
         assert mock_get.call_args[0][0].endswith("/tv/55/external_ids")
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_tvshow_external_ids_empty_is_none(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, {"imdb_id": None})
         assert fetch_tvshow_external_ids("k", "55") is None
@@ -821,7 +821,7 @@ class TestCrossReferences:
         lambda: find_episode_by_tvdb("k", "1"),
         lambda: fetch_tvshow_external_ids("k", "1"),
     ])
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_transient_propagates(self, mock_get: MagicMock, call: Any) -> None:
         mock_get.return_value = _mock_response(503)
         with pytest.raises(TransientProviderError):
@@ -841,7 +841,7 @@ class TestTitles:
     def _movie(**fields: Any) -> dict:
         return dict(MOVIE_RESPONSE, **fields)
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_translated_movie_title(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, self._movie(
             title="Het Monster van Parijs", original_title="Un monstre à Paris",
@@ -850,7 +850,7 @@ class TestTitles:
         result = fetch_movie("1", "k", language="nl-NL")
         assert result is not None and result["title"] == "Het Monster van Parijs"
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_untranslated_movie_title_is_empty(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, self._movie(
             title="Past Lives", original_title="Past Lives", original_language="en",
@@ -858,7 +858,7 @@ class TestTitles:
         result = fetch_movie("1", "k", language="nl-NL")
         assert result is not None and result["title"] == ""
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_original_in_the_requested_language_counts(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, self._movie(
             title="Zwartboek", original_title="Zwartboek", original_language="nl",
@@ -866,13 +866,13 @@ class TestTitles:
         result = fetch_movie("1", "k", language="nl-NL")
         assert result is not None and result["title"] == "Zwartboek"
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_unknown_original_language_keeps_the_title(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, self._movie())
         result = fetch_movie("1", "k", language="nl-NL")
         assert result is not None and result["title"] == "Past Lives"
 
-    @patch("resources.lib.providers.http.requests.get")
+    @patch("resources.lib.providers.http._send")
     def test_show_title(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, dict(
             TVSHOW_RESPONSE, name="The Night Agent", original_name="The Night Agent",

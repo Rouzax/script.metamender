@@ -1,32 +1,62 @@
 """Tests for the shared provider HTTP helper."""
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
 
-from resources.lib.providers.http import provider_get, provider_post
+from resources.lib.providers.http import provider_get, provider_get_text, provider_post
 from resources.lib.utils import ApiKeyError, TransientProviderError
 import resources.lib.providers.http as http_mod
 
 
+class _FakeResp:
+    """A streamed response: the body arrives through iter_content."""
+
+    def __init__(self, status, body=b"", chunks=None):
+        self.status_code = status
+        self.encoding = "utf-8"
+        self._chunks = chunks if chunks is not None else [body]
+        self.closed = False
+
+    def iter_content(self, chunk_size):
+        yield from self._chunks
+
+    def close(self):
+        self.closed = True
+
+
 def _resp(status, json_data=None, raise_json=False):
-    r = MagicMock()
-    r.status_code = status
     if raise_json:
-        r.json.side_effect = ValueError("bad json")
-    else:
-        r.json.return_value = json_data or {}
-    return r
+        return _FakeResp(status, b"{not json")
+    return _FakeResp(status, json.dumps(json_data or {}).encode())
 
 
-def _patch_get(monkeypatch, resp=None, exc=None):
-    def fake_get(url, params=None, timeout=None, headers=None):
-        assert headers and "User-Agent" in headers  # UA always sent
+class _FakeSession:
+    def __init__(self, handler):
+        self._handler = handler
+
+    def request(self, method, url, **kw):
+        assert kw["headers"] and "User-Agent" in kw["headers"]  # UA always sent
+        assert kw["allow_redirects"] is False and kw["stream"] is True
+        assert kw["timeout"] == (http_mod.HTTP_CONNECT_TIMEOUT, http_mod.HTTP_READ_TIMEOUT)
+        return self._handler(method, url, kw)
+
+
+def _install(monkeypatch, handler):
+    monkeypatch.setattr(http_mod, "_session_for", lambda url: _FakeSession(handler))
+
+
+def _patch_get(monkeypatch, resp=None, exc=None, seen=None):
+    def handler(method, url, kw):
+        assert method == "GET"
+        if seen is not None:
+            seen.update(url=url, **kw)
         if exc:
             raise exc
         return resp
-    monkeypatch.setattr(http_mod.requests, "get", fake_get)
+    _install(monkeypatch, handler)
 
 
 def test_provider_get_200_returns_json(monkeypatch):
@@ -84,14 +114,14 @@ def test_provider_get_other_4xx_returns_none(monkeypatch):
 
 
 def _patch_post(monkeypatch, resp=None, exc=None, seen=None):
-    def fake_post(url, json=None, timeout=None, headers=None):
-        assert headers and "User-Agent" in headers
+    def handler(method, url, kw):
+        assert method == "POST"
         if seen is not None:
-            seen.update(url=url, json=json, headers=headers)
+            seen.update(url=url, **kw)
         if exc:
             raise exc
         return resp
-    monkeypatch.setattr(http_mod.requests, "post", fake_post)
+    _install(monkeypatch, handler)
 
 
 def _call(method, **kw):
@@ -145,11 +175,7 @@ def test_400_nodata_by_default(monkeypatch, method):
 
 def test_extra_headers_sent_on_get(monkeypatch):
     seen = {}
-
-    def fake_get(url, params=None, timeout=None, headers=None):
-        seen.update(headers=headers)
-        return _resp(200, {})
-    monkeypatch.setattr(http_mod.requests, "get", fake_get)
+    _patch_get(monkeypatch, resp=_resp(200, {}), seen=seen)
     _call("get", headers={"Authorization": "Bearer t"})
     assert seen["headers"]["Authorization"] == "Bearer t"
     assert "User-Agent" in seen["headers"]
@@ -162,3 +188,65 @@ def test_extra_headers_and_body_sent_on_post(monkeypatch):
     assert seen["headers"]["Authorization"] == "Bearer t"
     assert "User-Agent" in seen["headers"]
     assert seen["json"] == {"a": 1}
+
+
+# =============================================================================
+# Sessions, redirects, limits, text responses
+# =============================================================================
+
+
+def test_redirect_is_transient(monkeypatch):
+    _patch_get(monkeypatch, resp=_FakeResp(302))
+    with pytest.raises(TransientProviderError) as info:
+        provider_get("http://x", logger=MagicMock(), label="t")
+    assert info.value.status == 302
+
+
+def test_body_over_cap_is_transient(monkeypatch):
+    monkeypatch.setattr(http_mod, "HTTP_MAX_BODY_BYTES", 10)
+    resp = _FakeResp(200, chunks=[b"{\"a\":", b" 12345678}"])
+    _patch_get(monkeypatch, resp=resp)
+    with pytest.raises(TransientProviderError):
+        provider_get("http://x", logger=MagicMock(), label="t")
+    assert resp.closed
+
+
+def test_deadline_is_transient(monkeypatch):
+    ticks = iter([0.0, 0.0, http_mod.HTTP_DEADLINE_SEC + 1])
+    monkeypatch.setattr(http_mod.time, "monotonic", lambda: next(ticks))
+    _patch_get(monkeypatch, resp=_FakeResp(200, chunks=[b"{", b"}"]))
+    with pytest.raises(TransientProviderError):
+        provider_get("http://x", logger=MagicMock(), label="t")
+
+
+def test_get_text_returns_body(monkeypatch):
+    _patch_get(monkeypatch, resp=_FakeResp(200, "<html>caf\u00e9</html>".encode()))
+    assert provider_get_text("http://x", logger=MagicMock(), label="t") == "<html>caf\u00e9</html>"
+
+
+def test_get_text_404_is_none(monkeypatch):
+    _patch_get(monkeypatch, resp=_FakeResp(404))
+    assert provider_get_text("http://x", logger=MagicMock(), label="t") is None
+
+
+def test_429_status_attached(monkeypatch):
+    _patch_get(monkeypatch, resp=_FakeResp(429))
+    with pytest.raises(TransientProviderError) as info:
+        provider_get_text("http://x", logger=MagicMock(), label="t")
+    assert info.value.status == 429
+
+
+def test_session_reused_per_host():
+    http_mod._SESSIONS.clear()
+    a = http_mod._session_for("https://api.example.org/a")
+    assert http_mod._session_for("https://API.example.org/b?x=1") is a
+    assert http_mod._session_for("https://other.example.org/") is not a
+    http_mod._SESSIONS.clear()
+
+
+def test_text_errors_are_redacted(monkeypatch):
+    exc = http_mod.requests.ConnectionError("failed https://x/?api_key=SECRETKEY123")
+    _patch_get(monkeypatch, exc=exc)
+    with pytest.raises(TransientProviderError) as info:
+        provider_get_text("http://x", logger=MagicMock(), label="t")
+    assert "SECRETKEY123" not in str(info.value)

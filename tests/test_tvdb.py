@@ -280,16 +280,14 @@ def test_project_key_not_logged(caplog):
     caplog.set_level(logging.DEBUG)
     key, token = constants.TVDB_API_KEY, "tok-secret"
 
-    def fake_post(url, json=None, **kwargs):
-        return _Resp(200, {"data": {"token": token}})
-
-    def fake_get(url, **kwargs):
+    def fake_send(url, method="GET", **kwargs):
+        if method == "POST":
+            return _Resp(200, {"data": {"token": token}})
         raise requests.ConnectionError(
             "failed {} Authorization: Bearer {} apikey={}".format(url, token, key)
         )
 
-    with patch("resources.lib.providers.http.requests.post", side_effect=fake_post), \
-            patch("resources.lib.providers.http.requests.get", side_effect=fake_get), \
+    with patch("resources.lib.providers.http._send", side_effect=fake_send), \
             pytest.raises(TransientProviderError) as exc:
         tvdb.fetch_series("80767", "nld")
     assert key not in caplog.text and token not in caplog.text

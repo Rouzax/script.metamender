@@ -17,9 +17,10 @@ import re
 import threading
 import time
 import traceback
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime as dt
-from typing import Any, Dict, Generator, Optional, TextIO
+from typing import Any, TextIO
 
 import xbmc
 import xbmcaddon
@@ -63,7 +64,7 @@ def is_empty(value: Any) -> bool:
 
 
 # Singleton addon instance
-_addon: Optional[xbmcaddon.Addon] = None
+_addon: xbmcaddon.Addon | None = None
 
 
 def get_addon() -> xbmcaddon.Addon:
@@ -124,7 +125,13 @@ class TvdbAuthError(Exception):
 
 class TransientProviderError(Exception):
     """A provider request failed transiently (429, 5xx, timeout, connection,
-    malformed JSON). Counts toward the circuit breaker; the item is retried."""
+    malformed JSON). Counts toward the circuit breaker; the item is retried.
+    ``status`` is the HTTP status when one caused it, so a caller can tell a
+    rate limit or a block (429, 403) from an outage."""
+
+    def __init__(self, message: str = "", status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class KodiQueryError(Exception):
@@ -156,9 +163,9 @@ class StructuredLogger:
         All file operations protected by threading.Lock().
     """
 
-    _log_file: Optional[TextIO] = None
-    _log_file_path: Optional[str] = None
-    _log_dir: Optional[str] = None
+    _log_file: TextIO | None = None
+    _log_file_path: str | None = None
+    _log_dir: str | None = None
     _addon_id: str = DEFAULT_ADDON_ID
     _debug_enabled: bool = False
     _initialized: bool = False
@@ -211,7 +218,7 @@ class StructuredLogger:
             cls._log_dir = None
 
     @classmethod
-    def start_scan_log(cls) -> Optional[str]:
+    def start_scan_log(cls) -> str | None:
         """Open a new timestamped log file for this scan.
 
         Cleans up old files beyond LOG_MAX_FILES. Returns the file path
@@ -329,7 +336,7 @@ class StructuredLogger:
             except (IOError, OSError):
                 pass
 
-    def _ensure_event(self, level: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    def _ensure_event(self, level: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Inject placeholder event= for INFO/WARNING/ERROR if missing."""
         if "event" not in kwargs:
             kwargs["event"] = "misc.{}".format(level)
@@ -417,7 +424,7 @@ class TimedOperation:
 
     def __init__(self, start_time: float) -> None:
         self._start = start_time
-        self._phases: Dict[str, float] = {}
+        self._phases: dict[str, float] = {}
         self._last_mark = start_time
 
     def mark(self, phase_name: str) -> None:
@@ -426,7 +433,7 @@ class TimedOperation:
         self._phases[phase_name] = now - self._last_mark
         self._last_mark = now
 
-    def _get_phase_kwargs(self) -> Dict[str, int]:
+    def _get_phase_kwargs(self) -> dict[str, int]:
         return {
             "{}_ms".format(name): int(duration * 1000)
             for name, duration in self._phases.items()
