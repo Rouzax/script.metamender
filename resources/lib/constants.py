@@ -98,6 +98,15 @@ HTTP_READ_TIMEOUT = 15
 HTTP_DEADLINE_SEC = 30
 HTTP_MAX_BODY_BYTES = 5_000_000
 
+# Certification sites (engine/certchain): the national rating websites are
+# not APIs built for bulk use, so each is asked at most once a second, a cycle
+# makes at most SITE_REQUESTS_PER_CYCLE site requests (a large library's first
+# scan spreads over several cycles), and one item's chain gives up after
+# CERT_ITEM_BUDGET_SEC.
+SITE_MIN_INTERVAL_SEC = 1.0
+SITE_REQUESTS_PER_CYCLE = 300
+CERT_ITEM_BUDGET_SEC = 60
+
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TVDB_BASE_URL = "https://api4.thetvdb.com/v4"
 # Project key issued to this add-on; TVDB intends project keys to ship

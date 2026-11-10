@@ -27,6 +27,7 @@ log = get_logger('bbfc')
 SITE = "bbfc"
 COUNTRY = "GB"
 RATINGS = frozenset({"U", "PG", "12", "12A", "15", "18", "R18"})
+MEDIA_TYPES = frozenset({"movie", "tvshow"})
 
 _SEARCH_URL = "https://www.bbfc.co.uk/search"
 _NEXT_DATA = '<script id="__NEXT_DATA__"'

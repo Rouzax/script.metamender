@@ -29,6 +29,7 @@ log = get_logger('medieraadet')
 SITE = "medieraadet"
 COUNTRY = "DK"
 RATINGS = frozenset({"A", "7", "11", "15"})
+MEDIA_TYPES = frozenset({"movie"})
 CODE_MAP = {"tfa": "A", "fr.u7": "7", "to7": "7", "to11": "11", "to15": "15"}
 MAX_DETAILS = 3
 

@@ -26,6 +26,7 @@ log = get_logger('fsk')
 SITE = "fsk"
 COUNTRY = "DE"
 RATINGS = frozenset({"0", "6", "12", "16", "18"})
+MEDIA_TYPES = frozenset({"movie", "tvshow"})
 
 _SEARCH_URL = "https://www.fsk.de/fskapi/ReleaseSearch"
 _SEASON_MARKER = re.compile(
