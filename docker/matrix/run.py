@@ -125,7 +125,15 @@ MM: dict[str, dict[str, Any]] = {
     "M5": {"sources": False},
     "M6": dict(_TEXT_ONLY),
     "M7": {"enable_main_titles": "true"},
+    # Certifications; "country" is the setting's index (0 Automatic, then
+    # COUNTRY_CODES order: 1 NL, 5 GB).
+    "M8": {"enable_certifications": "true", "country": "1", "enable_fsk": "true",
+           "enable_bbfc": "true", "enable_medieraadet": "true", "replace_incorrect": "true"},
+    "M8gb": {"enable_certifications": "true", "country": "5", "enable_fsk": "true",
+             "enable_bbfc": "true", "enable_medieraadet": "true", "replace_incorrect": "true"},
 }
+
+_CERT_COUNTRIES = ("NL", "BE", "DE", "AT", "GB", "US", "FR", "DK", "SE")
 
 # Setting changed after the second scan, before a third.
 CHANGES: dict[str, dict[str, Any]] = {
@@ -137,7 +145,7 @@ CHANGES: dict[str, dict[str, Any]] = {
 PLAN = (
     [f"{k}-M1" for k in KODI]
     + [f"{k}-{m}" for m in ("M2", "M3", "M4", "M5", "M6") for k in ("K1", "K2")]
-    + ["K1-M4b", "K3-M7"]
+    + ["K1-M4b", "K3-M7", "K1-M8", "K1-M8gb"]
     # M2 fills the English placeholder titles from its Dutch fallback, so
     # these start with values a setting change may reopen.
     + [f"K1-M2-{c}" for c in CHANGES]
@@ -148,7 +156,7 @@ BASE_SETTINGS = {
     "enable_certifications": "false", "enable_credits": "true",
     "enable_trailers": "true", "enable_taglines": "true", "enable_details": "true",
     "enable_fsk": "false", "enable_bbfc": "false", "enable_medieraadet": "false",
-    "enable_kijkwijzer": "false", "scan_interval": "24", "rate_limit": "0.25",
+    "scan_interval": "24", "rate_limit": "0.25",
     "show_notifications": "false", "logging": "true",
 }
 
@@ -567,6 +575,26 @@ def _label(item: dict[str, Any]) -> str:
     return item.get("title") or item.get("label", "?")
 
 
+def _certs_valid(name: str, ab: dict[str, Any], logs: dict[str, str]) -> list[str]:
+    """Every certification metamender wrote is in the preset's system with its
+    prefix, and the second scan asks no certification site."""
+    settings = MM[parse_run(name)[1]]
+    if settings.get("enable_certifications") != "true":
+        return []
+    country = _CERT_COUNTRIES[int(settings["country"]) - 1]
+    preset = json.loads((REPO / "resources" / "presets" / f"{country}.json").read_text())
+    prefix, valid = preset["default_prefix"], set(preset["valid_ratings"])
+    found = []
+    for key, fields in ab.items():
+        if "mpaa" in fields:
+            new = str(fields["mpaa"][1] or "")
+            if not (new.startswith(prefix) and new[len(prefix):] in valid):
+                found.append(f"{key}: mpaa {fields['mpaa'][0]!r} -> {new!r}")
+    if "event=cert.site" in logs.get("C", ""):
+        found.append("scan C asked a certification site")
+    return found
+
+
 def analyse(name: str, run_dir: Path) -> dict[str, Any]:
     is_nfo, blank, _ = _engine_rules()
     snaps = {s: json.loads((run_dir / f"{s}.json").read_text())
@@ -581,7 +609,7 @@ def analyse(name: str, run_dir: Path) -> dict[str, Any]:
     checks: dict[str, list[str]] = {
         "nfo_protected": [], "second_scan_quiet": [], "no_errors": [],
         "fallback_fill_only": [], "change_reopens_only_fallback": [],
-        "one_tmdb_rating": [],
+        "one_tmdb_rating": [], "certs_valid": [],
     }
     notes: dict[str, list[str]] = {"real_text_replaced": [], "still_blank": []}
 
@@ -633,6 +661,8 @@ def analyse(name: str, run_dir: Path) -> dict[str, Any]:
                         f"{_label(c[key])}: {field} {fields[field]}")
         if edit and snaps["D"][edit["key"]].get(edit["field"]) != edit["value"]:
             checks["change_reopens_only_fallback"].append(f"hand edit overwritten: {edit}")
+
+    checks["certs_valid"] = _certs_valid(name, ab, logs)
 
     fallback_rows = sum(1 for r in trackers["B"].values() if r["from_fallback"])
     return {

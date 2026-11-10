@@ -132,7 +132,7 @@ A run name is `K<n>-M<n>`, optionally `-C<n>`; the tables at the top of
   whether each folder is scraped in its own language or in English.
 - `M`: metamender settings on top of the defaults (an en-US fallback for the
   Dutch folders, text source order, rating source, no `sources.json`, text
-  fields only, show and movie titles managed).
+  fields only, show and movie titles managed, certifications for NL or GB).
 - `C`: a setting changed after the second scan, followed by a third scan
   (the Dutch folders' fallback becomes de-DE, or is removed, or the fallback
   order flips).
@@ -164,6 +164,9 @@ finding:
 - `fallback_fill_only`: real text was replaced by a fallback-language value.
 - `change_reopens_only_fallback` (C runs): the setting change altered text
   metamender did not fill from the fallback, or the hand edit.
+- `certs_valid` (certification runs): a certification metamender wrote lacks
+  the country's prefix or is not in its rating list, or the second scan asked
+  a certification site.
 
 `notes` in the report are not failures but need a human look:
 `real_text_replaced` lists text the folder-language value replaced (expected

@@ -172,7 +172,7 @@ msgid "Country"
 msgstr ""
 
 msgctxt "#32203"
-msgid "The country whose certification system to use. This determines valid certification values, the inference chain for cross-country mapping, and which scrapers are available."
+msgid "The rating system to fill in: its valid ratings, its prefix and how other countries' ratings are converted to it. Automatic uses the region of Kodi's interface language; certifications are skipped when that region has no rating system here."
 msgstr ""
 
 msgctxt "#32204"
@@ -188,7 +188,7 @@ msgid "Custom prefix"
 msgstr ""
 
 msgctxt "#32207"
-msgid "The prefix to prepend to certification values (for example, \"de:\" or \"Rated \"). Leave empty for no prefix."
+msgid "The prefix written before every certification, at most 8 characters (for example \"de:\" or \"Rated \"). Leave empty for no prefix."
 msgstr ""
 
 msgctxt "#32210"
@@ -200,7 +200,7 @@ msgid "Enable FSK lookup"
 msgstr ""
 
 msgctxt "#32212"
-msgid "Look up certifications from the German FSK (Freiwillige Selbstkontrolle) website. Only useful when the target country is Germany or Austria."
+msgid "Ask the German FSK when TMDB has no certification. Its ratings count directly for Germany and are converted for the other countries."
 msgstr ""
 
 msgctxt "#32213"
@@ -208,7 +208,7 @@ msgid "Enable BBFC lookup"
 msgstr ""
 
 msgctxt "#32214"
-msgid "Look up certifications from the British Board of Film Classification website. Only useful when the target country is the United Kingdom."
+msgid "Ask the British Board of Film Classification when TMDB has no certification. Its ratings count directly for the United Kingdom and are converted for the other countries."
 msgstr ""
 
 msgctxt "#32215"
@@ -216,7 +216,7 @@ msgid "Enable Medieraadet lookup"
 msgstr ""
 
 msgctxt "#32216"
-msgid "Look up certifications from the Danish Media Council (Medieraadet) API. Only useful when the target country is Denmark."
+msgid "Ask the Danish Media Council (Medieraadet) when TMDB has no certification. It rates films only. Its ratings count directly for Denmark and are converted for the other countries."
 msgstr ""
 
 msgctxt "#32220"
@@ -228,7 +228,7 @@ msgid "Replace incorrect certifications"
 msgstr ""
 
 msgctxt "#32222"
-msgid "When enabled, certifications that do not match any valid value for the selected country will be replaced with a fresh lookup. When disabled, only empty certifications are filled."
+msgid "Replace a certification from another country's system, such as \"Rated PG-13\" in a Dutch library. Ratings already in the selected country's system are kept, and ratings from an NFO file are never replaced. When disabled, only empty certifications are filled."
 msgstr ""
 
 msgctxt "#32230"
@@ -240,7 +240,7 @@ msgid "Apply certification when not found"
 msgstr ""
 
 msgctxt "#32232"
-msgid "When enabled, items that cannot be resolved after the retry window will receive the fallback certification below. When disabled, unresolved items are left empty."
+msgid "When no source has a certification for an item after a year of monthly rechecks, write the value below, so the item shows it was checked. When disabled, such items stay empty."
 msgstr ""
 
 msgctxt "#32233"
@@ -248,7 +248,7 @@ msgid "Not-found certification"
 msgstr ""
 
 msgctxt "#32234"
-msgid "The certification value to apply when no source can provide a result and the retry window has expired. Common values: NR, Not Rated, Unrated."
+msgid "The value written when no source has a certification, exactly as entered (no country prefix). Common values: NR, Not Rated, Unrated."
 msgstr ""
 
 # Country names

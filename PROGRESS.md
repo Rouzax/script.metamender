@@ -90,11 +90,11 @@ feat/7d-provider-replacement.
 - [x] 7d.10 Headless Kodi: the scan lock falls back to a file in `special://temp` when there is no home window, the service clears a leftover lock file at startup, and a held lock is retried after a minute instead of every tick; full service scan verified in the headless Omega image. Python floor raised to 3.10
 
 ## Phase 8: Certifications (rewrite, not a port of script.eucert.fixer)
-- [ ] 8.0 Settle the ten decisions in the Phase 8 review action list
-- [ ] 8.1 Presets and config (country JSON presets, load/inference/seed)
-- [ ] 8.2 Certification sources: TMDB, then preset inference, then BBFC, FSK, Medieraadet (Kijkwijzer dropped: bot challenge)
-- [ ] 8.3 Certification backfill logic (multi-tier lookup)
-- [ ] 8.4 Integrate certifications into scan engine
+- [x] 8.0 Settle the ten decisions in the Phase 8 review action list
+- [x] 8.1 Presets and config (`resources/presets`, read-only; `data/presets.py`, fails closed; country Automatic from Kodi's region)
+- [x] 8.2 Certification sources: TMDB, then the country's own site, then TMDB mapped, then the other sites mapped (`providers/fsk.py`, `bbfc.py`, `medieraadet.py`; Kijkwijzer dropped: bot challenge)
+- [x] 8.3 Certification chain and site gate (`engine/certchain.py`: per-site pacing, cap per cycle, memo, breaker, abort)
+- [x] 8.4 Integrate certifications into scan engine (`mpaa` producer, `maturity.decide_certification`: real final at once, derived or none rechecked monthly)
 
 ## Phase 9: Source Configuration Dialog
 - [ ] 9.1 Custom Kodi dialog for source config (toggle, language picker)

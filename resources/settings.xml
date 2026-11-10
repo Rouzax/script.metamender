@@ -69,8 +69,7 @@
                     <default>false</default>
                 </setting>
                 <setting id="enable_certifications" type="boolean" label="32108" help="32109">
-                    <visible>false</visible>
-                    <default>false</default>
+                    <default>true</default>
                 </setting>
                 <setting id="enable_credits" type="boolean" label="32110" help="32111">
                     <default>false</default>
@@ -117,7 +116,6 @@
         <category id="certifications" label="32200">
             <group id="cert_format" label="32201">
                 <setting id="country" type="integer" label="32202" help="32203">
-                    <visible>false</visible>
                     <default>0</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
@@ -139,7 +137,6 @@
                     <control type="list" format="string" />
                 </setting>
                 <setting id="override_prefix" type="boolean" label="32204" help="32205">
-                    <visible>false</visible>
                     <level>2</level>
                     <default>false</default>
                     <dependencies>
@@ -147,7 +144,6 @@
                     </dependencies>
                 </setting>
                 <setting id="rating_prefix" type="string" label="32206" help="32207">
-                    <visible>false</visible>
                     <level>2</level>
                     <default></default>
                     <dependencies>
@@ -161,21 +157,18 @@
             </group>
             <group id="scrapers" label="32210">
                 <setting id="enable_fsk" type="boolean" label="32211" help="32212">
-                    <visible>false</visible>
                     <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
                 </setting>
                 <setting id="enable_bbfc" type="boolean" label="32213" help="32214">
-                    <visible>false</visible>
                     <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
                 </setting>
                 <setting id="enable_medieraadet" type="boolean" label="32215" help="32216">
-                    <visible>false</visible>
                     <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
@@ -184,8 +177,7 @@
             </group>
             <group id="correction" label="32220">
                 <setting id="replace_incorrect" type="boolean" label="32221" help="32222">
-                    <visible>false</visible>
-                    <default>false</default>
+                    <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
@@ -193,14 +185,12 @@
             </group>
             <group id="fallback" label="32230">
                 <setting id="enable_fallback" type="boolean" label="32231" help="32232">
-                    <visible>false</visible>
                     <default>false</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
                 </setting>
                 <setting id="fallback_rating" type="string" label="32233" help="32234">
-                    <visible>false</visible>
                     <default>NR</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
