@@ -1421,6 +1421,31 @@ def _resolve_ratings(
     return False, new_ratings, source, votes, slot_fps
 
 
+def _reopened_fallbacks(
+    item: Dict[str, Any],
+    fs_map: Dict[str, Dict[str, Any]],
+    rebaseline: Set[str],
+) -> Set[str]:
+    """Chain fields whose current value metamender filled from the fallback
+    language and that are re-checked under changed settings.
+
+    The chain is fill-only, so without this a value filled from an old
+    fallback language would never give way to the new one. Only a value
+    Kodi still holds exactly as written is reopened; one the user edited
+    stays fill-only.
+    """
+    reopened = set()  # type: Set[str]
+    for f in rebaseline & _CHAIN_FIELDS:
+        fs = fs_map.get(f) or {}
+        written = fs.get("written_value")
+        if (
+            fs.get("from_fallback") and written is not None
+            and fingerprint(_kodi_form(item.get(f))) == written
+        ):
+            reopened.add(f)
+    return reopened
+
+
 def _resolve_fields(
     ctx: _ScanCtx,
     item: Dict[str, Any],
@@ -1429,8 +1454,12 @@ def _resolve_fields(
     ids: _Ids,
     folder_lang: str,
     fields: List[str],
+    reopened: Set[str],
 ) -> Tuple[Dict[str, FieldOutcome], Dict[str, Any], Dict[str, Optional[str]]]:
     """Per-field verdicts for the non-rating fields.
+
+    A field in ``reopened`` runs its chain as if empty, so a fallback step may
+    replace its current value (see _reopened_fallbacks).
 
     Returns (outcomes keyed by Kodi field, provider values keyed by TMDB key
     for _extract_fields, winning provider per Kodi field).
@@ -1447,7 +1476,8 @@ def _resolve_fields(
             continue
         key = _KODI_TO_TMDB.get(f, f)
         if f in _CHAIN_FIELDS:
-            outcome, provider = _text_chain(ctx, text, f, folder_lang, item.get(f))
+            current = None if f in reopened else item.get(f)
+            outcome, provider = _text_chain(ctx, text, f, folder_lang, current)
         else:
             value = None if tmdb_transient else tmdb_data.get(key)
             outcome = FieldOutcome(transient=tmdb_transient, value=value, from_fallback=False)
@@ -1849,6 +1879,7 @@ def run_scan(
         nonfinal = [f for f, d in decisions.items() if d != FINAL]
         outcomes, values, providers = _resolve_fields(
             ctx, item, identity, primary, ids, language, nonfinal,
+            _reopened_fallbacks(item, fs_map, rebaseline),
         )
         answered = [f for f in nonfinal if f in outcomes and not outcomes[f].transient]
         extracted = _extract_fields(values, answered)

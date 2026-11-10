@@ -4584,6 +4584,102 @@ class TestTvdbAuthStats:
         assert stats["tvdb_auth_failed"] is False
 
 
+class TestFallbackSettingChange:
+    """A changed fallback setting reopens a value metamender filled from the
+    old fallback, so the new setting can replace it; nothing else."""
+
+    @staticmethod
+    def _german_settings():
+        settings = _make_settings()
+        settings["fallback_language"] = "de-DE"
+        return settings
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_new_fallback_language_replaces_old_fallback_value(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang(
+            {"en-US": "English plot", "de-DE": "Deutsche Handlung"},
+        )
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Deutsche Handlung"
+        assert row["from_fallback"] == 1
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_native_answer_replaces_old_fallback_value(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang(
+            {"nl-NL": "Nederlandse plot", "de-DE": "Deutsche Handlung"},
+        )
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", self._german_settings(), items=[_old_movie(plot="English plot")],
+        )
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "Nederlandse plot"
+        assert row["from_fallback"] == 0
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_edited_fallback_value_is_not_reopened(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.side_effect = _plot_by_lang(
+            {"en-US": "English plot", "de-DE": "Deutsche Handlung"},
+        )
+        tracker = _make_tracker(tmp_path)
+        _seed_fallback_plot(tracker, "English plot")
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", self._german_settings(), items=[_old_movie(plot="My own plot")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") is None
+        assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_native_value_is_not_reopened(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.protect import fingerprint
+        from resources.lib.engine.scan import settings_fingerprint
+
+        mock_fetch.side_effect = _plot_by_lang({"de-DE": "Deutsche Handlung"})
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry="2020-01-01", source="tmdb",
+            written_value=fingerprint("Nederlandse plot"), from_fallback=False,
+            settings_fp=settings_fingerprint("plot", _make_settings(), "nl-NL", "movie"),
+        )
+        tracker.commit()
+        run_scan(
+            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            "k", self._german_settings(), items=[_old_movie(plot="Nederlandse plot")],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") is None
+        assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]
+
+
 class TestFallbackRecheckCounting:
     """Only a monthly recheck (a sample that replaced a FINAL verdict) spends
     one of a fallback value's FALLBACK_RECHECKS; ordinary samples of young

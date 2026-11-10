@@ -487,7 +487,7 @@ msgid "Fallback language"
 msgstr ""
 
 msgctxt "#32395"
-msgid "Language code (for example en-US) used when no provider has a title or plot in the source folder's language. A fallback value only fills an empty field and never replaces existing text. Set it to the folder's own language to turn the fallback off."
+msgid "Language code (for example en-US) used when no provider has a title or plot in the source folder's language. A fallback value only fills an empty field and never replaces existing text, except that changing this setting or the fallback order replaces values metamender filled from the old fallback, unless you edited them. Set it to the folder's own language to turn the fallback off."
 msgstr ""
 
 msgctxt "#32396"
