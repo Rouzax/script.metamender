@@ -4986,3 +4986,43 @@ class TestYearMismatchConfirmedByEpisodes:
 
         assert row["tvdb_id"] == "80767"
         mock_kodi.assert_not_called()
+
+
+class TestIdentitySurvivesIdWriteBack:
+    """A show keyed on "title (year)" gets an IMDb id written back to Kodi;
+    the next scan computes imdb:<id> and must keep the same tracker row, or
+    its clocks restart and its provenance is orphaned."""
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow_ids", return_value={})
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    @patch("resources.lib.engine.scan.resolve_id", return_value="99999")
+    def test_second_scan_keeps_the_tracker_row(
+        self, mock_resolve, mock_tmdb, mock_ids, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_tvshow_item(title="De Snorkels")
+        item["uniqueid"] = {"tvdb": "777"}
+        item["premiered"] = "1984-09-15"
+        mock_tmdb.return_value = _tmdb_tvshow_response(imdb_id="tt0086798")
+        tracker = _make_tracker(tmp_path)
+        fields = frozenset({"plot"})
+        assert compute_identity(item, TVSHOW) == "De Snorkels (1984)"
+
+        run_scan(TVSHOW, tracker, _make_source_config(), fields, "k",
+                 _make_settings(), items=[item])
+        written = [c.kwargs["uniqueid"] for c in mock_update.call_args_list
+                   if "uniqueid" in c.kwargs]
+        assert written == [{"tvdb": "777", "imdb": "tt0086798"}]
+
+        item["uniqueid"] = dict(written[0])
+        tracker.begin_cycle(resume_interrupted=False)
+        run_scan(TVSHOW, tracker, _make_source_config(), fields, "k",
+                 _make_settings(), items=[item])
+
+        rows = tracker._conn.execute(
+            "SELECT identity FROM items WHERE media_type = 'tvshow'"
+        ).fetchall()
+        fs = tracker.get_field_status("tvshow", "imdb:tt0086798", "plot")
+        tracker.close()
+        assert [r[0] for r in rows] == ["imdb:tt0086798"]
+        assert fs is not None and fs["fetch_count"] == 1

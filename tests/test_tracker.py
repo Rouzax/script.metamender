@@ -669,3 +669,70 @@ def test_reset_field_clock_records_source_votes_and_fallback(tmp_path):
     t.close()
     assert row["from_fallback"] == 0
     assert (inserted["from_fallback"], inserted["fallback_checks"]) == (1, 0)
+
+
+# =============================================================================
+# Tests: adopt_identity
+# =============================================================================
+
+
+def _row_count(db):
+    return db._conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
+
+
+def test_adopt_identity_renames_the_same_kodi_items_row(tmp_path):
+    # metamender wrote an IMDb id to a show keyed on "title (year)"; the
+    # next scan computes imdb:<id> for the same Kodi item.
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("tvshow", "De Snorkels (1984)", kodi_id=7, imdb_id="tt0086798")
+    db.record_field_fetch("tvshow", "De Snorkels (1984)", "plot", next_retry=None, source="tmdb")
+    db.commit()
+
+    assert db.adopt_identity("tvshow", "imdb:tt0086798", 7) == "De Snorkels (1984)"
+
+    assert db.get_item("tvshow", "De Snorkels (1984)") is None
+    assert db.get_item("tvshow", "imdb:tt0086798")["kodi_id"] == 7
+    assert db.get_field_status("tvshow", "imdb:tt0086798", "plot")["fetch_count"] == 1
+    assert _row_count(db) == 1
+    db.close()
+
+
+def test_adopt_identity_matches_tmdb_ids(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Foo (2001)", kodi_id=3, tmdb_id="170")
+    assert db.adopt_identity("movie", "tmdb:170", 3) == "Foo (2001)"
+    assert db.get_item("movie", "tmdb:170") is not None
+    db.close()
+
+
+def test_adopt_identity_noop_when_identity_exists(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "imdb:tt1", kodi_id=3, imdb_id="tt1")
+    db.upsert_item("movie", "Foo (2001)", kodi_id=3, imdb_id="tt1")
+    assert db.adopt_identity("movie", "imdb:tt1", 3) is None
+    assert db.get_item("movie", "Foo (2001)") is not None
+    db.close()
+
+
+def test_adopt_identity_needs_the_same_kodi_item(tmp_path):
+    # Another Kodi item that resolved to the same id keeps its own row.
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Foo (2001)", kodi_id=3, imdb_id="tt1")
+    assert db.adopt_identity("movie", "imdb:tt1", 4) is None
+    assert db.get_item("movie", "Foo (2001)") is not None
+    db.close()
+
+
+def test_adopt_identity_needs_the_matching_id(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Foo (2001)", kodi_id=3, imdb_id="tt2")
+    assert db.adopt_identity("movie", "imdb:tt1", 3) is None
+    db.close()
+
+
+def test_adopt_identity_ignores_identities_without_an_id(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("episode", "Show S01E01", kodi_id=3)
+    assert db.adopt_identity("episode", "Show S01E02", 3) is None
+    assert db.adopt_identity("movie", "Bar (1999)", 3) is None
+    db.close()
