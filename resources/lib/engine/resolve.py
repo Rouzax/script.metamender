@@ -113,9 +113,15 @@ def build_ratings(
     it is absent or still fingerprints to owned_slots[slot], the value
     metamender last wrote there. A slot that came from the NFO, or that the
     user edited, is never modified. default_source and its votes are None.
+    The exception is an NFO item with no ratings at all: nothing there says
+    which rating to show, so the default follows rating_pref, as without an
+    NFO, instead of leaving Kodi to pick one.
     """
     current = current_ratings or {}
     owned = owned_slots or {}
+    # Whether existing default flags stand: an NFO item's do, unless it has
+    # no ratings to hold one.
+    keep_defaults = nfo_managed and bool(current)
 
     # Collect in-range candidates honoring the preference's source filter
     use_tmdb, use_imdb = rating_sources(rating_pref)
@@ -147,14 +153,14 @@ def build_ratings(
         new_map[name] = {
             "rating": entry.get("rating"),
             "votes": int(entry.get("votes") or 0),
-            "default": bool(entry.get("default")) if nfo_managed else False,
+            "default": bool(entry.get("default")) if keep_defaults else False,
         }
     for name, (r, v) in candidates.items():
-        keep_default = nfo_managed and bool(current.get(name, {}).get("default"))
+        keep_default = keep_defaults and bool(current.get(name, {}).get("default"))
         new_map[name] = {"rating": r, "votes": v, "default": keep_default}
 
     default_source: str | None = None
-    if not nfo_managed:
+    if not keep_defaults:
         # Choose the default slot by preference, falling back to whichever exists
         order = [_IMDB_SLOT, tmdb_slot] if rating_pref in (PREFER_IMDB, IMDB_ONLY) \
             else [tmdb_slot, _IMDB_SLOT]

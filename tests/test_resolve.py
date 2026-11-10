@@ -136,6 +136,35 @@ def test_nfo_ratings_keep_default():
     assert set(fps) == {"imdb", "themoviedb"}
 
 
+def test_nfo_item_without_ratings_gets_the_preferred_default():
+    # Nothing in the NFO says which rating to show, so the preference does;
+    # otherwise Kodi picks one itself.
+    m, src, votes, _fps = build_ratings(
+        {"rating": 7.0, "votes": 20}, (8.0, 900), {}, PREFER_TMDB, nfo_managed=True,
+    )
+    assert m["themoviedb"]["default"] is True
+    assert m["imdb"]["default"] is False
+    assert (src, votes) == ("themoviedb", 20)
+
+    m, src, _votes, _fps = build_ratings(
+        {"rating": 7.0, "votes": 20}, (8.0, 900), None, PREFER_IMDB, nfo_managed=True,
+    )
+    assert m["imdb"]["default"] is True
+    assert src == "imdb"
+
+
+def test_nfo_item_default_set_by_metamender_is_kept_next_scan():
+    first, *_ = build_ratings(
+        {"rating": 7.0, "votes": 20}, (8.0, 900), {}, PREFER_TMDB, nfo_managed=True,
+    )
+    owned = {name: slot_fingerprint(entry) for name, entry in first.items()}
+    again = build_ratings(
+        {"rating": 7.0, "votes": 20}, (8.0, 900), first, PREFER_TMDB,
+        nfo_managed=True, owned_slots=owned,
+    )
+    assert again == (None, None, None, {})
+
+
 def test_nfo_ratings_update_owned_imdb_slot():
     imdb_old = {"rating": 7.0, "votes": 100, "default": False}
     current = {
