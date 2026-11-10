@@ -436,7 +436,7 @@ def tracker_fields(db: Path) -> dict[str, dict[str, Any]]:
     rows = conn.execute(
         "SELECT i.media_type, i.kodi_id, f.field, f.source, f.fetch_count,"
         " f.from_fallback, f.written_value, f.next_retry, f.fallback_checks,"
-        " f.settings_fp, i.identity FROM field_status f"
+        " f.settings_fp, i.identity, i.id AS item_id FROM field_status f"
         " JOIN items i ON i.id = f.item_id").fetchall()
     conn.close()
     return {f"{r['media_type'].lower()}:{r['kodi_id']}:{r['field']}": dict(r) for r in rows}

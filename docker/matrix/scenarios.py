@@ -271,10 +271,20 @@ def _by_identity(tracker: dict[str, dict[str, Any]]) -> dict[tuple[str, str, str
     return {(r["media_type"], r["identity"], r["field"]): r for r in tracker.values()}
 
 
+def _before(pre: State, post: State) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """The pre-scan rows under the post-scan keys. Rows are matched on the
+    tracker's row id, which survives metamender renaming an item's identity
+    (tracker.adopt_identity); a row the step dropped and the scan made again
+    has a new id and starts from nothing."""
+    by_id = {(r["item_id"], r["field"]): r for r in pre.tracker.values()}
+    return {(r["media_type"], r["identity"], r["field"]): by_id.get((r["item_id"], r["field"]), {})
+            for r in post.tracker.values()}
+
+
 def check_clock(pre: State, post: State) -> list[str]:
     decisions = logged_decisions(post.scan_log)
     found = []
-    old = _by_identity(pre.tracker)
+    old = _before(pre, post)
     for key, row in _by_identity(post.tracker).items():
         before = int(old.get(key, {}).get("fetch_count") or 0)
         delta = int(row["fetch_count"] or 0) - before
@@ -295,7 +305,7 @@ def check_decisions(pre: State, post: State, maturity: Any) -> list[str]:
     """The scan's logged decisions against metamender's own rules applied to
     the tracker before the scan."""
     today = date.today().isoformat()
-    old = _by_identity(pre.tracker)
+    old = _before(pre, post)
     kodi_ids = {(r["media_type"], r["identity"]): r["kodi_id"] for r in post.tracker.values()}
     found = []
     for (media_type, identity), (decisions, rebaseline) in logged_decisions(post.scan_log).items():
@@ -340,7 +350,7 @@ def writes(pre: State, post: State) -> list[str]:
 
 
 def fetched(pre: State, post: State) -> int:
-    old = _by_identity(pre.tracker)
+    old = _before(pre, post)
     return sum(int(r["fetch_count"] or 0) - int(old.get(k, {}).get("fetch_count") or 0)
                for k, r in _by_identity(post.tracker).items())
 
@@ -600,7 +610,7 @@ def outlier_steps() -> list[Step]:
         for key, fields in rig._diff(pre.snap, post.snap).items():
             if "/Planet Earth II/" in pre.snap[key]["file"]:
                 found.append(f"{rig._label(pre.snap[key])}: {sorted(fields)} written")
-        old = _by_identity(pre.tracker)
+        old = _before(pre, post)
         for k, row in _by_identity(post.tracker).items():
             if k[1].startswith("Planet Earth II") and \
                     row["fetch_count"] != old.get(k, {}).get("fetch_count"):
