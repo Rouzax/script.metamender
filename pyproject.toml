@@ -3,15 +3,17 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 
 [tool.ruff]
-# Kodi Omega ships Python 3.8. Pinned to match pyrightconfig.json so neither
-# tool proposes syntax the target interpreter cannot run.
-target-version = "py38"
+# Kodi 21 Omega runs Python 3.11 on the official builds, but Linux builds that
+# link the system Python can be older; the headless Omega Docker image used for
+# live tests runs 3.10. Pinned to match pyrightconfig.json so neither tool
+# proposes syntax that interpreter cannot run.
+target-version = "py310"
 
 [tool.ruff.lint]
-# UP (pyupgrade) is disabled rather than fixed: most of it rewrites typing
-# imports to 3.9+ builtin generics and X | Y unions, which break on the 3.8
-# floor above. The version-independent members (UP032 f-strings) are excluded
-# with them so the codebase keeps one .format() style throughout.
+# UP (pyupgrade) stays disabled: enabling it would rewrite every typing import
+# to builtin generics and X | Y unions in one sweep. Code moves to the modern
+# forms file by file as it is edited. The version-independent members (UP032
+# f-strings) are excluded with them.
 #
 # DTZ wants timezone-aware datetimes. Every call it flags is deliberate local
 # time: content age, refetch due dates and per-scan log filenames are all
