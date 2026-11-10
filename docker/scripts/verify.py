@@ -188,6 +188,8 @@ _CERT_CHECKS = [
     ("fsk", "Dark", "", 2017, "tvshow", "12"),
     ("bbfc", "Interstellar", "", 2014, "movie", "12"),
     ("bbfc", "Sherlock", "", 2010, "tvshow", "15"),
+    ("medieraadet", "Interstellar", "", 2014, "movie", "11"),
+    ("medieraadet", "The Hunt", "", 2020, "movie", "15"),
 ]
 
 
