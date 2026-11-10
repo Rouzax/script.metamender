@@ -83,7 +83,7 @@ from resources.lib.engine.maturity import (
     decide_field,
     fallback_recheck_due,
 )
-from resources.lib.engine.protect import fingerprint, may_write
+from resources.lib.engine.protect import fingerprint, is_blank, may_write
 from resources.lib.engine.resolve import build_ratings, rating_sources, slot_fingerprint
 from resources.lib.providers.imdb_ratings import lookup as imdb_rating_lookup
 from resources.lib.providers.languages import tmdb_language, tvdb_language
@@ -1429,6 +1429,23 @@ def _resolve_ratings(
     return False, new_ratings, source, votes, slot_fps
 
 
+def _blanked(item: dict[str, Any], field: str, fs: dict[str, Any]) -> bool:
+    """Kodi holds an empty or placeholder value where metamender last wrote
+    something else: a Kodi refresh or rescrape wiped the fill.
+
+    A FINAL field is otherwise never looked at again, so the gap would stay.
+    A field metamender never wrote (no provenance) is not "wiped", and one
+    whose recorded value is the blank itself (metamender cleared it, or a
+    refill found nothing) does not trigger again. Ratings are a slot map, not
+    one value, and Kodi's refresh rewrites them rather than blanking them.
+    """
+    if field in _RATING_FIELDS:
+        return False
+    written = fs.get("written_value")
+    current = _kodi_form(item.get(field))
+    return written is not None and is_blank(current) and fingerprint(current) != written
+
+
 def _reopened_fallbacks(
     item: dict[str, Any],
     fs_map: dict[str, dict[str, Any]],
@@ -1863,6 +1880,8 @@ def run_scan(
         # Fields due only because a fallback value holds back FINAL: their
         # sample is a monthly recheck and spends one of FALLBACK_RECHECKS.
         rechecks: set[str] = set()
+        # FINAL fields fetched once more because Kodi lost metamender's value.
+        refills: set[str] = set()
         for f in candidates:
             if f in rebaseline:
                 # Update now, or changed settings: due regardless of the
@@ -1886,6 +1905,9 @@ def run_scan(
             )
             if base == FINAL and decisions[f] == FETCH_NOW:
                 rechecks.add(f)
+            elif decisions[f] == FINAL and _blanked(item, f, fs):
+                decisions[f] = FETCH_NOW
+                refills.add(f)
 
         due = any(d == FETCH_NOW for d in decisions.values())
 
@@ -1944,6 +1966,7 @@ def run_scan(
             tvdb_id=ids.tvdb,
             decisions=decisions,
             rebaseline=sorted(rebaseline),
+            refills=sorted(refills),
         )
 
         if breaker.all_disabled(needed):
@@ -2023,6 +2046,10 @@ def run_scan(
             f: fingerprint(fields_to_write[f])
             for f in written if f in fields_to_write
         }
+        # A refill the provider could not fill records the blank as the
+        # field's value, so the same blank does not trigger it again.
+        for f in refills - written:
+            provenance[f] = fingerprint(_kodi_form(item.get(f)))
         if slot_fps and _RATING_FIELDS & written:
             merged = dict(owned_slots)
             merged.update(slot_fps)

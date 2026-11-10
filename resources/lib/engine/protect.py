@@ -45,14 +45,16 @@ def fingerprint(value: Any) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
 
-def _is_empty(value: Any) -> bool:
+def is_blank(value: Any) -> bool:
+    """Empty, zero, a placeholder text, or a container of only such values:
+    a value Kodi holds that says nothing."""
     if value is None:
         return True
     if isinstance(value, str):
         return is_empty_text(value)
     if isinstance(value, (list, tuple, dict)):
         items = value.values() if isinstance(value, dict) else value
-        return all(_is_empty(v) for v in items)
+        return all(is_blank(v) for v in items)
     if isinstance(value, bool):
         return False
     if isinstance(value, (int, float)):
@@ -72,6 +74,6 @@ def may_write(protected: bool, current: Any, written_value: str | None) -> bool:
     """
     if not protected:
         return True
-    if _is_empty(current):
+    if is_blank(current):
         return True
     return written_value is not None and fingerprint(current) == written_value

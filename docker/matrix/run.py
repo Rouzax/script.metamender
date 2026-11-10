@@ -193,7 +193,7 @@ def _engine_rules() -> tuple[Any, Any, Any]:
     sys.modules.setdefault("xbmcvfs", vfs)
     sys.path.insert(0, str(REPO))
     from resources.lib.data.nfo import NFO, nfo_state
-    from resources.lib.engine.protect import _is_empty
+    from resources.lib.engine.protect import is_blank
     from resources.lib.engine.textrules import is_placeholder_title
 
     def is_nfo(media_type: str, kodi_path: str) -> bool:
@@ -205,7 +205,7 @@ def _engine_rules() -> tuple[Any, Any, Any]:
         if field == "votes" and str(value).strip() in ("", "0"):
             # Kodi reports votes as a string, "0" when there are none.
             return True
-        return bool(_is_empty(value))
+        return bool(is_blank(value))
 
     return is_nfo, blank, is_placeholder_title
 

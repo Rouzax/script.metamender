@@ -256,14 +256,17 @@ def scan(mode: str) -> str:
 
 _PROCESSING = re.compile(
     r"event=scan\.processing, title=.*?, identity=(.*?), media_type=(\w+), .*?"
-    r"decisions=(\{.*?\}), rebaseline=(\[.*?\])")
+    r"decisions=(\{.*?\}), rebaseline=(\[.*?\]), refills=(\[.*?\])")
 
 
 def logged_decisions(scan_log: str) -> dict[tuple[str, str], tuple[dict[str, str], list[str]]]:
     out = {}
     for m in _PROCESSING.finditer(scan_log):
+        # Re-baselined fields and refills of a value Kodi lost are due by
+        # rules outside decide_field, so the check leaves them out.
         out[(m.group(2), m.group(1))] = (ast.literal_eval(m.group(3)),
-                                        ast.literal_eval(m.group(4)))
+                                        ast.literal_eval(m.group(4))
+                                        + ast.literal_eval(m.group(5)))
     return out
 
 

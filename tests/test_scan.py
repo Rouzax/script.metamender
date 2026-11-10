@@ -3537,6 +3537,7 @@ class TestNfoProtection:
             MOVIE, tracker, _make_source_config(), fields,
             "k", _make_settings(), items=[final],
         )
+        final["plot"] = "Great movie"  # what Kodi now holds
         tracker.start_new_cycle()
         with patch("resources.lib.engine.scan.nfo_state", return_value=NO_NFO) as mock_nfo:
             run_scan(
@@ -5124,6 +5125,7 @@ class TestIdentitySurvivesIdWriteBack:
         assert written == [{"tvdb": "777", "imdb": "tt0086798"}]
 
         item["uniqueid"] = dict(written[0])
+        item["plot"] = "Great show"  # what Kodi now holds
         tracker.begin_cycle(resume_interrupted=False)
         run_scan(TVSHOW, tracker, _make_source_config(), fields, "k",
                  _make_settings(), items=[item])
@@ -5403,3 +5405,85 @@ def test_empty_source_fallback_turns_off_the_default(
 
     assert _written(mock_update, "plot") is None
     assert [c.args[2] for c in mock_fetch.call_args_list] == ["nl-NL"]
+
+
+class TestRefillBlankedFinal:
+    """A FINAL field Kodi now holds blank, although metamender wrote a value
+    there (a Kodi refresh or rescrape wiped it), gets one fetch and is FINAL
+    again. A field that was always blank stays final."""
+
+    @staticmethod
+    def _seed(tracker, written, field="plot"):
+        from resources.lib.engine.protect import fingerprint
+
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, field, next_retry="2020-01-01", source="tmdb",
+            written_value=None if written is None else fingerprint(written),
+            settings_fp=_fp(field),
+        )
+        tracker.commit()
+
+    def _scan(self, tracker):
+        return run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_old_movie(plot="")],
+        )
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_blanked_value_is_refilled_once(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="The plot")
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker, "The plot")
+        self._scan(tracker)
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "The plot"
+        assert row["fetch_count"] == 2
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_no_answer_does_not_loop(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="")
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker, "The plot")
+        self._scan(tracker)
+        tracker.begin_cycle(resume_interrupted=False)
+        self._scan(tracker)
+        row = _plot_row(tracker)
+        tracker.close()
+
+        assert mock_fetch.call_count == 1
+        assert row["fetch_count"] == 2
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_always_blank_field_stays_final(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker, None)
+        self._scan(tracker)
+        tracker.close()
+
+        mock_fetch.assert_not_called()
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_value_metamender_cleared_stays_final(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        # A value metamender cleared itself (a removed fallback) is blank by
+        # design, not wiped.
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker, "")
+        self._scan(tracker)
+        tracker.close()
+
+        mock_fetch.assert_not_called()
