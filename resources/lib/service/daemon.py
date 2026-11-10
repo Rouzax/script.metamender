@@ -142,7 +142,7 @@ def _load_settings() -> dict[str, Any]:
     return {
         "tmdb_api_key": get_setting("tmdb_api_key"),
         "rating_source": get_int_setting("rating_source", 0),
-        "text_source_order": get_int_setting("text_source_order", 0),
+        "text_source_order": get_int_setting("text_source_order", 2),
         "fallback_order": get_int_setting("fallback_order", 0),
         "enabled_fields": frozenset(fields),
         "stale_threshold_days": get_int_setting("stale_threshold_days", 365),

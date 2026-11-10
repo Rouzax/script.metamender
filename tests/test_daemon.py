@@ -81,7 +81,7 @@ def test_load_settings_has_new_keys_not_old(kodi_stubs, settings_mock):
     raw refetch_schedule string; the replaced and retired keys are gone."""
     s = daemon._load_settings()
 
-    assert s["text_source_order"] == 0
+    assert s["text_source_order"] == 2  # follow the scraper
     assert s["fallback_order"] == 0
     assert isinstance(s["refetch_schedule"], str)
 

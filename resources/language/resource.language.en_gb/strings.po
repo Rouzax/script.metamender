@@ -471,7 +471,7 @@ msgid "Text source order"
 msgstr ""
 
 msgctxt "#32391"
-msgid "Which provider to ask first for TV show plots and episode titles and plots in the source folder's language. If the first has nothing, the second is asked. Movies always use TMDB."
+msgid "Which provider to ask first for TV show plots and episode titles and plots in the source folder's language. If the first has nothing, the second is asked. \"Follow the scraper\" asks first the provider whose Kodi scraper added the show or episode, so its wording stays; TMDB first when that cannot be told. Movies always use TMDB."
 msgstr ""
 
 msgctxt "#32392"
@@ -480,6 +480,10 @@ msgstr ""
 
 msgctxt "#32393"
 msgid "TheTVDB, then TMDB"
+msgstr ""
+
+msgctxt "#32398"
+msgid "Follow the scraper"
 msgstr ""
 
 msgctxt "#32396"

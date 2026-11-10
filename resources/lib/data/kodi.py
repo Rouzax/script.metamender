@@ -36,7 +36,7 @@ _EXTRA_PROPERTIES = {
         "studio", "country", "trailer", "runtime",
     ],
     "tvshow": [
-        "mpaa", "genre",
+        "mpaa", "genre", "episodeguide",
     ],
     "episode": [
         "tvshowid", "showtitle", "season", "episode",

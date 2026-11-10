@@ -25,9 +25,10 @@
                     <control type="list" format="string" />
                 </setting>
                 <setting id="text_source_order" type="integer" label="32390" help="32391">
-                    <default>0</default>
+                    <default>2</default>
                     <constraints>
                         <options>
+                            <option label="32398">2</option>
                             <option label="32392">0</option>
                             <option label="32393">1</option>
                         </options>

@@ -144,9 +144,14 @@ _LANGUAGE_FIELDS = frozenset({"title", "plot", "tagline", "genre"})
 # Key holding each chained field in a TVDB series record.
 _TVDB_SERIES_KEYS = {"title": "name", "plot": "overview"}
 
+_EPISODEGUIDE_TAG = re.compile(r"</?episodeguide>")
+
 # text_source_order / fallback_order setting values (settings.xml).
 TEXT_TMDB_FIRST = 0
 TEXT_TVDB_FIRST = 1
+# Per item, the provider whose scraper made it first (_scraper_provider);
+# TMDB first when that cannot be told.
+TEXT_FOLLOW_SCRAPER = 2
 FALLBACK_TVDB_FIRST = 0
 FALLBACK_TMDB_FIRST = 1
 
@@ -175,7 +180,7 @@ def settings_fingerprint(
             "fallback_language": fallback_language.strip(),
         }
         if media_type != "movie":
-            inputs["text_source_order"] = settings.get("text_source_order", TEXT_TMDB_FIRST)
+            inputs["text_source_order"] = settings.get("text_source_order", TEXT_FOLLOW_SCRAPER)
             inputs["fallback_order"] = settings.get("fallback_order", FALLBACK_TVDB_FIRST)
     else:
         inputs = {"folder_language": folder_language}
@@ -1246,6 +1251,10 @@ class _TextSources:
         self._fallback_lang = fallback_lang
         self._tmdb_fallback: Any = _UNFETCHED
 
+    @property
+    def item(self) -> dict[str, Any]:
+        return self._item
+
     def tmdb(self, field: str, fallback: bool) -> Any:
         if fallback:
             if self._tmdb_fallback is _UNFETCHED:
@@ -1326,6 +1335,39 @@ class _TextSources:
         return None
 
 
+def _scraper_provider(item: dict[str, Any], media_type: MediaType) -> str | None:
+    """"tmdb" or "tvdb": the provider whose Kodi scraper made the item, or None
+    when nothing tells.
+
+    Kodi's JSON-RPC does not say which uniqueid is the default, so the
+    scraper's traces decide. A show's episodeguide holds its scraper's ids
+    (the TMDB scraper lists "tmdb"); failing that, the scraper marks its own
+    rating slot default. An episode carries the ids its scraper set: the TMDB
+    scraper always sets "tmdb", TheTVDB's never does.
+    """
+    if media_type.name == "episode":
+        uid = item.get("uniqueid") or {}
+        if uid.get("tmdb"):
+            return "tmdb"
+        return "tvdb" if uid.get("tvdb") else None
+    guide = _EPISODEGUIDE_TAG.sub("", str(item.get("episodeguide") or "")).strip()
+    try:
+        guide_ids = json.loads(guide) if guide else {}
+    except ValueError:
+        guide_ids = {}
+    if isinstance(guide_ids, dict):
+        for provider in ("tmdb", "tvdb"):
+            if guide_ids.get(provider):
+                return provider
+    for slot, entry in (item.get("ratings") or {}).items():
+        if isinstance(entry, dict) and entry.get("default"):
+            if slot in ("tmdb", "themoviedb"):
+                return "tmdb"
+            if slot == "tvdb":
+                return "tvdb"
+    return None
+
+
 def _fallback_applies(fallback_lang: str, folder_lang: str) -> bool:
     """The fallback steps run only when the folder has a fallback language and
     it is not the folder's own language."""
@@ -1357,7 +1399,9 @@ def _text_chain(
     movie = ctx.media_type.name == "movie"
     if movie:
         specs = [tmdb_step(False)]
-    elif ctx.text_order == TEXT_TVDB_FIRST:
+    elif ctx.text_order == TEXT_TVDB_FIRST or (
+            ctx.text_order == TEXT_FOLLOW_SCRAPER
+            and _scraper_provider(sources.item, ctx.media_type) == "tvdb"):
         specs = [tvdb_step(folder_lang, False), tmdb_step(False)]
     else:
         specs = [tmdb_step(False), tvdb_step(folder_lang, False)]
@@ -1750,7 +1794,7 @@ def run_scan(
         counts={"unknown_ids_accepted": 0, "episodes_found_by_tvdb": 0},
         schedule=schedule,
         rating_pref=settings.get("rating_source", 0),
-        text_order=settings.get("text_source_order", TEXT_TMDB_FIRST),
+        text_order=settings.get("text_source_order", TEXT_FOLLOW_SCRAPER),
         fallback_order=settings.get("fallback_order", FALLBACK_TVDB_FIRST),
         default_fallback=str(source_config.get("fallback_language") or ""),
         imdb_ready=bool(settings.get("imdb_ready", False)),

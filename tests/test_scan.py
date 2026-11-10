@@ -2952,7 +2952,7 @@ class TestUnknownIds:
         run_scan(
             EPISODE, tracker, _make_source_config(),
             frozenset({"title", "plot", "runtime"}),
-            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+            "k", dict(_make_settings(), text_source_order=0), items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
         row = _row(tracker, EPISODE, item)
@@ -3040,7 +3040,7 @@ class TestIdResolutionOrder:
 
         run_scan(
             EPISODE, tracker, _nl_source_config(), frozenset({"title", "runtime"}),
-            "k", _make_settings(), items=[item], show_id_map={},
+            "k", dict(_make_settings(), text_source_order=0), items=[item], show_id_map={},
         )
         fs_map = _fs(tracker, EPISODE, item)
         tracker.close()
@@ -4200,7 +4200,7 @@ class TestSettingsFingerprint:
     def test_missing_settings_use_scan_defaults(self):
         from resources.lib.engine.scan import settings_fingerprint as sfp
 
-        explicit = {"rating_source": 0, "text_source_order": 0, "fallback_order": 0}
+        explicit = {"rating_source": 0, "text_source_order": 2, "fallback_order": 0}
         for field in ("rating", "plot", "genre"):
             assert sfp(field, {}, "nl-NL", "episode") == sfp(field, explicit, "nl-NL", "episode")
 
@@ -5501,3 +5501,75 @@ class TestRefillBlankedFinal:
         tracker.close()
 
         mock_fetch.assert_not_called()
+
+
+class TestFollowTheScraper:
+    """text_source_order "follow the scraper" asks first the provider whose
+    scraper made the item, so a TheTVDB library keeps TheTVDB's wording."""
+
+    def test_scraper_provider_signals(self):
+        from resources.lib.engine.scan import _scraper_provider
+
+        show = _make_tvshow_item()
+        show["episodeguide"] = '<episodeguide>{"tmdb": "1570", "tvdb": "72668"}</episodeguide>'
+        assert _scraper_provider(show, TVSHOW) == "tmdb"
+        show["episodeguide"] = '<episodeguide>{"tvdb": "72668"}</episodeguide>'
+        assert _scraper_provider(show, TVSHOW) == "tvdb"
+        show["episodeguide"] = ""
+        show["ratings"] = {"tvdb": {"rating": 7.0, "votes": 3, "default": True}}
+        assert _scraper_provider(show, TVSHOW) == "tvdb"
+        show["ratings"] = {"tmdb": {"rating": 7.0, "votes": 3, "default": True}}
+        assert _scraper_provider(show, TVSHOW) == "tmdb"
+        show["ratings"] = {}
+        show["episodeguide"] = "not json"
+        assert _scraper_provider(show, TVSHOW) is None
+
+        ep = _make_episode_item()
+        ep["uniqueid"] = {"tmdb": "1", "tvdb": "2", "imdb": "tt1"}
+        assert _scraper_provider(ep, EPISODE) == "tmdb"
+        ep["uniqueid"] = {"tvdb": "2", "imdb": "tt1"}
+        assert _scraper_provider(ep, EPISODE) == "tvdb"
+        ep["uniqueid"] = {"unknown": "2"}
+        assert _scraper_provider(ep, EPISODE) is None
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    def test_tvdb_scraped_show_asks_tvdb_first_by_default(
+        self, mock_tmdb, mock_tvdb, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_tvshow_item()
+        item["uniqueid"] = {"tmdb": "99999", "tvdb": "777"}
+        item["episodeguide"] = '<episodeguide>{"tvdb": "777"}</episodeguide>'
+        mock_tmdb.return_value = _tmdb_tvshow_response(plot="TMDB plot")
+        mock_tvdb.return_value = {"name": "Show", "overview": "TVDB plot", "names": []}
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[item],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "TVDB plot"
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tvdb_fetch_series")
+    @patch("resources.lib.engine.scan.tmdb_fetch_tvshow")
+    def test_fixed_order_overrides_the_scraper(
+        self, mock_tmdb, mock_tvdb, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_tvshow_item()
+        item["uniqueid"] = {"tmdb": "99999", "tvdb": "777"}
+        item["episodeguide"] = '<episodeguide>{"tvdb": "777"}</episodeguide>'
+        mock_tmdb.return_value = _tmdb_tvshow_response(plot="TMDB plot")
+        settings = _make_settings()
+        settings["text_source_order"] = 0
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", settings, items=[item],
+        )
+        tracker.close()
+
+        assert _written(mock_update, "plot") == "TMDB plot"
+        mock_tvdb.assert_not_called()
