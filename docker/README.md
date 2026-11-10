@@ -173,6 +173,7 @@ after each, to see behaviour over time and under changing data:
 
 ```bash
 python3 docker/matrix/scenarios.py --out /path/to/results TIME CHANGES OUTLIERS
+python3 docker/matrix/scenarios.py --out /path/to/results OUTAGE   # only the provider steps
 ```
 
 - `TIME`: the tracker's dates are moved back in jumps (8, 31, 91, 401 days,
@@ -184,7 +185,8 @@ python3 docker/matrix/scenarios.py --out /path/to/results TIME CHANGES OUTLIERS
   episode is removed and later pruned, a movie gets another movie's id.
 - `OUTLIERS`: odd ids, text and dates; a show folder that disappears; the
   providers blocked in the container's hosts file (the step checks they are
-  really unreachable); an invalid TMDB key; Kodi killed during a full rescan;
+  really unreachable, and scans through the add-on's manual scan because a
+  container restart rewrites the hosts file); an invalid TMDB key; Kodi killed during a full rescan;
   a show added while the service runs (waits for the library-event scan).
 
 Every step is checked: a field's fetch count rises by at most one and only

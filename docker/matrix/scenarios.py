@@ -71,7 +71,7 @@ Expect = Callable[[Ctx, State, State, State], list[str]]
 class Step:
     label: str
     act: Action | None = None
-    scan: str = "restart"  # restart | apikey | killed | event
+    scan: str = "restart"  # restart | manual | apikey | killed | event
     allow: tuple[str, ...] = ()
     expect: Expect | None = None
 
@@ -234,6 +234,16 @@ def scan(mode: str) -> str:
         rig.sh(*rig.COMPOSE, "up", "-d")
         rig.wait_ready()
         return rig.run_service_scan()
+    if mode == "manual":
+        # The add-on's own manual scan, without a restart: Docker rewrites
+        # /etc/hosts when the container restarts, which would lift a block.
+        before = _count(rig.kodi_log(), "event=manual.")
+        rig.rpc("Addons.ExecuteAddon", {"addonid": rig.ADDON_ID})
+        rig.wait_until(lambda: any(e in rig.kodi_log() for e in (
+            "event=manual.complete", "event=manual.apikey", "event=manual.error"))
+            and _count(rig.kodi_log(), "event=manual.") > before + 1,
+            1800, "manual scan", step=5)
+        return rig.kodi_log()
     if mode == "event":
         before = _count(rig.kodi_log(), "event=service.scan_complete")
         rig.wait_until(lambda: _count(rig.kodi_log(), "event=service.scan_complete") > before,
@@ -620,7 +630,7 @@ def outlier_steps() -> list[Step]:
              both(forget_show, unlink(True), shift(8)), expect=unreachable_untouched),
         Step("the show folder is back", unlink(False)),
         Step("providers unreachable, 8 days later",
-             both(block_providers(True), forget_some), allow=breaker,
+             both(block_providers(True), forget_some), scan="manual", allow=breaker,
              expect=transient_seen),
         Step("providers back", block_providers(False)),
         Step("invalid TMDB key", both(api_key(False), forget_some),
@@ -641,6 +651,8 @@ SCENARIOS: dict[str, tuple[str, str, Callable[[Ctx, Any], None] | None, Callable
     "TIME": ("K1", "M2", None, time_steps),
     "CHANGES": ("K1", "M1", changes_setup, changes_steps),
     "OUTLIERS": ("K1", "M1", outlier_setup, outlier_steps),
+    "OUTAGE": ("K1", "M1", outlier_setup,
+               lambda: [s for s in outlier_steps() if s.label.startswith("providers")]),
 }
 
 
