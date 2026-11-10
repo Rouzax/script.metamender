@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import List, Optional
 
 # "and" in the languages of the library's sources. Unified rather than
 # dropped, so "Tom en Jerry" equals "Tom & Jerry" but not "Tom Jerry".
@@ -55,7 +54,7 @@ def normalize_title(text: str) -> str:
     text = "".join(c for c in decomposed if not unicodedata.combining(c))
     text = text.replace("&", " {} ".format(_AND))
     text = _APOSTROPHES.sub("", text)
-    words = []  # type: List[str]
+    words: list[str] = []
     for word in _NON_WORD.sub(" ", text).split():
         if word in _ARTICLES:
             continue
@@ -63,12 +62,12 @@ def normalize_title(text: str) -> str:
     return " ".join(words)
 
 
-def _title_year(text: str) -> Optional[int]:
+def _title_year(text: str) -> int | None:
     match = _TRAILING_YEAR.search(text or "")
     return int(match.group(1)) if match else None
 
 
-def _years_agree(a: Optional[int], b: Optional[int]) -> bool:
+def _years_agree(a: int | None, b: int | None) -> bool:
     return a is None or b is None or abs(a - b) <= _YEAR_TOLERANCE
 
 
@@ -78,10 +77,10 @@ YEAR_MISMATCH = "year_mismatch"
 
 def show_mismatch(
     kodi_title: str,
-    candidate_names: List[str],
-    kodi_year: Optional[int] = None,
-    candidate_year: Optional[int] = None,
-) -> Optional[str]:
+    candidate_names: list[str],
+    kodi_year: int | None = None,
+    candidate_year: int | None = None,
+) -> str | None:
     """Why the Kodi title does not name the candidate show, or None when it
     does.
 
@@ -89,8 +88,8 @@ def show_mismatch(
     normalization and the years agree where both sides have one. A year in
     the title wins over the passed year. YEAR_MISMATCH means a name matched
     but no matching name agreed on the year; NAME_MISMATCH means no name
-    matched (an empty normalized title never does). The caller may confirm a
-    year mismatch by other evidence; a name mismatch is final.
+    matched (an empty normalized title never does). The caller may confirm
+    the id by other evidence either way.
     """
     wanted = normalize_title(kodi_title)
     if not wanted:
@@ -108,9 +107,9 @@ def show_mismatch(
 
 def show_matches(
     kodi_title: str,
-    candidate_names: List[str],
-    kodi_year: Optional[int] = None,
-    candidate_year: Optional[int] = None,
+    candidate_names: list[str],
+    kodi_year: int | None = None,
+    candidate_year: int | None = None,
 ) -> bool:
     """True when show_mismatch finds no reason the title does not match."""
     return show_mismatch(kodi_title, candidate_names, kodi_year, candidate_year) is None

@@ -74,7 +74,7 @@ from resources.lib.data.sources import kodi_ui_language, match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome, Step, run_chain
-from resources.lib.engine.idverify import YEAR_MISMATCH, show_mismatch
+from resources.lib.engine.idverify import show_mismatch
 from resources.lib.engine.maturity import (
     FETCH_NOW,
     FINAL,
@@ -775,7 +775,7 @@ def _unknown_verdict(
         )
 
 
-# A show id whose names match but whose year does not is accepted when at
+# A show id whose names or year do not match the Kodi show is accepted when at
 # least this many of the show's untyped episode ids, and a majority of them,
 # are in that TVDB series' episode list. TVDB episode ids are unique across
 # series, so a remake or namesake cannot confirm itself this way, and one
@@ -788,8 +788,10 @@ def _verify_unknown_show(
     unknown_id: str, folder_lang: str,
 ) -> None:
     """Accept the show's unknown id when the TVDB series it names carries the
-    Kodi title among its names, translations or aliases, and the years agree
-    or the show's own episode ids confirm it (_confirmed_by_episodes)."""
+    Kodi title among its names, translations or aliases and the years agree,
+    or else when the show's own episode ids confirm it (_confirmed_by_episodes):
+    a title can differ from every name TVDB knows ("Alfred Jodocus Kwak" for
+    "Alfred J. Kwak"), while the episode ids are TVDB's own."""
     series = _tvdb_cached(
         ctx, "series", unknown_id, _verification_lang(ctx, folder_lang),
         tvdb_fetch_series, identity,
@@ -807,14 +809,13 @@ def _verify_unknown_show(
     if reason is None:
         _unknown_verdict(ctx, ids, identity, unknown_id, True, "name_match")
         return
-    if reason == YEAR_MISMATCH:
-        confirmed = _confirmed_by_episodes(ctx, item, identity, unknown_id, folder_lang)
-        if confirmed is TRANSIENT:
-            _unknown_verdict(ctx, ids, identity, unknown_id, TRANSIENT, "")
-            return
-        if confirmed:
-            _unknown_verdict(ctx, ids, identity, unknown_id, True, "accepted_by_episodes")
-            return
+    confirmed = _confirmed_by_episodes(ctx, item, identity, unknown_id, folder_lang)
+    if confirmed is TRANSIENT:
+        _unknown_verdict(ctx, ids, identity, unknown_id, TRANSIENT, "")
+        return
+    if confirmed:
+        _unknown_verdict(ctx, ids, identity, unknown_id, True, "accepted_by_episodes")
+        return
     _unknown_verdict(ctx, ids, identity, unknown_id, False, reason)
 
 
