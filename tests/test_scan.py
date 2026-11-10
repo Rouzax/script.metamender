@@ -1157,6 +1157,36 @@ class TestRunScanApiKeyError:
         # The pass stops at the first item (second movie not attempted).
         assert mock_fetch.call_count == 1
 
+    @patch("resources.lib.engine.scan.log")
+    @patch("resources.lib.engine.scan.tmdb_fetch_season")
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_api_key_error_left_to_the_caller_to_log(
+        self, mock_movie, mock_season, mock_log, tmp_path, kodi_stubs
+    ):
+        # The caller that stops the scan logs the invalid key once; a scan
+        # line as well would report the same failure twice.
+        from resources.lib.utils import ApiKeyError
+
+        mock_movie.side_effect = ApiKeyError("tmdb")
+        mock_season.side_effect = ApiKeyError("tmdb")
+        cases = (
+            (MOVIE, [_make_movie_item()], {}),
+            (EPISODE, [_make_episode_item()], {"show_id_map": {10: "55555"}}),
+        )
+        for media_type, items, extra in cases:
+            (tmp_path / media_type.name).mkdir()
+            tracker = _make_tracker(tmp_path / media_type.name)
+            with pytest.raises(ApiKeyError):
+                run_scan(
+                    media_type, tracker, _make_source_config(),
+                    frozenset({"plot"}), "bad_key", _make_settings(),
+                    items=items, **extra,
+                )
+            tracker.close()
+        assert mock_season.called
+        events = [c.kwargs.get("event") for c in mock_log.method_calls]
+        assert "scan.apikey" not in events
+
 
 class TestRunScanMultipleItems:
     @patch("resources.lib.engine.scan.get_all_items")

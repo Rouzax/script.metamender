@@ -31,7 +31,6 @@ Logging:
         - scan.updated (INFO): Item metadata written to Kodi
         - scan.breaker (WARNING): A provider tripped, or every provider the
           enabled fields need is down so the pass stops (scope="all")
-        - scan.apikey (ERROR): TMDB rejected the API key (terminal)
         - scan.tvdb_auth (ERROR): TVDB rejected the add-on's credentials;
           TVDB is disabled for the cycle, the scan continues
         - scan.imdb_lookup_failed (ERROR): The IMDb ratings store raised
@@ -553,10 +552,7 @@ def _call_provider(
                 event="scan.error", provider=provider, identity=identity,
             )
             return TRANSIENT
-        log.exception(
-            "Provider API key invalid",
-            event="scan.apikey", provider=provider, identity=identity,
-        )
+        # Terminal: the caller that stops the scan logs it, once.
         raise
     except TransientProviderError:
         if best_effort:
@@ -1140,12 +1136,6 @@ def _fetch_episode_tmdb(
         if is_cache_miss:
             ctx.pacer.arm()
         ctx.breaker.record_success("tmdb")
-    except ApiKeyError:
-        log.exception(
-            "Provider API key invalid",
-            event="scan.apikey", provider="tmdb", identity=identity,
-        )
-        raise
     except TransientProviderError:
         tmdb_data = TRANSIENT
         if ctx.breaker.record_failure("tmdb"):

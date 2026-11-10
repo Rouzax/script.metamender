@@ -12,6 +12,8 @@ Logging:
         - service.scan_trigger (INFO): Scan triggered (scheduled or library event)
         - service.scan_complete (INFO): Scan finished with summary
         - service.scan_error (ERROR): Scan failed
+        - service.scan_apikey (ERROR): A provider rejected the API key; the
+          scan stops and backs off
         - service.skip_playback (DEBUG): Scan skipped because video is playing
         - service.library_scan_finished (INFO): Library scan event received
         - service.orphans_pruned (INFO/DEBUG): Orphan prune result (INFO when >0)
@@ -478,16 +480,17 @@ def run() -> None:
                                 time.time() + SCAN_FAILURE_BACKOFF_SEC
                             )
                             continue
-                        except ApiKeyError:
+                        except ApiKeyError as exc:
                             # A provider rejected the API key. This is terminal
                             # for the cycle: notify the user, do NOT advance the
                             # watermark or clear a library-event request, and back
                             # off so we do not re-attempt every loop while the key
-                            # stays invalid.
-                            log.warning(
+                            # stays invalid. The scan leaves the logging to here.
+                            log.exception(
                                 "Scan stopped: invalid API key",
                                 event="service.scan_apikey",
                                 reason=reason,
+                                provider=exc.provider,
                             )
                             notify(lang(32341))  # Invalid TMDB API key
                             next_retry_after = (
