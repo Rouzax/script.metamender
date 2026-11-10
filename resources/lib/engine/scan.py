@@ -1572,6 +1572,43 @@ def _needed_providers(media_type: MediaType, candidates: list[str]) -> list[str]
     return needed
 
 
+def _tracker_identity(
+    tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: Any,
+) -> str:
+    """The tracker key for this Kodi item: compute_identity's, unless another
+    Kodi item in the library holds that row.
+
+    Two items can compute one identity, such as two files of a movie that
+    both carry its tmdb id. Sharing a row would let the first mark it
+    processed for the cycle and the second never be scanned, so the item
+    that does not hold the row gets ``<identity>|<file>``, and keeps it.
+    The holder is the item whose Kodi id the row records. Whether that item
+    still exists is asked from Kodi, and only when the ids differ: after a
+    file is replaced or the library rebuilt, the recorded id is gone or
+    names another item, and this item takes the row over.
+    """
+    identity = compute_identity(item, media_type)
+    own = "{}|{}".format(identity, item.get("file", ""))
+    if tracker.get_item(media_type.name, own) is not None:
+        return own
+    # An id written back to Kodi (_enrich_imdb_id) changes the identity the
+    # item computes; keep its tracker row under the new one.
+    tracker.adopt_identity(media_type.name, identity, kodi_id)
+    row = tracker.get_item(media_type.name, identity)
+    holder = row.get("kodi_id") if row else None
+    if holder is None or holder == kodi_id:
+        return identity
+    other = get_item_by_id(media_type, holder)
+    if other and compute_identity(other, media_type) == identity:
+        log.debug(
+            "Duplicate identity, item tracked under its file",
+            event="scan.duplicate_identity", identity=identity,
+            kodi_id=kodi_id, holder=holder,
+        )
+        return own
+    return identity
+
+
 def _new_items(tracker: TrackerDB, media_type: MediaType) -> list[dict[str, Any]]:
     """The library's items whose Kodi id the tracker does not know yet, with
     full details. An id listed but gone by the details call is skipped."""
@@ -1720,12 +1757,9 @@ def run_scan(
         if not reset:
             _yield_to_playback(ctx, monitor, stats["processed"])
 
-        identity = compute_identity(item, media_type)
         title = _item_title(item, media_type)
         kodi_id = item.get(media_type.kodi_id_field, 0)
-        # An id written back to Kodi (_enrich_imdb_id) changes the identity
-        # the item computes; keep its tracker row under the new one.
-        tracker.adopt_identity(media_type.name, identity, kodi_id)
+        identity = _tracker_identity(tracker, media_type, item, kodi_id)
 
         # Resume: skip items already processed in this cycle. The reset path
         # (Update now) bypasses this so a just-scanned item can still be

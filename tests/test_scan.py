@@ -5059,3 +5059,117 @@ class TestNewOnlyScan:
         assert sorted(c.args[1] for c in mock_by_id.call_args_list) == [2, 3]
         assert stats["processed"] == 1
         assert [c.args[0] for c in mock_tmdb.call_args_list] == ["22"]
+
+
+class TestDuplicateIdentities:
+    """Two Kodi items that compute the same identity (two files of one movie,
+    each with tmdb 170) need their own tracker rows: with one shared row the
+    second is skipped as already processed in this cycle."""
+
+    @staticmethod
+    def _pair():
+        a = _make_movie_item(title="A Monster in Paris", tmdb_id="170", movie_id=5)
+        a["file"] = "smb://server/movies/nl/monster.mkv"
+        b = _make_movie_item(title="A Monster in Paris", tmdb_id="170", movie_id=9)
+        b["file"] = "smb://server/movies/en/monster.mkv"
+        return a, b
+
+    def _scan(self, tracker, items, **kw):
+        return run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+            _make_settings(), items=items, **kw,
+        )
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    def test_both_items_processed_and_stable(
+        self, mock_by_id, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        a, b = self._pair()
+        mock_by_id.side_effect = lambda mt, i: {5: a, 9: b}.get(i)
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+
+        stats = self._scan(tracker, [a, b])
+        assert stats["processed"] == 2
+        assert sorted(c.args[0] for c in mock_update.call_args_list) == [5, 9]
+
+        tracker.begin_cycle(resume_interrupted=False)
+        self._scan(tracker, [b, a])
+        rows = dict(tracker._conn.execute(
+            "SELECT identity, kodi_id FROM items"
+        ).fetchall())
+        tracker.close()
+        assert rows == {
+            "tmdb:170": 5,
+            "tmdb:170|smb://server/movies/en/monster.mkv": 9,
+        }
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    def test_single_item_update_keeps_the_duplicate_row(
+        self, mock_by_id, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        a, b = self._pair()
+        mock_by_id.side_effect = lambda mt, i: {5: a, 9: b}.get(i)
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        self._scan(tracker, [a, b])
+
+        self._scan(tracker, [b], reset=True)
+        rows = dict(tracker._conn.execute(
+            "SELECT identity, kodi_id FROM items"
+        ).fetchall())
+        tracker.close()
+        assert rows["tmdb:170"] == 5
+        assert rows["tmdb:170|smb://server/movies/en/monster.mkv"] == 9
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    def test_replaced_file_takes_over_the_row(
+        self, mock_by_id, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        # The old file is gone (its Kodi id no longer exists): the new item
+        # with the same identity keeps the row and its clocks.
+        a, _b = self._pair()
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        mock_by_id.side_effect = lambda mt, i: {5: a}.get(i)
+        self._scan(tracker, [a])
+
+        upgraded = _make_movie_item(title="A Monster in Paris", tmdb_id="170", movie_id=12)
+        mock_by_id.side_effect = lambda mt, i: {12: upgraded}.get(i)
+        tracker.begin_cycle(resume_interrupted=False)
+        self._scan(tracker, [upgraded])
+        rows = dict(tracker._conn.execute(
+            "SELECT identity, kodi_id FROM items"
+        ).fetchall())
+        tracker.close()
+        assert rows == {"tmdb:170": 12}
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    def test_rebuilt_library_keeps_rows(
+        self, mock_by_id, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        # After a library rebuild the old Kodi id belongs to another movie.
+        a, _b = self._pair()
+        other = _make_movie_item(title="Other", tmdb_id="999", movie_id=5)
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        mock_by_id.side_effect = lambda mt, i: {5: a}.get(i)
+        self._scan(tracker, [a])
+
+        a["movieid"] = 40
+        mock_by_id.side_effect = lambda mt, i: {5: other, 40: a}.get(i)
+        tracker.begin_cycle(resume_interrupted=False)
+        self._scan(tracker, [other, a])
+        rows = dict(tracker._conn.execute(
+            "SELECT identity, kodi_id FROM items"
+        ).fetchall())
+        tracker.close()
+        assert rows == {"tmdb:170": 40, "tmdb:999": 5}
