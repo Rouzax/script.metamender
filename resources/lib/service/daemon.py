@@ -43,9 +43,11 @@ from resources.lib.constants import (
     SOURCES_CONFIG_FILENAME,
 )
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
-from resources.lib.data.sources import load_source_config
+from resources.lib.data.presets import country_for_setting
+from resources.lib.data.sources import kodi_ui_language, load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
+from resources.lib.engine.certchain import SiteGate
 from resources.lib.engine.resolve import rating_sources
 from resources.lib.engine.scan import run_scan
 from resources.lib.providers import imdb_ratings
@@ -155,6 +157,20 @@ def _load_settings() -> dict[str, Any]:
         "show_notifications": get_bool_setting("show_notifications"),
         "resume_interrupted": get_bool_setting("resume_interrupted"),
         "orphan_retention_days": get_int_setting("orphan_retention_days", 30),
+        # Certifications (Certifications tab); see scan._cert_config.
+        "cert_country": country_for_setting(get_int_setting("country", 0), kodi_ui_language()),
+        "cert_prefix_override": (
+            get_setting("rating_prefix") if get_bool_setting("override_prefix") else None
+        ),
+        "cert_sites": frozenset(
+            site for site in ("fsk", "bbfc", "medieraadet")
+            if get_bool_setting("enable_" + site)
+        ),
+        "cert_replace_foreign": get_bool_setting("replace_incorrect"),
+        "cert_not_found": (
+            get_setting("fallback_rating").strip() or None
+            if get_bool_setting("enable_fallback") else None
+        ),
     }
 
 
@@ -239,6 +255,9 @@ def _run_scan(
     # One breaker for the whole cycle: a provider that fails repeatedly
     # stays disabled across the movie/tvshow/episode passes.
     breaker = CircuitBreaker()
+    # One certification site gate per cycle too: its request cap and memo
+    # span the movie and TV show passes.
+    cert_gate = SiteGate(settings.get("cert_sites", frozenset()), breaker, monitor)
 
     for media_type in (MOVIE, TVSHOW):
         stats = run_scan(
@@ -251,6 +270,7 @@ def _run_scan(
             monitor=monitor,
             new_only=new_only,
             breaker=breaker,
+            cert_gate=cert_gate,
         )
         all_stats[media_type.name] = stats
 

@@ -5672,3 +5672,254 @@ class TestMainTitles:
 
         assert _written(mock_update, "title") == "Testserie"
         assert names == ["Testserie S01E01"]
+
+
+class TestCertifications:
+    """mpaa for movies and TV shows: TMDB first, sites only when due, the
+    configured country's system and prefix, and its own maturity rule."""
+
+    @staticmethod
+    def _settings(**overrides):
+        settings = _make_settings()
+        settings.update({
+            "cert_country": "NL", "cert_prefix_override": None,
+            "cert_sites": frozenset({"fsk", "bbfc", "medieraadet"}),
+            "cert_replace_foreign": True, "cert_not_found": None,
+        })
+        settings.update(overrides)
+        return settings
+
+    @staticmethod
+    def _fake_sites(monkeypatch, answers=None):
+        from types import SimpleNamespace
+
+        from resources.lib.engine import certchain
+
+        calls = []
+
+        def make(name, media):
+            def lookup(title, original_title, year, media_type, imdb_id=None):
+                calls.append(name)
+                return (answers or {}).get(name)
+            return SimpleNamespace(SITE=name, MEDIA_TYPES=frozenset(media), lookup=lookup)
+
+        monkeypatch.setattr(certchain, "SITES", {
+            "fsk": make("fsk", ("movie", "tvshow")), "bbfc": make("bbfc", ("movie", "tvshow")),
+            "medieraadet": make("medieraadet", ("movie",)),
+        })
+        return calls
+
+    def _scan(self, tracker, item, certs, fields=("mpaa",), settings=None, nfo=False,
+              media=MOVIE, gate=None):
+        from resources.lib.data.nfo import NFO, NO_NFO
+        from resources.lib.engine.breaker import CircuitBreaker
+        from resources.lib.engine.certchain import SiteGate
+
+        settings = settings or self._settings()
+        if gate is None:
+            gate = SiteGate(settings["cert_sites"], CircuitBreaker(), None, min_interval=0.0)
+        fetch = ("tmdb_fetch_movie", _tmdb_movie_response) if media is MOVIE else (
+            "tmdb_fetch_tvshow", _tmdb_tvshow_response)
+        with patch("resources.lib.engine.scan." + fetch[0],
+                   return_value=fetch[1](certifications=certs, plot="P")), \
+                patch("resources.lib.engine.scan.update_item", return_value=True) as upd, \
+                patch("resources.lib.engine.scan.nfo_state", return_value=NFO if nfo else NO_NFO):
+            stats = run_scan(media, tracker, _make_source_config(), frozenset(fields), "k",
+                             settings, items=[item], cert_gate=gate)
+        return upd, stats, gate
+
+    def _row(self, tracker, item, media=MOVIE):
+        return tracker.get_field_status(media.name, compute_identity(item, media), "mpaa")
+
+    def test_us_rated_movie_gets_nl_rating_from_tmdb(self, tmp_path, kodi_stubs, monkeypatch):
+        calls = self._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        item["mpaa"] = "Rated PG-13"
+        tracker = _make_tracker(tmp_path)
+        upd, _stats, _gate = self._scan(tracker, item, {"NL": "12", "US": "PG-13"})
+        row = self._row(tracker, item)
+        assert _written(upd, "mpaa") == "NL:12"
+        assert (row["from_fallback"], row["source"]) == (0, "tmdb")
+        item["mpaa"] = "NL:12"
+        tracker.start_new_cycle()
+        upd, _stats, gate = self._scan(tracker, item, {"NL": "12"}, fields=("mpaa", "plot"))
+        again = self._row(tracker, item)
+        tracker.close()
+        assert _written(upd, "mpaa") is None and calls == [] and gate.requests == 0
+        assert row["fetch_count"] == again["fetch_count"] == 1  # FINAL: not sampled again
+
+    def test_own_value_kept_prefix_normalized(self, tmp_path, kodi_stubs, monkeypatch):
+        calls = self._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        item["mpaa"] = "12"
+        tracker = _make_tracker(tmp_path)
+        upd, _s, _g = self._scan(tracker, item, {})
+        row = self._row(tracker, item)
+        tracker.close()
+        assert _written(upd, "mpaa") == "NL:12" and calls == []
+        assert row["source"] == "kodi" and row["from_fallback"] == 0
+
+    def test_equal_bare_not_rewritten(self, tmp_path, kodi_stubs, monkeypatch):
+        self._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        item["mpaa"] = "NL:12"
+        tracker = _make_tracker(tmp_path)
+        upd, stats, _g = self._scan(tracker, item, {"NL": "12"})
+        tracker.close()
+        assert _written(upd, "mpaa") is None and stats["updated"] == 0
+
+    def test_nfo_certification_never_replaced(self, tmp_path, kodi_stubs, monkeypatch):
+        self._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        item["mpaa"] = "Rated R"
+        tracker = _make_tracker(tmp_path)
+        upd, _s, _g = self._scan(tracker, item, {"NL": "16"}, nfo=True)
+        tracker.close()
+        assert _written(upd, "mpaa") is None
+
+    def test_foreign_kept_when_replace_off(self, tmp_path, kodi_stubs, monkeypatch):
+        calls = self._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        item["mpaa"] = "Rated R"
+        tracker = _make_tracker(tmp_path)
+        upd, _s, _g = self._scan(tracker, item, {"NL": "16"},
+                                 settings=self._settings(cert_replace_foreign=False))
+        row = self._row(tracker, item)
+        tracker.close()
+        assert _written(upd, "mpaa") is None and calls == []
+        assert row["from_fallback"] == 0  # answered, final
+
+    def test_sites_only_when_mpaa_due(self, tmp_path, kodi_stubs, monkeypatch):
+        from resources.lib.engine.protect import fingerprint
+        from resources.lib.engine.scan import settings_fingerprint
+
+        calls = self._fake_sites(monkeypatch, {"fsk": "16"})
+        item = _make_movie_item(plot="")
+        tracker = _make_tracker(tmp_path)
+        identity = compute_identity(item, MOVIE)
+        tracker.upsert_item("movie", identity, kodi_id=1)
+        settings = self._settings()
+        tracker.record_field_fetch(
+            "movie", identity, "mpaa", next_retry="2999-01-01", source=None,
+            written_value=fingerprint(""), from_fallback=True,
+            settings_fp=settings_fingerprint("mpaa", settings, "en-US", "movie"),
+        )
+        tracker.commit()
+        upd, _s, gate = self._scan(tracker, item, {}, fields=("mpaa", "plot"), settings=settings)
+        tracker.close()
+        assert _written(upd, "plot") == "P"
+        assert calls == [] and gate.requests == 0
+
+    def test_site_rating_when_tmdb_has_none(self, tmp_path, kodi_stubs, monkeypatch):
+        calls = self._fake_sites(monkeypatch, {"fsk": "16"})
+        item = _make_movie_item()
+        tracker = _make_tracker(tmp_path)
+        upd, _s, _g = self._scan(tracker, item, {})
+        row = self._row(tracker, item)
+        tracker.close()
+        assert _written(upd, "mpaa") == "NL:16" and calls == ["fsk"]
+        assert (row["from_fallback"], row["source"]) == (1, "fsk")
+
+    def test_derived_rechecked_monthly_then_final(self, tmp_path, kodi_stubs, monkeypatch):
+        from resources.lib.constants import FALLBACK_RECHECKS
+
+        self._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        tracker = _make_tracker(tmp_path)
+        identity = compute_identity(item, MOVIE)
+        self._scan(tracker, item, {"US": "PG-13"})
+        item["mpaa"] = "NL:12"
+        for _ in range(FALLBACK_RECHECKS):
+            tracker._conn.execute(
+                "UPDATE field_status SET next_retry = '2000-01-01' WHERE field = 'mpaa'")
+            tracker.start_new_cycle()
+            self._scan(tracker, item, {"US": "PG-13"})
+        row = tracker.get_field_status("movie", identity, "mpaa")
+        tracker._conn.execute("UPDATE field_status SET next_retry = '2000-01-01'")
+        tracker.start_new_cycle()
+        upd, _s, _g = self._scan(tracker, item, {"US": "PG-13"})
+        after = tracker.get_field_status("movie", identity, "mpaa")
+        tracker.close()
+        assert row["fallback_checks"] == FALLBACK_RECHECKS
+        assert after["fetch_count"] == row["fetch_count"]  # FINAL now
+
+    def test_not_found_value_after_last_clean_recheck(self, tmp_path, kodi_stubs, monkeypatch):
+        from resources.lib.constants import FALLBACK_RECHECKS
+
+        self._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        tracker = _make_tracker(tmp_path)
+        identity = compute_identity(item, MOVIE)
+        settings = self._settings(cert_not_found="NR")
+        upd, _s, _g = self._scan(tracker, item, {}, settings=settings)
+        assert _written(upd, "mpaa") is None
+        for _ in range(FALLBACK_RECHECKS):
+            tracker._conn.execute(
+                "UPDATE field_status SET next_retry = '2000-01-01' WHERE field = 'mpaa'")
+            tracker.start_new_cycle()
+            upd, _s, _g = self._scan(tracker, item, {}, settings=settings)
+        row = tracker.get_field_status("movie", identity, "mpaa")
+        tracker.close()
+        assert _written(upd, "mpaa") == "NR"
+        assert (row["source"], row["from_fallback"]) == ("fallback", 0)
+
+    def test_transient_cert_records_nothing(self, tmp_path, kodi_stubs, monkeypatch):
+        from resources.lib.engine import certchain
+
+        self._fake_sites(monkeypatch)
+
+        def down(*args, **kwargs):
+            from resources.lib.utils import TransientProviderError
+            raise TransientProviderError("http 503", status=503)
+
+        certchain.SITES["fsk"].lookup = down
+        item = _make_movie_item()
+        tracker = _make_tracker(tmp_path)
+        upd, _s, _g = self._scan(tracker, item, {})
+        row = self._row(tracker, item)
+        tracker.close()
+        assert _written(upd, "mpaa") is None and row is None
+
+    def test_tvshow_gets_mpaa(self, tmp_path, kodi_stubs, monkeypatch):
+        self._fake_sites(monkeypatch)
+        item = _make_tvshow_item()
+        tracker = _make_tracker(tmp_path)
+        upd, _s, _g = self._scan(tracker, item, {"NL": "16"}, media=TVSHOW)
+        tracker.close()
+        assert _written(upd, "mpaa") == "NL:16"
+
+    def test_episode_never_gets_mpaa(self):
+        from resources.lib.engine.scan import _candidate_fields
+
+        assert "mpaa" not in _candidate_fields(EPISODE, frozenset({"mpaa", "plot"}))
+
+    def test_changed_country_rebaselines_mpaa_only(self):
+        from resources.lib.engine.scan import settings_fingerprint as sfp
+
+        a, b = self._settings(), self._settings(cert_country="DE")
+        assert sfp("mpaa", a, "nl-NL", "movie") != sfp("mpaa", b, "nl-NL", "movie")
+        assert sfp("plot", a, "nl-NL", "movie") == sfp("plot", b, "nl-NL", "movie")
+        c = self._settings(cert_sites=frozenset({"fsk"}))
+        assert sfp("mpaa", a, "nl-NL", "movie") != sfp("mpaa", c, "nl-NL", "movie")
+
+    def test_unknown_auto_country_turns_certs_off(self, tmp_path, kodi_stubs, monkeypatch):
+        self._fake_sites(monkeypatch)
+        item = _make_movie_item(plot="")
+        tracker = _make_tracker(tmp_path)
+        with patch("resources.lib.engine.scan.log") as log:
+            upd, _s, _g = self._scan(tracker, item, {"NL": "12"}, fields=("mpaa", "plot"),
+                                     settings=self._settings(cert_country=None))
+        tracker.close()
+        assert _written(upd, "mpaa") is None and _written(upd, "plot") == "P"
+        errors = [c for c in log.error.call_args_list
+                  if c.kwargs.get("event") == "scan.cert_unavailable"]
+        assert len(errors) == 1
+
+    def test_custom_prefix(self, tmp_path, kodi_stubs, monkeypatch):
+        self._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        tracker = _make_tracker(tmp_path)
+        upd, _s, _g = self._scan(tracker, item, {"NL": "12"},
+                                 settings=self._settings(cert_prefix_override=""))
+        tracker.close()
+        assert _written(upd, "mpaa") == "12"

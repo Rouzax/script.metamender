@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import random
 from datetime import date, timedelta
-from typing import Optional, Tuple
 
 from resources.lib.constants import FALLBACK_RECHECK_DAYS, FALLBACK_RECHECKS
 
@@ -22,9 +21,9 @@ FINAL = "final"
 
 
 def decide_field(
-    content_age_days: Optional[int],
+    content_age_days: int | None,
     fetch_count: int,
-    next_retry: Optional[str],
+    next_retry: str | None,
     today: str,
     threshold_days: int,
 ) -> str:
@@ -43,7 +42,7 @@ def apply_fallback_recheck(
     decision: str,
     from_fallback: bool,
     fallback_checks: int,
-    next_retry: Optional[str],
+    next_retry: str | None,
     today: str,
 ) -> str:
     """Hold back FINAL for a fallback-language value with re-checks left.
@@ -60,7 +59,7 @@ def apply_fallback_recheck(
     return SKIP_NOT_DUE
 
 
-def fallback_recheck_due(next_due: Optional[str], today: str) -> str:
+def fallback_recheck_due(next_due: str | None, today: str) -> str:
     """Next sample of a field still holding a fallback value: the regular
     schedule date when that comes within FALLBACK_RECHECK_DAYS, otherwise
     FALLBACK_RECHECK_DAYS from today. A missing or past schedule date (old
@@ -73,12 +72,12 @@ def fallback_recheck_due(next_due: Optional[str], today: str) -> str:
 
 def compute_next_due(
     fetch_count: int,
-    schedule: Tuple[int, ...],
-    premiered: Optional[str],
+    schedule: tuple[int, ...],
+    premiered: str | None,
     threshold_days: int,
     today: str,
     jitter: int = -1,
-) -> Optional[str]:
+) -> str | None:
     """Date of the next sample for a field that stays volatile after a fetch.
 
     On the schedule: today + schedule[fetch_count-1] + jitter. After the schedule
@@ -97,3 +96,27 @@ def compute_next_due(
     except ValueError:
         return None
     return (prem_d + timedelta(days=threshold_days)).isoformat()
+
+
+def decide_certification(
+    fetch_count: int,
+    from_fallback: bool,
+    fallback_checks: int,
+    next_retry: str | None,
+    today: str,
+) -> str:
+    """The maturity decision for `mpaa`, which does not follow content age.
+
+    A certification from a real source (TMDB or the site for the configured
+    country, or one the item already had in that system) never changes, so it
+    is FINAL after one answer. A derived one, or "none found", is held like a
+    fallback value: re-checked when due, up to FALLBACK_RECHECKS times, then
+    FINAL.
+    """
+    if fetch_count == 0:
+        return FETCH_NOW
+    if not from_fallback or fallback_checks >= FALLBACK_RECHECKS:
+        return FINAL
+    if next_retry is None or next_retry <= today:
+        return FETCH_NOW
+    return SKIP_NOT_DUE

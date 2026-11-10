@@ -76,3 +76,21 @@ def test_fallback_recheck_due_never_later_than_a_month():
 
 def test_fallback_recheck_due_keeps_an_earlier_schedule_date():
     assert fallback_recheck_due("2026-06-26", TODAY) == "2026-06-26"
+
+
+def test_decide_certification():
+    from resources.lib.constants import FALLBACK_RECHECKS
+    from resources.lib.engine.maturity import (
+        FETCH_NOW,
+        FINAL,
+        SKIP_NOT_DUE,
+        decide_certification,
+    )
+
+    today = "2026-11-10"
+    assert decide_certification(0, False, 0, None, today) == FETCH_NOW
+    assert decide_certification(1, False, 0, "2000-01-01", today) == FINAL  # real answer
+    assert decide_certification(1, True, 3, "2026-11-01", today) == FETCH_NOW
+    assert decide_certification(1, True, 3, "2026-12-01", today) == SKIP_NOT_DUE
+    assert decide_certification(5, True, FALLBACK_RECHECKS, "2026-11-01", today) == FINAL
+    assert decide_certification(1, True, 0, None, today) == FETCH_NOW

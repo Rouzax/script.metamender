@@ -32,11 +32,11 @@ _BASE_PROPERTIES = [
 # Extra properties per media type name
 _EXTRA_PROPERTIES = {
     "movie": [
-        "mpaa", "tagline", "director", "writer", "genre",
+        "mpaa", "tagline", "director", "writer", "genre", "originaltitle",
         "studio", "country", "trailer", "runtime",
     ],
     "tvshow": [
-        "mpaa", "genre", "episodeguide",
+        "mpaa", "genre", "episodeguide", "originaltitle",
     ],
     "episode": [
         "tvshowid", "showtitle", "season", "episode",

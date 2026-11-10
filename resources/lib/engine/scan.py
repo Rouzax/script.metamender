@@ -63,6 +63,7 @@ import xbmc
 from resources.lib.constants import (
     DEFAULT_REFETCH_SCHEDULE,
     FALLBACK_RECHECK_DAYS,
+    FALLBACK_RECHECKS,
     PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
     parse_refetch_schedule,
 )
@@ -70,9 +71,29 @@ from resources.lib.data.identity import compute_identity
 from resources.lib.data.kodi import get_all_items, get_item_by_id, update_item
 from resources.lib.data.media_types import EPISODE, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
+from resources.lib.data.presets import Preset, load_preset
 from resources.lib.data.sources import kodi_ui_language, match_source
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
+from resources.lib.engine.certchain import (
+    DERIVED,
+    NONE,
+    NOT_ASKED,
+    REAL,
+    UNAVAILABLE,
+    CertAnswer,
+    CertQuery,
+    SiteGate,
+    resolve_certification,
+)
+from resources.lib.engine.certification import (
+    FOREIGN,
+    OWN,
+    classify_current,
+    format_mpaa,
+    parse_mpaa,
+    sanitize_prefix,
+)
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome, Step, run_chain
 from resources.lib.engine.idverify import show_mismatch
 from resources.lib.engine.maturity import (
@@ -80,6 +101,7 @@ from resources.lib.engine.maturity import (
     FINAL,
     apply_fallback_recheck,
     compute_next_due,
+    decide_certification,
     decide_field,
     fallback_recheck_due,
 )
@@ -174,6 +196,16 @@ def settings_fingerprint(
     """
     if field in _RATING_FIELDS:
         inputs: dict[str, Any] = {"rating_source": settings.get("rating_source", 0)}
+    elif field == "mpaa":
+        # The certification depends on the configured system and sources,
+        # not on the folder language.
+        inputs = {
+            "country": settings.get("cert_country"),
+            "prefix": settings.get("cert_prefix_override"),
+            "sites": sorted(settings.get("cert_sites") or ()),
+            "replace_foreign": bool(settings.get("cert_replace_foreign", True)),
+            "not_found": settings.get("cert_not_found"),
+        }
     elif field in _CHAIN_FIELDS:
         inputs = {
             "folder_language": folder_language,
@@ -494,6 +526,17 @@ class _Pacer:
 
 
 @dataclass(frozen=True)
+class _CertConfig:
+    """What the certification producer needs for one pass."""
+
+    preset: Preset
+    prefix: str
+    replace_foreign: bool
+    not_found: str | None
+    gate: SiteGate
+
+
+@dataclass(frozen=True)
 class _ScanCtx:
     """Scan-level constants shared across one run_scan cycle.
 
@@ -535,6 +578,9 @@ class _ScanCtx:
     # "" means no fallback.
     default_fallback: str
     imdb_ready: bool
+    # Certification settings for this pass; None when certifications are off
+    # or no usable country preset exists (episodes never have one).
+    cert: _CertConfig | None = None
 
 
 def _call_provider(
@@ -1548,7 +1594,8 @@ def _resolve_fields(
     tmdb_data = {} if tmdb_transient or not primary.tmdb else primary.tmdb
 
     for f in fields:
-        if f in _RATING_FIELDS:
+        if f in _RATING_FIELDS or f == "mpaa":
+            # Ratings and certifications have their own producers.
             continue
         key = _KODI_TO_TMDB.get(f, f)
         if f in _CHAIN_FIELDS:
@@ -1623,6 +1670,102 @@ def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
             "Scan resumed, playback stopped",
             event="scan.resume", media_type=ctx.media_type.name,
         )
+
+
+def _cert_config(
+    media_type: MediaType,
+    enabled_fields: frozenset[str],
+    settings: dict[str, Any],
+    breaker: CircuitBreaker,
+    monitor: Any,
+    gate: SiteGate | None,
+) -> _CertConfig | None:
+    """The pass's certification settings, or None when certifications are off
+    for it. A configured country without a usable preset turns them off for
+    the pass with one ERROR, rather than writing ratings from a wrong system."""
+    if "mpaa" not in enabled_fields or media_type.name not in ("movie", "tvshow"):
+        return None
+    country = settings.get("cert_country")
+    preset = load_preset(country) if country else None
+    if preset is None:
+        log.error(
+            "Certifications skipped: no country preset applies",
+            event="scan.cert_unavailable", country=country, media_type=media_type.name,
+        )
+        return None
+    override = settings.get("cert_prefix_override")
+    prefix = preset.prefix if override is None else sanitize_prefix(override, preset.prefix)
+    return _CertConfig(
+        preset=preset,
+        prefix=prefix,
+        replace_foreign=bool(settings.get("cert_replace_foreign", True)),
+        not_found=settings.get("cert_not_found") or None,
+        gate=gate or SiteGate(frozenset(settings.get("cert_sites") or ()), breaker, monitor),
+    )
+
+
+def _resolve_cert(
+    cfg: _CertConfig,
+    item: dict[str, Any],
+    identity: str,
+    primary: _Primary,
+    ids: _Ids,
+    fs: dict[str, Any],
+    media_type: str,
+    due: bool,
+    recheck: bool,
+) -> tuple[CertAnswer, str | None]:
+    """The certification answer for the item and the value to plan, if any.
+
+    A rating already in the configured system is kept (only its prefix is
+    normalized); a foreign one is kept when replacing is off; otherwise the
+    chain runs, with the sites only when the field itself is due. The
+    not-found value replaces "none" on the last of the monthly rechecks.
+    """
+    preset = cfg.preset
+    current = str(item.get("mpaa") or "")
+    written = fs.get("written_value")
+    ours = written is not None and fingerprint(_kodi_form(current)) == written
+    placeholder = ours and fs.get("source") == "fallback"
+    # A derived rating metamender wrote is in the configured system too, but
+    # it is not the item's own: it stays on its monthly rechecks.
+    ours_derived = ours and bool(fs.get("from_fallback"))
+    state = classify_current(current, preset.valid, cfg.prefix, preset.country, placeholder)
+    if state == OWN and not ours_derived:
+        bare = _own_bare(current, cfg.prefix)
+        answer, value = CertAnswer(REAL, bare, "kodi"), format_mpaa(bare, cfg.prefix)
+    elif state == FOREIGN and not cfg.replace_foreign:
+        answer, value = CertAnswer(REAL, None, "kodi"), None
+    else:
+        tmdb = primary.tmdb
+        certs = TRANSIENT if tmdb is TRANSIENT else ((tmdb or {}).get("certifications") or {})
+        query = CertQuery(
+            title=str(item.get("title") or ""),
+            original_title=str(item.get("originaltitle") or ""),
+            year=_premiered_year(item),
+            media_type=media_type,
+            imdb_id=ids.imdb,
+            tmdb_certs=certs,
+        )
+        answer = resolve_certification(query, preset, cfg.gate if due else None)
+        value = format_mpaa(answer.rating, cfg.prefix) if answer.rating else None
+        if (answer.kind == NONE and cfg.not_found and recheck
+                and int(fs.get("fallback_checks") or 0) >= FALLBACK_RECHECKS - 1):
+            answer, value = CertAnswer(REAL, cfg.not_found, "fallback"), cfg.not_found
+    log.debug(
+        "Certification resolved", event="scan.cert", identity=identity,
+        kind=answer.kind, source=answer.source, rating=answer.rating,
+    )
+    return answer, value
+
+
+def _own_bare(current: str, prefix: str) -> str:
+    """The bare rating of a value already in the configured system."""
+    custom = prefix.strip()
+    stripped = current.strip()
+    if custom and stripped.lower().startswith(custom.lower()):
+        return stripped[len(custom):].strip()
+    return parse_mpaa(current)[1]
 
 
 def _candidate_fields(media_type: MediaType, enabled_fields: frozenset[str]) -> list[str]:
@@ -1726,6 +1869,7 @@ def run_scan(
     breaker: CircuitBreaker | None = None,
     reset: bool = False,
     new_only: bool = False,
+    cert_gate: SiteGate | None = None,
 ) -> dict[str, int]:
     """Run a single scan cycle for one media type.
 
@@ -1815,8 +1959,11 @@ def run_scan(
         fallback_order=settings.get("fallback_order", FALLBACK_TVDB_FIRST),
         default_fallback=str(source_config.get("fallback_language") or ""),
         imdb_ready=bool(settings.get("imdb_ready", False)),
+        cert=_cert_config(media_type, enabled_fields, settings, breaker, monitor, cert_gate),
     )
     candidates = _candidate_fields(media_type, enabled_fields)
+    if ctx.cert is not None:
+        candidates = sorted(set(candidates) | {"mpaa"})
     needed = _needed_providers(media_type, candidates)
 
     log.info(
@@ -1952,6 +2099,19 @@ def run_scan(
                 decisions[f] = FETCH_NOW
                 continue
             fs = fs_map.get(f, {})
+            if f == "mpaa":
+                # Certifications do not age: see decide_certification.
+                count = int(fs.get("fetch_count") or 0)
+                decisions[f] = decide_certification(
+                    count, bool(fs.get("from_fallback")),
+                    int(fs.get("fallback_checks") or 0), fs.get("next_retry"), today,
+                )
+                if decisions[f] == FETCH_NOW and count and fs.get("from_fallback"):
+                    rechecks.add(f)
+                elif decisions[f] == FINAL and _blanked(item, f, fs):
+                    decisions[f] = FETCH_NOW
+                    refills.add(f)
+                continue
             base = decide_field(
                 age,
                 int(fs.get("fetch_count") or 0),
@@ -2054,8 +2214,24 @@ def run_scan(
             ctx, item, identity, primary, ids, language, fallback_lang, nonfinal,
             reopened,
         )
+        cert_value: str | None = None
+        if "mpaa" in nonfinal and ctx.cert is not None:
+            cert_answer, cert_value = _resolve_cert(
+                ctx.cert, item, identity, primary, ids, fs_map.get("mpaa", {}),
+                media_type.name, decisions["mpaa"] == FETCH_NOW, "mpaa" in rechecks,
+            )
+            # Not asked (sites not due, TMDB without an answer) and
+            # unavailable both leave the field's clock alone.
+            outcomes["mpaa"] = FieldOutcome(
+                transient=cert_answer.kind in (UNAVAILABLE, NOT_ASKED),
+                value=cert_value,
+                from_fallback=cert_answer.kind in (DERIVED, NONE),
+            )
+            providers["mpaa"] = cert_answer.source
         answered = [f for f in nonfinal if f in outcomes and not outcomes[f].transient]
         extracted = _extract_fields(values, answered)
+        if cert_value is not None and "mpaa" in answered:
+            extracted["mpaa"] = cert_value
         # A reopened fallback value whose chain now has nothing (the folder's
         # fallback was removed, or the new one has no text either) is cleared:
         # it was only ever there because of the old setting. Only a value Kodi
@@ -2151,7 +2327,9 @@ def run_scan(
                 # on the fallback language.
                 source = providers.get(f) if f in written or f in held else None
                 vote_count = None
-                if f in written:
+                if f in written or f == "mpaa":
+                    # A certification's flag is its answer's kind (derived or
+                    # none is rechecked), whether or not anything was written.
                     from_fallback = outcome.from_fallback
                 elif f in held and not outcome.from_fallback:
                     from_fallback = False
@@ -2165,7 +2343,8 @@ def run_scan(
                 # Past the stability age the schedule no longer applies, so
                 # the recheck is a month out; younger content keeps an
                 # earlier schedule date.
-                mature = age is not None and age >= threshold
+                # A certification is rechecked monthly at any age.
+                mature = f == "mpaa" or (age is not None and age >= threshold)
                 next_due = fallback_recheck_due(None if mature else next_due, today)
             if f in rebaseline:
                 tracker.reset_field_clock(

@@ -1,6 +1,6 @@
 """Tests for the MetaMender service daemon helpers."""
 from datetime import date, timedelta
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.service import daemon
@@ -388,3 +388,26 @@ def test_certification_settings_hidden_until_phase8():
     assert ids["enable_certifications"].findtext("default") == "false"
     for sid in ("enable_certifications", "country", "enable_fsk"):
         assert ids[sid].findtext("visible") == "false"
+
+
+def test_load_settings_cert_keys(kodi_stubs, settings_mock):
+    values = {
+        "country": "3", "override_prefix": "true", "rating_prefix": "FSK ",
+        "enable_fsk": "true", "enable_bbfc": "false", "enable_medieraadet": "true",
+        "replace_incorrect": "false", "enable_fallback": "true", "fallback_rating": "NR",
+    }
+    settings_mock.side_effect = lambda sid: values.get(sid, "")
+    s = daemon._load_settings()
+    assert s["cert_country"] == "DE"
+    assert s["cert_prefix_override"] == "FSK "
+    assert s["cert_sites"] == frozenset({"fsk", "medieraadet"})
+    assert s["cert_replace_foreign"] is False
+    assert s["cert_not_found"] == "NR"
+
+
+def test_load_settings_cert_defaults(kodi_stubs, settings_mock):
+    settings_mock.side_effect = lambda sid: ""
+    with patch("resources.lib.service.daemon.kodi_ui_language", return_value="nl-NL"):
+        s = daemon._load_settings()
+    assert s["cert_country"] == "NL"  # Automatic
+    assert s["cert_prefix_override"] is None and s["cert_not_found"] is None
