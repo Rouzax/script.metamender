@@ -48,6 +48,15 @@ _SECRET_RE = re.compile(
 )
 
 
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+_CONTROL_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def _escape_control(match: re.Match[str]) -> str:
+    char = match.group(0)
+    return _CONTROL_ESCAPES.get(char, "\\x{:02x}".format(ord(char)))
+
+
 def _redact(text: str) -> str:
     return _SECRET_RE.sub(r"\1***", text)
 
@@ -309,6 +318,10 @@ class StructuredLogger:
             pairs = []
             for k, v in kwargs.items():
                 str_v = _redact(str(v))
+                if k != 'trace':
+                    # A value is untrusted text (titles, provider errors); a
+                    # line break in it must not start a forged log line.
+                    str_v = _CONTROL_CHARS.sub(_escape_control, str_v)
                 if k != 'trace' and len(str_v) > LOG_MAX_VALUE_LENGTH:
                     str_v = str_v[:LOG_MAX_VALUE_LENGTH] + "..."
                 pairs.append("{}={}".format(k, str_v))

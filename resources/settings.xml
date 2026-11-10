@@ -9,6 +9,10 @@
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
+                    <control type="edit" format="string">
+                        <heading>32011</heading>
+                        <hidden>true</hidden>
+                    </control>
                 </setting>
             </group>
             <group id="source_priority" label="32025">

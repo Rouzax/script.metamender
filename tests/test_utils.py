@@ -84,3 +84,19 @@ def test_apikey_json_body_is_redacted(kodi_stubs):
         error='body={"apikey": "abc123secret", "pin": "x"}',
     )
     assert "abc123secret" not in _last_kodi_line(kodi_stubs)
+
+
+def test_log_values_cannot_forge_lines(kodi_stubs):
+    from resources.lib.utils import StructuredLogger
+
+    line = StructuredLogger("t")._format_message("m", event="e", title="a\nb\rc\x07")
+    assert "\n" not in line and "\r" not in line and "\x07" not in line
+    assert "title=a\\nb\\rc\\x07" in line
+
+
+def test_tmdb_key_setting_is_hidden():
+    import xml.etree.ElementTree as ET  # the repo's own settings.xml
+
+    root = ET.parse("resources/settings.xml").getroot()
+    key = next(s for s in root.iter("setting") if s.get("id") == "tmdb_api_key")
+    assert key.findtext("control/hidden") == "true"
