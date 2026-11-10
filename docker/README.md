@@ -17,11 +17,14 @@ Prefer the **host harness** for verifying specific behaviour. It runs the real
 engine modules on the host and proxies `xbmc.executeJSONRPC` to the container,
 so you exercise the actual `run_scan` code without installing the addon.
 
-The headless image cannot run the service itself: MetaMender's cross-process
-lock (`service/lock.py`) uses a home-window property, the headless image has no
-home window, and every scan stops with `RuntimeError: Window id does not exist`
-(`service.scan_error` in kodi.log). For an end-to-end run of the real service
-use the Flatpak Kodi (next sections).
+The service also runs in the headless image. With no home window, its scan
+lock (`service/lock.py`) keeps its token in `special://temp/metamender_scan.lock`
+instead of a window property, and the service deletes that file at startup in
+case a killed Kodi left it behind. Kodi logs one harmless
+`EXCEPTION: Window id does not exist` per interpreter when the lock first looks
+for the window. The image runs Python 3.10, the add-on's floor. There is no
+scoped scan: a scan in the container covers the whole library, so bracket it
+with backup and restore.
 
 ## Prerequisites
 
@@ -119,8 +122,8 @@ Kodi must be wrapped in backup/restore.
 
 `setup.sh` installs the add-on and its dependencies in the container and seeds
 its settings, which the host harness and `run-test.sh --status` can use. A scan
-triggered in the container (`run-test.sh` without arguments) stops at the
-scan lock described above, so it changes nothing.
+triggered in the container (`run-test.sh` without arguments) runs the real
+service over the whole library and writes to it.
 
 ```bash
 ./scripts/setup.sh            # backup, install deps, symlink, seed settings, restart
@@ -140,7 +143,7 @@ The seeded settings enable the metadata field groups with **certifications off**
 | `verify.py` | Host-harness surgical checks | No (bundled commands) |
 | `setup.sh` | Install MetaMender into the container | Backs up first |
 | `teardown.sh` | Remove MetaMender (`--restore` to roll back the DB) | No (optional restore) |
-| `run-test.sh` | `--status` report / trigger scan / `--log` | `--status` no; scan: stops at the lock, writes nothing |
+| `run-test.sh` | `--status` report / trigger scan / `--log` | `--status` no; scan yes (whole library) |
 | `kodi-rpc.sh` | Send a raw JSON-RPC payload | Depends on payload |
 | `wait-for-kodi.sh` | Wait for JSON-RPC readiness (shared) | No |
 | `backup-db.sh` / `restore-db.sh` | Shared DB backup/restore wrappers | restore yes |

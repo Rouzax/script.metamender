@@ -8,9 +8,9 @@
 #   run-test.sh --kodi-log  # MetaMender entries from kodi.log
 #
 # --status is read-only. The default (trigger scan) asks the add-on inside the
-# container to scan; on the headless image that scan stops at the scan lock (no
-# home window, see docker/README.md) and writes nothing. Full service runs use
-# the Flatpak Kodi; surgical engine checks use the host harness, verify.py.
+# container to scan the whole library and writes to it, so bracket it with
+# backup-db.sh and restore-db.sh. Surgical engine checks use the host harness,
+# verify.py.
 
 set -euo pipefail
 

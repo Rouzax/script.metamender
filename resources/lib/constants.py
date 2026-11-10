@@ -43,6 +43,7 @@ LIBRARY_SCAN_DEBOUNCE_SEC = 300
 # Short relative to the full scan interval so a transient RPC failure recovers
 # quickly without re-hammering Kodi every loop iteration.
 SCAN_FAILURE_BACKOFF_SEC = 300
+SCAN_LOCKED_RETRY_SEC = 60
 
 # =============================================================================
 # Rating Defaults

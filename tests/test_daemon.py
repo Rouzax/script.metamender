@@ -328,3 +328,43 @@ def test_no_tvdb_message_without_auth_failure(kodi_stubs):
 def test_tvdb_auth_failed_helper():
     assert daemon.tvdb_auth_failed([{"tvdb_auth_failed": False}, {"tvdb_auth_failed": True}])
     assert not daemon.tvdb_auth_failed([{}, {"updated": 1}])
+
+
+def _run_daemon_locked(ticks=5):
+    """Drive daemon.run() with the scan lock always held elsewhere.
+
+    Returns (acquire mock, clear_file_lock mock).
+    """
+    from unittest.mock import patch
+
+    acquire = MagicMock(return_value=False)
+    clear = MagicMock()
+    with patch.object(daemon, "MetaMendMonitor", return_value=_FakeMonitor(ticks)), \
+            patch.object(daemon, "TrackerDB"), \
+            patch.object(daemon, "_run_scan"), \
+            patch.object(daemon, "_load_settings",
+                         return_value={"tmdb_api_key": "k",
+                                       "resume_interrupted": True,
+                                       "show_notifications": False,
+                                       "orphan_retention_days": 30}), \
+            patch.object(daemon, "load_source_config", return_value={}), \
+            patch.object(daemon, "acquire_scan_lock", acquire), \
+            patch.object(daemon, "release_scan_lock"), \
+            patch.object(daemon, "clear_file_lock", clear), \
+            patch.object(daemon, "get_int_setting", return_value=24), \
+            patch.object(daemon.xbmc, "getCondVisibility", return_value=False):
+        daemon.run()
+    return acquire, clear
+
+
+def test_held_lock_is_retried_after_a_pause(kodi_stubs):
+    """A scan running elsewhere is not polled every service tick."""
+    acquire, _clear = _run_daemon_locked(ticks=5)
+
+    assert acquire.call_count == 1
+
+
+def test_service_start_clears_a_lock_file_left_by_a_killed_kodi(kodi_stubs):
+    _acquire, clear = _run_daemon_locked(ticks=1)
+
+    clear.assert_called_once_with()

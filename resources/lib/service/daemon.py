@@ -35,6 +35,7 @@ from resources.lib.constants import (
     DEFAULT_SCAN_INTERVAL_HOURS,
     LIBRARY_SCAN_DEBOUNCE_SEC,
     SCAN_FAILURE_BACKOFF_SEC,
+    SCAN_LOCKED_RETRY_SEC,
     SERVICE_SLEEP_INTERVAL_SEC,
     SOURCES_CONFIG_FILENAME,
 )
@@ -45,7 +46,11 @@ from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.resolve import rating_sources
 from resources.lib.engine.scan import run_scan
 from resources.lib.providers import imdb_ratings
-from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
+from resources.lib.service.lock import (
+    acquire_scan_lock,
+    clear_file_lock,
+    release_scan_lock,
+)
 from resources.lib.utils import (
     ApiKeyError,
     KodiQueryError,
@@ -363,6 +368,7 @@ def run() -> None:
     StructuredLogger.reconfigure(debug_enabled=debug_on, addon_id=addon_id)
 
     log.info("Service started", event="service.start")
+    clear_file_lock()
 
     monitor = MetaMendMonitor()
     tracker: Optional[TrackerDB] = None
@@ -417,6 +423,9 @@ def run() -> None:
                         event="service.locked",
                     )
                     should_scan = False
+                    # The other scan can take hours; ask again later rather
+                    # than every service tick.
+                    next_retry_after = now + SCAN_LOCKED_RETRY_SEC
 
                 if should_scan:
                     # settings is always loaded above when should_scan stays True.
