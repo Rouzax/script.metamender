@@ -250,3 +250,51 @@ def test_text_errors_are_redacted(monkeypatch):
     with pytest.raises(TransientProviderError) as info:
         provider_get_text("http://x", logger=MagicMock(), label="t")
     assert "SECRETKEY123" not in str(info.value)
+
+
+def test_deadline_cuts_a_trickling_body(monkeypatch):
+    """A real local server sending one byte at a time: the deadline must end
+    the read, not just the read timeout between bytes."""
+    import socket
+    import threading
+    import time as _time
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    stop = threading.Event()
+
+    def serve():
+        conn, _ = server.accept()
+        conn.recv(4096)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n")
+        try:
+            while not stop.is_set():
+                conn.sendall(b"x")
+                _time.sleep(0.2)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    monkeypatch.setattr(http_mod, "HTTP_DEADLINE_SEC", 1.0)
+    http_mod._SESSIONS.clear()
+    started = _time.monotonic()
+    try:
+        with pytest.raises(TransientProviderError):
+            provider_get_text("http://127.0.0.1:{}/".format(port), logger=MagicMock(), label="t")
+    finally:
+        stop.set()
+        server.close()
+        http_mod._SESSIONS.clear()
+    assert _time.monotonic() - started < 3
+
+
+def test_unknown_charset_falls_back_to_utf8(monkeypatch):
+    resp = _FakeResp(200, b'{"a": "caf\xc3\xa9"}')
+    resp.encoding = "x-bogus-charset"
+    _patch_get(monkeypatch, resp=resp)
+    assert provider_get("http://x", logger=MagicMock(), label="t") == {"a": "café"}

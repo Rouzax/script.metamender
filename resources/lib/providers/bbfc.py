@@ -16,9 +16,16 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
-from resources.lib.engine.certification import Candidate, best_match
+from resources.lib.engine.certification import (
+    Candidate,
+    best_match,
+    no_pace,
+    other_title,
+    paced,
+)
 from resources.lib.providers.http import provider_get_text
 from resources.lib.utils import TransientProviderError, get_logger
 
@@ -40,15 +47,34 @@ def lookup(
     year: int | None,
     media_type: str,
     imdb_id: str | None = None,
+    pace: Callable[[], bool] = no_pace,
 ) -> str | None:
     """The BBFC classification of the item, or None when the BBFC has no
-    matching film or show. Raises TransientProviderError when the site is
-    unavailable or the page lacks its result data. ``imdb_id`` is part of the
-    shared site interface; BBFC results carry no external ids."""
+    matching film or show. The original title is searched too when the item's
+    title finds nothing. Raises TransientProviderError when the site is
+    unavailable, the page lacks its result data, or ``pace`` refuses a
+    request. ``imdb_id`` is part of the shared site interface; BBFC results
+    carry no external ids."""
+    rating = _search(title, title, original_title, year, media_type, pace)
+    second = other_title(title, original_title)
+    if rating is None and second:
+        rating = _search(second, title, original_title, year, media_type, pace)
+    return rating
+
+
+def _search(
+    query: str,
+    title: str,
+    original_title: str,
+    year: int | None,
+    media_type: str,
+    pace: Callable[[], bool],
+) -> str | None:
     tv = media_type == "tvshow"
+    paced(pace)
     page = provider_get_text(
         _SEARCH_URL, logger=log, label="bbfc.search", provider=SITE,
-        params={"q": title, "t[]": "TV Show" if tv else "Film"},
+        params={"q": query, "t[]": "TV Show" if tv else "Film"},
     )
     if page is None:
         return None

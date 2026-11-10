@@ -32,6 +32,8 @@ Logging:
 from __future__ import annotations
 
 import json
+import socket
+import threading
 import time
 from typing import Any, NoReturn
 from urllib.parse import urlsplit
@@ -70,11 +72,18 @@ class _Response:
         self.encoding = encoding or "utf-8"
 
     def json(self) -> Any:
-        return json.loads(self.body.decode(self.encoding))
+        return json.loads(self._decode("strict"))
 
     @property
     def text(self) -> str:
-        return self.body.decode(self.encoding, errors="replace")
+        return self._decode("replace")
+
+    def _decode(self, errors: str) -> str:
+        try:
+            return self.body.decode(self.encoding, errors=errors)
+        except LookupError:
+            # A charset Python does not know: the providers all send UTF-8.
+            return self.body.decode("utf-8", errors=errors)
 
 
 def _session_for(url: str) -> requests.Session:
@@ -98,24 +107,59 @@ def _send(
     Raises requests.RequestException (including _TransportLimit) on any
     transport failure; the caller classifies it.
     """
-    deadline = time.monotonic() + HTTP_DEADLINE_SEC
+    started = time.monotonic()
     resp = _session_for(url).request(
         method, url, params=params, json=json_body, headers=_merge_headers(headers),
         timeout=(HTTP_CONNECT_TIMEOUT, read_timeout), allow_redirects=False,
         stream=True,
     )
+    # A read blocks until a whole chunk or the end arrives, and the read
+    # timeout only bounds the gap between bytes, so a trickling body would
+    # outlive any check between chunks. A watchdog closes the response at the
+    # deadline, which ends the blocked read.
+    remaining = max(0.0, HTTP_DEADLINE_SEC - (time.monotonic() - started))
+    expired = threading.Event()
+
+    def _expire() -> None:
+        expired.set()
+        # close() alone does not wake a recv already blocked in another
+        # thread; shutting the socket down does. urllib3 keeps the socket on
+        # its connection (1.26 and 2.x alike); without it, close() still ends
+        # the read at the next byte.
+        sock = getattr(getattr(resp.raw, "_connection", None), "sock", None)
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        resp.close()
+
+    watchdog = threading.Timer(remaining, _expire)
+    watchdog.daemon = True
+    watchdog.start()
     try:
         chunks: list[bytes] = []
         size = 0
-        for chunk in resp.iter_content(_CHUNK_BYTES):
-            size += len(chunk)
-            if size > HTTP_MAX_BODY_BYTES:
-                raise _TransportLimit("response larger than {} bytes".format(HTTP_MAX_BODY_BYTES))
-            if time.monotonic() > deadline:
-                raise _TransportLimit("response slower than {} s".format(HTTP_DEADLINE_SEC))
-            chunks.append(chunk)
+        try:
+            for chunk in resp.iter_content(_CHUNK_BYTES):
+                size += len(chunk)
+                if size > HTTP_MAX_BODY_BYTES:
+                    raise _TransportLimit(
+                        "response larger than {} bytes".format(HTTP_MAX_BODY_BYTES))
+                if time.monotonic() - started > HTTP_DEADLINE_SEC:
+                    raise _TransportLimit(
+                        "response slower than {} s".format(HTTP_DEADLINE_SEC))
+                chunks.append(chunk)
+        except Exception as exc:
+            if expired.is_set():
+                raise _TransportLimit(
+                    "response slower than {} s".format(HTTP_DEADLINE_SEC)) from exc
+            raise
+        if expired.is_set():
+            raise _TransportLimit("response slower than {} s".format(HTTP_DEADLINE_SEC))
         return _Response(resp.status_code, b"".join(chunks), resp.encoding)
     finally:
+        watchdog.cancel()
         resp.close()
 
 

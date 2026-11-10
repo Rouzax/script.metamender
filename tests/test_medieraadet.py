@@ -105,3 +105,25 @@ def test_search_without_film_list_is_transient():
 def test_code_map():
     assert medieraadet.CODE_MAP == {"tfa": "A", "fr.u7": "7", "to7": "7", "to11": "11",
                                     "to15": "15"}
+
+
+def test_original_title_searched_when_local_title_finds_nothing():
+    def answers(url, params):
+        if url.endswith("/film"):
+            if params["Title"] == "Interstellar":
+                return _load("search_interstellar.json")
+            return {"FilmList": []}
+        return _load("film_91076.json")
+
+    paced = []
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs.get("params"))
+        return answers(url, kwargs.get("params"))
+
+    with patch("resources.lib.providers.medieraadet.provider_get", side_effect=fake_get):
+        rating = medieraadet.lookup("Interstellaire", "Interstellar", 2014, "movie",
+                                    pace=lambda: paced.append(1) or True)
+    assert rating == "11"
+    assert len(paced) == len(calls)  # every request paced, details included

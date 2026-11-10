@@ -87,8 +87,10 @@ from resources.lib.engine.certchain import (
     resolve_certification,
 )
 from resources.lib.engine.certification import (
+    BLANK,
     FOREIGN,
     OWN,
+    PLACEHOLDER,
     classify_current,
     format_mpaa,
     parse_mpaa,
@@ -1714,13 +1716,17 @@ def _resolve_cert(
     media_type: str,
     due: bool,
     recheck: bool,
+    nfo_managed: bool,
 ) -> tuple[CertAnswer, str | None]:
     """The certification answer for the item and the value to plan, if any.
 
-    A rating already in the configured system is kept (only its prefix is
+    An NFO's certification, which may not be replaced, costs no lookups. A
+    rating already in the configured system is kept (only its prefix is
     normalized); a foreign one is kept when replacing is off; otherwise the
     chain runs, with the sites only when the field itself is due. The
-    not-found value replaces "none" on the last of the monthly rechecks.
+    not-found value fills an empty field on the last of the monthly rechecks,
+    never a rating, and metamender's own placeholder follows the not-found
+    setting when that changes.
     """
     preset = cfg.preset
     current = str(item.get("mpaa") or "")
@@ -1731,7 +1737,9 @@ def _resolve_cert(
     # it is not the item's own: it stays on its monthly rechecks.
     ours_derived = ours and bool(fs.get("from_fallback"))
     state = classify_current(current, preset.valid, cfg.prefix, preset.country, placeholder)
-    if state == OWN and not ours_derived:
+    if nfo_managed and not may_write(True, current, written):
+        answer, value = CertAnswer(REAL, None, "kodi"), None
+    elif state == OWN and not ours_derived:
         bare = _own_bare(current, cfg.prefix)
         answer, value = CertAnswer(REAL, bare, "kodi"), format_mpaa(bare, cfg.prefix)
     elif state == FOREIGN and not cfg.replace_foreign:
@@ -1749,7 +1757,14 @@ def _resolve_cert(
         )
         answer = resolve_certification(query, preset, cfg.gate if due else None)
         value = format_mpaa(answer.rating, cfg.prefix) if answer.rating else None
-        if (answer.kind == NONE and cfg.not_found and recheck
+        if answer.kind == NONE and state == PLACEHOLDER:
+            # Reached through a settings change: the placeholder becomes the
+            # current not-found value, or goes when that is switched off.
+            if cfg.not_found:
+                answer, value = CertAnswer(REAL, cfg.not_found, "fallback"), cfg.not_found
+            else:
+                value = ""
+        elif (answer.kind == NONE and state == BLANK and cfg.not_found and recheck
                 and int(fs.get("fallback_checks") or 0) >= FALLBACK_RECHECKS - 1):
             answer, value = CertAnswer(REAL, cfg.not_found, "fallback"), cfg.not_found
     log.debug(
@@ -2219,6 +2234,7 @@ def run_scan(
             cert_answer, cert_value = _resolve_cert(
                 ctx.cert, item, identity, primary, ids, fs_map.get("mpaa", {}),
                 media_type.name, decisions["mpaa"] == FETCH_NOW, "mpaa" in rechecks,
+                nfo_managed,
             )
             # Not asked (sites not due, TMDB without an answer) and
             # unavailable both leave the field's clock alone.

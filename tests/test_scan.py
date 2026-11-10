@@ -5698,7 +5698,9 @@ class TestCertifications:
         calls = []
 
         def make(name, media):
-            def lookup(title, original_title, year, media_type, imdb_id=None):
+            def lookup(title, original_title, year, media_type, imdb_id=None, pace=None):
+                if pace is not None:
+                    pace()
                 calls.append(name)
                 return (answers or {}).get(name)
             return SimpleNamespace(SITE=name, MEDIA_TYPES=frozenset(media), lookup=lookup)
@@ -5923,3 +5925,84 @@ class TestCertifications:
                                  settings=self._settings(cert_prefix_override=""))
         tracker.close()
         assert _written(upd, "mpaa") == "12"
+
+
+class TestCertificationReviewFixes:
+    """Findings from the Phase 8 review: NFO items spend no lookups, the
+    not-found value never replaces a rating, and a placeholder follows a
+    change of the not-found setting."""
+
+    _helper = TestCertifications()
+
+    def _seed(self, tracker, item, value, source, from_fallback, checks, settings):
+        from resources.lib.engine.protect import fingerprint
+        from resources.lib.engine.scan import settings_fingerprint
+
+        identity = compute_identity(item, MOVIE)
+        tracker.upsert_item("movie", identity, kodi_id=1)
+        tracker.record_field_fetch(
+            "movie", identity, "mpaa", next_retry="2000-01-01", source=source,
+            written_value=fingerprint(value), from_fallback=from_fallback,
+            settings_fp=settings_fingerprint("mpaa", settings, "en-US", "movie"),
+        )
+        tracker._conn.execute(
+            "UPDATE field_status SET fallback_checks = ? WHERE field = 'mpaa'", (checks,))
+        tracker.commit()
+        return identity
+
+    def test_nfo_foreign_rating_spends_no_lookups(self, tmp_path, kodi_stubs, monkeypatch):
+        calls = self._helper._fake_sites(monkeypatch, {"fsk": "16"})
+        item = _make_movie_item()
+        item["mpaa"] = "Rated PG-13"
+        tracker = _make_tracker(tmp_path)
+        upd, _s, gate = self._helper._scan(tracker, item, {}, nfo=True)
+        row = self._helper._row(tracker, item)
+        tracker.close()
+        assert _written(upd, "mpaa") is None and calls == [] and gate.requests == 0
+        assert (row["fetch_count"], row["from_fallback"]) == (1, 0)  # answered, final
+
+    def test_nfo_blank_certification_is_filled(self, tmp_path, kodi_stubs, monkeypatch):
+        self._helper._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        tracker = _make_tracker(tmp_path)
+        upd, _s, _g = self._helper._scan(tracker, item, {"NL": "12"}, nfo=True)
+        tracker.close()
+        assert _written(upd, "mpaa") == "NL:12"
+
+    def test_not_found_never_replaces_a_rating(self, tmp_path, kodi_stubs, monkeypatch):
+        from resources.lib.constants import FALLBACK_RECHECKS
+
+        self._helper._fake_sites(monkeypatch)
+        settings = self._helper._settings(cert_not_found="NR")
+        item = _make_movie_item()
+        item["mpaa"] = "NL:16"
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker, item, "NL:16", "tmdb-us", True, FALLBACK_RECHECKS - 1, settings)
+        upd, _s, _g = self._helper._scan(tracker, item, {}, settings=settings)
+        tracker.close()
+        assert _written(upd, "mpaa") is None
+
+    def test_placeholder_cleared_when_not_found_turned_off(self, tmp_path, kodi_stubs,
+                                                         monkeypatch):
+        self._helper._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        item["mpaa"] = "NR"
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker, item, "NR", "fallback", False, 12,
+                   self._helper._settings(cert_not_found="NR"))
+        upd, _s, _g = self._helper._scan(tracker, item, {}, settings=self._helper._settings())
+        tracker.close()
+        assert _written(upd, "mpaa") == ""
+
+    def test_placeholder_follows_a_new_not_found_value(self, tmp_path, kodi_stubs,
+                                                       monkeypatch):
+        self._helper._fake_sites(monkeypatch)
+        item = _make_movie_item()
+        item["mpaa"] = "NR"
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker, item, "NR", "fallback", False, 12,
+                   self._helper._settings(cert_not_found="NR"))
+        upd, _s, _g = self._helper._scan(
+            tracker, item, {}, settings=self._helper._settings(cert_not_found="Unrated"))
+        tracker.close()
+        assert _written(upd, "mpaa") == "Unrated"

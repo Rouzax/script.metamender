@@ -18,7 +18,10 @@ def _site(name, answers, media=("movie", "tvshow")):
     """A fake site module; answers maps title -> rating, or an exception."""
     calls = []
 
-    def lookup(title, original_title, year, media_type, imdb_id=None):
+    def lookup(title, original_title, year, media_type, imdb_id=None, pace=None):
+        # Like a real site module: every request is paced first.
+        if pace is not None and not pace():
+            raise TransientProviderError("paced out")
         calls.append(title)
         answer = answers.get(title) if isinstance(answers, dict) else answers
         if isinstance(answer, Exception):
@@ -37,13 +40,19 @@ def sites(monkeypatch):
 
 
 class _Monitor:
-    def __init__(self, abort=False):
+    def __init__(self, abort=False, abort_after=None):
         self.abort = abort
+        self.abort_after = abort_after  # abortRequested() turns True after N calls
+        self.checks = 0
         self.waits = []
 
     def waitForAbort(self, seconds):
         self.waits.append(seconds)
         return self.abort
+
+    def abortRequested(self):
+        self.checks += 1
+        return self.abort_after is not None and self.checks > self.abort_after
 
 
 def _gate(enabled=("fsk", "bbfc", "medieraadet"), monitor=None, **kw):
@@ -204,3 +213,43 @@ def test_unexpected_error_disables_site(sites):
 def test_monitor_none_still_paces(sites):
     gate = SiteGate(frozenset({"fsk"}), CircuitBreaker(), None, min_interval=0.0)
     assert gate.ask("fsk", _q()) is None
+
+
+def test_abort_checked_before_every_request(sites):
+    monitor = _Monitor(abort_after=1)
+    gate = _gate(monitor=monitor)
+    assert gate.ask("fsk", _q("A")) is None
+    assert gate.ask("bbfc", _q("A")) is TRANSIENT  # another site, no wait pending
+    assert gate.aborted and sites["bbfc"].calls == []
+
+
+def test_chain_stops_on_abort(sites):
+    de = load_preset("DE")
+    gate = _gate(monitor=_Monitor(abort_after=0))
+    answer = resolve_certification(_q(certs={"US": "R"}), de, gate)
+    assert answer.kind == "transient"  # not the TMDB-mapped US rating
+
+
+def test_every_request_of_a_lookup_counts(sites):
+    def two_requests(title, original_title, year, media_type, imdb_id=None, pace=None):
+        for _ in range(2):
+            if not pace():
+                raise TransientProviderError("paced out")
+        return None
+
+    sites["medieraadet"].lookup = two_requests
+    gate = _gate()
+    assert gate.ask("medieraadet", _q()) is None
+    assert gate.requests == 2
+    capped = _gate(cap=1)
+    assert capped.ask("medieraadet", _q()) is TRANSIENT
+
+
+def test_memo_key_includes_original_title_and_imdb(sites):
+    sites["fsk"].lookup = _site("fsk", {"Film": "16"}).lookup
+    gate = _gate()
+    gate.ask("fsk", _q())
+    other = CertQuery(title="Film", original_title="Other", year=2014, media_type="movie",
+                      imdb_id="tt1", tmdb_certs={})
+    gate.ask("fsk", other)
+    assert gate.requests == 2

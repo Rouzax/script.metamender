@@ -47,3 +47,17 @@ def test_page_without_next_data_is_transient():
 
 def test_no_page_is_none():
     assert _lookup(None, "Interstellar", "", 2014, "movie")[0] is None
+
+
+def test_original_title_searched_when_local_title_finds_nothing():
+    page = (_FIX / "interstellar.html").read_text(encoding="utf-8")
+    empty = page.replace('"results": [', '"results": [] , "x": [')
+
+    def fake_get(url, **kwargs):
+        return page if kwargs["params"]["q"] == "Interstellar" else empty
+
+    with patch("resources.lib.providers.bbfc.provider_get_text", side_effect=fake_get) as get:
+        rating = bbfc.lookup("Interstellaire", "Interstellar", 2014, "movie")
+    assert rating == "12"
+    assert [c.kwargs["params"]["q"] for c in get.call_args_list] == [
+        "Interstellaire", "Interstellar"]

@@ -15,9 +15,16 @@ Logging:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
-from resources.lib.engine.certification import Candidate, best_match
+from resources.lib.engine.certification import (
+    Candidate,
+    best_match,
+    no_pace,
+    other_title,
+    paced,
+)
 from resources.lib.providers.http import provider_get
 from resources.lib.utils import TransientProviderError, get_logger
 
@@ -41,14 +48,33 @@ def lookup(
     year: int | None,
     media_type: str,
     imdb_id: str | None = None,
+    pace: Callable[[], bool] = no_pace,
 ) -> str | None:
     """The FSK rating ("0", "6", "12", "16", "18") of the item, or None when
-    FSK has no matching release. Raises TransientProviderError when the API
-    is unavailable or answers without its usual structure."""
+    FSK has no matching release. The original title is searched too when the
+    item's title finds nothing. Raises TransientProviderError when the API is
+    unavailable, answers without its usual structure, or ``pace`` refuses a
+    request."""
+    rating = _search(title, title, original_title, year, media_type, imdb_id, pace)
+    second = other_title(title, original_title)
+    if rating is None and second:
+        rating = _search(second, title, original_title, year, media_type, imdb_id, pace)
+    return rating
+
+
+def _search(
+    query: str,
+    title: str,
+    original_title: str,
+    year: int | None,
+    media_type: str,
+    imdb_id: str | None,
+    pace: Callable[[], bool],
+) -> str | None:
     tv = media_type == "tvshow"
     params: dict[str, Any] = {
         "searchLayout": "full",
-        "searchTitle": title,
+        "searchTitle": query,
         "sort": "__ratingReleaseDateTc",
     }
     if tv:
@@ -59,6 +85,7 @@ def lookup(
             params["ratingReleaseDateFrom"] = "{}-01-01".format(year - 1)
     else:
         params.update({"superType": "single", "singleOptions[]": "SP"})
+    paced(pace)
     data = provider_get(_SEARCH_URL, logger=log, label="fsk.search", params=params,
                         provider=SITE)
     if data is None:

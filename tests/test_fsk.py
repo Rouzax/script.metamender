@@ -85,3 +85,27 @@ def test_rating_outside_the_list_is_ignored():
     for doc in data["data"]["docs"]:
         doc["__rating"] = 99
     assert _lookup(data, "The Matrix", "", 1999, "movie")[0] is None
+
+
+def test_original_title_searched_when_local_title_finds_nothing():
+    matrix = _load("matrix_movie.json")
+    paced = []
+
+    def fake_get(url, **kwargs):
+        title = kwargs["params"]["searchTitle"]
+        return matrix if title == "The Matrix" else {"success": True, "data": {"docs": []}}
+
+    with patch("resources.lib.providers.fsk.provider_get", side_effect=fake_get) as get:
+        rating = fsk.lookup("Matrix (NL-titel)", "The Matrix", 1999, "movie",
+                            pace=lambda: paced.append(1) or True)
+    assert rating == "16"
+    assert [c.kwargs["params"]["searchTitle"] for c in get.call_args_list] == [
+        "Matrix (NL-titel)", "The Matrix"]
+    assert len(paced) == 2
+
+
+def test_refused_pace_makes_no_request():
+    with patch("resources.lib.providers.fsk.provider_get") as get, \
+            pytest.raises(TransientProviderError):
+        fsk.lookup("The Matrix", "", 1999, "movie", pace=lambda: False)
+    get.assert_not_called()

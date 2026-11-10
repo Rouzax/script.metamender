@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable
 
 from resources.lib.engine.protect import is_blank
+from resources.lib.utils import TransientProviderError
 
 _COUNTRY_PREFIX = re.compile(r"^\s*([A-Za-z]{2,3}):\s*")
 _RATED_PREFIX = re.compile(r"^\s*rated\s+", re.IGNORECASE)
@@ -151,4 +153,24 @@ def best_match(
             titles_match(t, w) for t in titles for w in item_titles if w
         ):
             return rating
+    return None
+
+
+def no_pace() -> bool:
+    """The pace of a lookup made outside a scan (tests, verify.py): go now."""
+    return True
+
+
+def paced(pace: Callable[[], bool]) -> None:
+    """Ask the scan's site gate before a request; it raises when the request
+    must not go out (Kodi shutting down, the cycle's budget spent)."""
+    if not pace():
+        raise TransientProviderError("certification request not allowed now")
+
+
+def other_title(title: str, original_title: str) -> str | None:
+    """The original title when it differs from the item's title: the second
+    search a site gets when the first finds nothing."""
+    if original_title and normalize_title(original_title) != normalize_title(title):
+        return original_title
     return None

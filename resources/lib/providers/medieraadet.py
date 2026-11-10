@@ -18,9 +18,17 @@ Logging:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
-from resources.lib.engine.certification import Candidate, best_match, years_match
+from resources.lib.engine.certification import (
+    Candidate,
+    best_match,
+    no_pace,
+    other_title,
+    paced,
+    years_match,
+)
 from resources.lib.providers.http import provider_get
 from resources.lib.utils import TransientProviderError, get_logger
 
@@ -46,16 +54,30 @@ def lookup(
     year: int | None,
     media_type: str,
     imdb_id: str | None = None,
+    pace: Callable[[], bool] = no_pace,
 ) -> str | None:
     """The Medieraadet rating ("A", "7", "11", "15") of a film, or None when
-    it has none (always for a TV show). Raises TransientProviderError when
-    the API is unavailable or answers without its usual structure.
+    it has none (always for a TV show). The original title is searched too
+    when the item's title finds nothing. Raises TransientProviderError when
+    the API is unavailable, answers without its usual structure, or ``pace``
+    refuses a request (every search and detail fetch asks it first).
     ``imdb_id`` is part of the shared site interface; the API has no ids."""
     if media_type != "movie":
         return None
-    films = _search(title)
-    if not films and _ARTICLE.match(title):
-        films = _search(_ARTICLE.sub("", title))
+    rating = _find(title, title, original_title, year, pace)
+    second = other_title(title, original_title)
+    if rating is None and second:
+        rating = _find(second, title, original_title, year, pace)
+    return rating
+
+
+def _find(
+    query: str, title: str, original_title: str, year: int | None,
+    pace: Callable[[], bool],
+) -> str | None:
+    films = _search(query, pace)
+    if not films and _ARTICLE.match(query):
+        films = _search(_ARTICLE.sub("", query), pace)
     # A known year first, in the API's order; a film without a year after
     # them rather than dropped.
     ranked = sorted(
@@ -64,7 +86,7 @@ def lookup(
     )
     candidates: list[Candidate] = []
     for film in ranked[:MAX_DETAILS]:
-        detail = _detail(film)
+        detail = _detail(film, pace)
         if detail is None:
             continue
         rating = CODE_MAP.get(str(detail.get("AssesmentCode") or ""))
@@ -82,7 +104,8 @@ def lookup(
     return best_match(wanted, year, candidates)
 
 
-def _search(query: str) -> list[dict[str, Any]]:
+def _search(query: str, pace: Callable[[], bool]) -> list[dict[str, Any]]:
+    paced(pace)
     data = provider_get(
         _BASE + "/film", logger=log, label="medieraadet.search", provider=SITE,
         params={"Title": query, "Sortby": "assessmentreleasedate", "Take": 10, "Skip": 0},
@@ -96,11 +119,12 @@ def _search(query: str) -> list[dict[str, Any]]:
     return [f for f in films if isinstance(f, dict)]
 
 
-def _detail(film: dict[str, Any]) -> dict[str, Any] | None:
+def _detail(film: dict[str, Any], pace: Callable[[], bool]) -> dict[str, Any] | None:
     try:
         film_id = int(str(film.get("Id")))
     except (TypeError, ValueError):
         return None
+    paced(pace)
     return provider_get(
         "{}/film/{}".format(_BASE, film_id), logger=log, label="medieraadet.film",
         provider=SITE, headers={"Accept": "application/json"},

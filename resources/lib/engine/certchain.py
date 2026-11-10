@@ -95,7 +95,7 @@ class SiteGate:
         self._min_interval = min_interval
         self._clock = clock
         self._last: dict[str, float] = {}
-        self._memo: dict[tuple[str, str, int | None, str], str | None] = {}
+        self._memo: dict[tuple[Any, ...], str | None] = {}
         self._cap_logged = False
 
     def ask(self, site: str, query: CertQuery) -> Any:
@@ -105,32 +105,25 @@ class SiteGate:
         module = SITES[site]
         if site not in self.enabled or query.media_type not in module.MEDIA_TYPES:
             return None
-        key = (site, normalize_title(query.title), query.year, query.media_type)
+        key = (
+            site, normalize_title(query.title), normalize_title(query.original_title),
+            query.year, query.media_type, query.imdb_id,
+        )
         if key in self._memo:
             return self._memo[key]
-        if self.aborted or self._breaker.is_disabled(site):
+        if self.aborted or self._breaker.is_disabled(site) or not self._has_budget():
             return TRANSIENT
-        if self.requests >= self._cap:
-            if not self._cap_logged:
-                self._cap_logged = True
-                log.info("Certification site budget used up for this cycle",
-                         event="cert.cap_reached", cap=self._cap)
-            return TRANSIENT
-        if not self._wait(site):
-            return TRANSIENT
-        self.requests += 1
-        self._last[site] = self._clock()
         try:
             answer = module.lookup(
                 query.title, query.original_title, query.year, query.media_type,
-                query.imdb_id,
+                query.imdb_id, pace=lambda: self._pace(site),
             )
         except TransientProviderError as exc:
             if exc.status in (403, 429):
                 # Blocked or rate limited: more requests this cycle would
                 # only make it worse.
                 self._breaker.disable(site)
-            else:
+            elif not self.aborted:
                 self._breaker.record_failure(site)
             log.debug("Certification site unavailable", event="cert.site",
                       site=site, outcome="transient", status=exc.status)
@@ -153,20 +146,35 @@ class SiteGate:
                   outcome="rating" if answer else "none", rating=answer)
         return answer
 
-    def _wait(self, site: str) -> bool:
-        """Wait out the site's interval; False when Kodi is shutting down."""
-        last = self._last.get(site)
-        if last is None:
+    def _has_budget(self) -> bool:
+        if self.requests < self._cap:
             return True
-        remaining = last + self._min_interval - self._clock()
-        if remaining <= 0:
-            return True
-        if self._monitor is None:
-            time.sleep(remaining)
-            return True
-        if self._monitor.waitForAbort(remaining):
+        if not self._cap_logged:
+            self._cap_logged = True
+            log.info("Certification site budget used up for this cycle",
+                     event="cert.cap_reached", cap=self._cap)
+        return False
+
+    def _pace(self, site: str) -> bool:
+        """Called by a site module before each of its requests: True when the
+        request may go out now, after waiting out the site's interval; False
+        when Kodi is shutting down or the cycle's budget is spent."""
+        if self.aborted or not self._has_budget():
+            return False
+        if self._monitor is not None and self._monitor.abortRequested():
             self.aborted = True
             return False
+        last = self._last.get(site)
+        if last is not None:
+            remaining = last + self._min_interval - self._clock()
+            if remaining > 0:
+                if self._monitor is None:
+                    time.sleep(remaining)
+                elif self._monitor.waitForAbort(remaining):
+                    self.aborted = True
+                    return False
+        self.requests += 1
+        self._last[site] = self._clock()
         return True
 
 
@@ -199,6 +207,9 @@ def resolve_certification(
             return None
         return answer
 
+    def aborting() -> bool:
+        return gate is not None and gate.aborted
+
     direct = certs.get(preset.country)
     if direct in preset.valid:
         return CertAnswer(REAL, direct, "tmdb")
@@ -208,6 +219,9 @@ def resolve_certification(
         rating = site(native)
         if rating in preset.valid:
             return CertAnswer(REAL, rating, native)
+        if aborting():
+            # Kodi is shutting down: nothing more is written or recorded.
+            return CertAnswer(UNAVAILABLE, None, None)
 
     for country in preset.inference:
         mapped = preset.mappings.get(country, {}).get(certs.get(country) or "")
@@ -219,6 +233,8 @@ def resolve_certification(
         if name is None:
             continue
         rating = site(name)
+        if aborting():
+            return CertAnswer(UNAVAILABLE, None, None)
         mapped = preset.mappings.get(country, {}).get(rating or "")
         if mapped:
             return CertAnswer(DERIVED, mapped, name)
