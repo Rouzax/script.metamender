@@ -253,3 +253,172 @@ def test_show_without_episodes_runs_one_pass():
     _, progress, _ = _run(Scope(7, None, "Lost"), scan, [])
     assert [c[0] for c in scan.calls] == [TVSHOW]
     assert (progress.total, progress.done) == (1, 1)
+
+
+# --- views, signals and the whole flow ---------------------------------------
+
+
+class FakeBar:
+    def __init__(self, log):
+        self.log = log
+
+    def create(self, heading, message):
+        self.log.append(("create", heading, message))
+
+    def update(self, percent, heading, message):
+        self.log.append(("update", percent))
+
+    def close(self):
+        self.log.append(("close",))
+
+
+def _drive(choices, finish_after_window=None, reopen_at=None, finish_after_updates=2):
+    """Run drive_views with a window that returns ``choices`` in turn and a
+    worker that finishes after a given number of bar updates."""
+    done = threading.Event()
+    progress = RefreshProgress()
+    progress.begin(4, now=0.0)
+    log = []
+    shown = []
+    updates = {"n": 0}
+
+    def show_window():
+        choice = choices[len(shown)]
+        shown.append(choice)
+        if finish_after_window == len(shown):
+            done.set()
+        return choice
+
+    class Bar(FakeBar):
+        def update(self, percent, heading, message):
+            super().update(percent, heading, message)
+            updates["n"] += 1
+            if updates["n"] >= finish_after_updates and (reopen_at is None or len(shown) > 1):
+                done.set()
+
+    def take_reopen():
+        return reopen_at is not None and updates["n"] == reopen_at and len(shown) == 1
+
+    refresh.drive_views(progress, done, "MetaMender: Lost", show_window,
+                        lambda: Bar(log), take_reopen, poll=0.001)
+    return shown, log, progress
+
+
+def test_background_then_finish_closes_the_bar():
+    shown, log, _ = _drive(["background"])
+    assert shown == ["background"]
+    assert log[0][0] == "create" and log[-1] == ("close",)
+
+
+def test_reopen_request_shows_the_window_again():
+    shown, log, _ = _drive(["background", "background"], reopen_at=1)
+    assert shown == ["background", "background"]
+    assert [e[0] for e in log].count("create") == 2
+
+
+def test_stop_requests_stop_and_waits_in_the_bar():
+    shown, log, progress = _drive(["stop"])
+    assert progress.stop_requested is True
+    assert shown == ["stop"] and log[-1] == ("close",)
+
+
+def test_finished_while_the_window_is_open_shows_no_bar():
+    shown, log, _ = _drive(["done"], finish_after_window=1)
+    assert shown == ["done"] and log == []
+
+
+@pytest.mark.parametrize("running,clicked,expected", [
+    (7, 7, "reopen"), (7, 8, "busy"), (7, None, "busy"), (None, 7, "busy"),
+])
+def test_bring_back_or_busy(running, clicked, expected):
+    with patch.object(refresh, "refresh_running_show", return_value=running):
+        assert refresh.bring_back_or_busy(clicked) == expected
+
+
+class Home:
+    """The home window's properties."""
+
+    def __init__(self):
+        self.props = {}
+
+    def getProperty(self, name):
+        return self.props.get(name, "")
+
+    def setProperty(self, name, value):
+        self.props[name] = value
+
+    def clearProperty(self, name):
+        self.props.pop(name, None)
+
+
+@pytest.fixture
+def flow(monkeypatch):
+    """open_refresh with Kodi, the lock and the worker's pieces replaced."""
+    home = Home()
+    notes = []
+    released = []
+    state = {"outcome": refresh.RefreshOutcome(), "raise": None, "lock": True,
+             "running_seen": None}
+    monkeypatch.setattr(refresh, "_home_window", lambda: home)
+    monkeypatch.setattr(refresh, "resolve_scope", lambda d, i: Scope(7, None, "Lost"))
+    monkeypatch.setattr(refresh, "acquire_scan_lock", lambda: state["lock"])
+    monkeypatch.setattr(refresh, "release_scan_lock", lambda: released.append(True))
+    monkeypatch.setattr(refresh, "notify", notes.append)
+    monkeypatch.setattr(refresh, "lang", lambda i: "#%d {}" % i)
+    monkeypatch.setattr(refresh, "_load_settings", lambda: {"tmdb_api_key": "k"})
+    monkeypatch.setattr(refresh, "TrackerDB", lambda path: type("T", (), {"close": lambda s: None})())
+    monkeypatch.setattr(refresh, "_get_db_path", lambda: ":memory:")
+    monkeypatch.setattr(refresh, "load_source_config", lambda p: {"sources": []})
+    monkeypatch.setattr(refresh, "_get_sources_config_path", lambda: "x")
+    monkeypatch.setattr(refresh, "_prepare_imdb_ratings", lambda s, m: False)
+    monkeypatch.setattr(refresh.xbmc, "Monitor", lambda: Monitor())
+    monkeypatch.setattr(refresh.StructuredLogger, "start_scan_log", lambda: None)
+    monkeypatch.setattr(refresh.StructuredLogger, "stop_scan_log", lambda: None)
+
+    def fake_run(scope, progress, settings, source_config, tracker, monitor):
+        state["running_seen"] = home.getProperty(refresh._RUNNING_SHOW)
+        if state["raise"]:
+            raise state["raise"]
+        return state["outcome"]
+
+    def fake_window(progress, heading, done):
+        done.wait(2)
+        return "done"
+
+    monkeypatch.setattr(refresh, "run_refresh", fake_run)
+    monkeypatch.setattr(refresh, "show_progress_window", fake_window)
+    return home, notes, released, state
+
+
+def test_flow_reports_and_cleans_up(flow):
+    home, notes, released, state = flow
+    refresh.open_refresh("tvshow", 7)
+    assert state["running_seen"] == "7"
+    assert notes == ["#32351 Lost"]
+    assert released == [True] and home.props == {}
+
+
+def test_flow_worker_failure_still_cleans_up(flow):
+    home, notes, released, state = flow
+    state["raise"] = RuntimeError("boom")
+    refresh.open_refresh("tvshow", 7)
+    assert notes == ["#32347 {}"]
+    assert released == [True] and home.props == {}
+
+
+def test_flow_after_shutdown_shows_no_toast(flow):
+    home, notes, released, state = flow
+    state["outcome"] = refresh.RefreshOutcome(aborted=True)
+    refresh.open_refresh("tvshow", 7)
+    assert notes == [] and released == [True]
+
+
+def test_flow_with_the_lock_held_reopens_or_says_busy(flow):
+    home, notes, released, state = flow
+    state["lock"] = False
+    home.setProperty(refresh._RUNNING_SHOW, "7")
+    refresh.open_refresh("season", 31)
+    assert home.getProperty(refresh._REOPEN) == "1" and notes == [] and released == []
+    home.props.clear()
+    refresh.open_refresh("season", 31)
+    assert notes == ["#32344 {}"]

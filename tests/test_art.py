@@ -61,3 +61,39 @@ def test_every_colour_the_window_sets_is_used():
         text = handle.read()
     used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))
     assert set(GOLDEN_HOUR) <= used, set(GOLDEN_HOUR) - used
+
+
+PROGRESS_XML = "resources/skins/Default/1080i/script-metamender-progress.xml"
+
+
+def test_progress_xml_textures_exist():
+    with open(PROGRESS_XML) as handle:
+        text = handle.read()
+    for name in set(re.findall(r"metamender/([a-z_]+\.png)", text)):
+        assert os.path.exists(MEDIA + name), name
+
+
+def test_progress_xml_reads_only_properties_the_window_sets():
+    from resources.lib.service.refresh import RefreshProgress
+    from resources.lib.ui.progress_window import progress_properties
+    with open(PROGRESS_XML) as handle:
+        text = handle.read()
+    used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))
+    produced = set(progress_properties(RefreshProgress(), "x", 0.0))
+    assert used <= produced, used - produced
+    assert {"MM.Heading", "MM.Current", "MM.Stop", "MM.Background", "MM.Accent"} <= used
+
+
+def test_progress_buttons_and_bar_match_the_window_code():
+    from resources.lib.ui import progress_window
+    with open(PROGRESS_XML) as handle:
+        text = handle.read()
+    assert 'id="%d"' % progress_window.STOP in text
+    assert 'id="%d"' % progress_window.BACKGROUND in text
+    assert '<defaultcontrol always="true">%d</defaultcontrol>' % progress_window.BACKGROUND in text
+    assert '<control type="progress" id="40">' in text
+
+
+def test_context_menu_shows_on_seasons():
+    with open("addon.xml") as handle:
+        assert "String.IsEqual(ListItem.DBType,season)" in handle.read()

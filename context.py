@@ -2,7 +2,8 @@
 
 Launched from the "MetaMender: Update now" context-menu item (declared as a
 kodi.context.item extension in addon.xml). Reads the focused list item's
-DBTYPE and DBID and runs the single-item force-correction handler.
+DBTYPE and DBID and runs Update now: one movie or episode, or a whole show
+or season with a progress window (service/refresh.py).
 
 Logging:
     Delegates to resources.lib.service.actions.update_now ('actions' logger).

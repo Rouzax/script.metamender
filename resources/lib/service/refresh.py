@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+import xbmc
+import xbmcgui
 
 from resources.lib.data.kodi import (
     get_all_items,
@@ -19,10 +23,23 @@ from resources.lib.data.kodi import (
     get_season_info,
 )
 from resources.lib.data.media_types import EPISODE, TVSHOW, MediaType
+from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
-from resources.lib.utils import get_logger, lang
+from resources.lib.service.daemon import (
+    _get_db_path,
+    _get_sources_config_path,
+    _load_settings,
+    _prepare_imdb_ratings,
+)
+from resources.lib.service.lock import (
+    _home_window,
+    acquire_scan_lock,
+    release_scan_lock,
+)
+from resources.lib.ui.progress_window import show_progress_window
+from resources.lib.utils import ApiKeyError, StructuredLogger, get_logger, lang, notify
 
 log = get_logger('refresh')
 
@@ -123,6 +140,10 @@ class RefreshProgress:
                 return None
             per_item = (now - self._started) / self.done
             return round(per_item * max(self.total - self.done, 0))
+
+    def percent(self) -> int:
+        with self._lock:
+            return 0 if self.total <= 0 else min(100, self.done * 100 // self.total)
 
     def bar_text(self) -> str:
         with self._lock:
@@ -228,3 +249,135 @@ def run_refresh(
              stopped=outcome.stopped, could_not_finish=outcome.could_not_finish,
              aborted=outcome.aborted)
     return outcome
+
+
+# Home-window properties shared with a second Update now (its own process):
+# the running refresh's show, and its request to show the window again.
+_RUNNING_SHOW = "metamender_refresh_show"
+_REOPEN = "metamender_refresh_reopen"
+# How often the background bar is updated and the reopen request checked.
+_POLL_SECONDS = 0.5
+
+
+def refresh_running_show() -> int | None:
+    value = _home_window().getProperty(_RUNNING_SHOW)
+    return int(value) if value.isdigit() else None
+
+
+def request_reopen() -> None:
+    _home_window().setProperty(_REOPEN, "1")
+
+
+def _take_reopen() -> bool:
+    window = _home_window()
+    if window.getProperty(_REOPEN):
+        window.clearProperty(_REOPEN)
+        return True
+    return False
+
+
+def bring_back_or_busy(clicked_show: int | None) -> str:
+    """What a second Update now does while a scan holds the lock: "reopen"
+    when it points into the running refresh's show, else "busy"."""
+    running = refresh_running_show()
+    if running is not None and clicked_show == running:
+        return "reopen"
+    return "busy"
+
+
+def drive_views(
+    progress: RefreshProgress,
+    done: threading.Event,
+    bar_heading: str,
+    show_window: Callable[[], str],
+    make_bar: Callable[[], Any],
+    take_reopen: Callable[[], bool],
+    poll: float = _POLL_SECONDS,
+) -> None:
+    """Show the window, and after Background or Stop Kodi's background bar,
+    until the refresh is done. A reopen request brings the window back;
+    after Stop the bar only waits for the item in progress to finish."""
+    while not done.is_set():
+        choice = show_window()
+        if choice == "stop":
+            progress.request_stop()
+        if done.is_set():
+            return
+        bar = make_bar()
+        bar.create(bar_heading, progress.bar_text())
+        try:
+            while not done.wait(poll):
+                bar.update(progress.percent(), bar_heading, progress.bar_text())
+                if choice != "stop" and take_reopen():
+                    break
+        finally:
+            bar.close()
+
+
+def open_refresh(dbtype: str, dbid: int) -> None:
+    """Update now on a show or season: run the refresh on a worker thread
+    while this thread shows its progress, then report the result."""
+    scope = resolve_scope(dbtype, dbid)
+    if scope is None:
+        notify(lang(32345))  # Item not found
+        return
+    if not acquire_scan_lock():
+        if bring_back_or_busy(scope.tvshowid) == "reopen":
+            request_reopen()
+        else:
+            notify(lang(32344))  # A scan is already running
+        return
+    home = _home_window()
+    home.setProperty(_RUNNING_SHOW, str(scope.tvshowid))
+    home.clearProperty(_REOPEN)
+    StructuredLogger.start_scan_log()
+    try:
+        settings = _load_settings()
+        if not settings.get("tmdb_api_key"):
+            notify(lang(32346))  # No TMDB API key configured
+            return
+        progress = RefreshProgress()
+        done = threading.Event()
+        result: dict[str, Any] = {}
+        monitor = xbmc.Monitor()
+
+        def work() -> None:
+            # The tracker's SQLite connection belongs to the thread that
+            # opens it, so the worker opens its own.
+            tracker = None
+            try:
+                tracker = TrackerDB(_get_db_path())
+                source_config = load_source_config(_get_sources_config_path())
+                settings["imdb_ready"] = _prepare_imdb_ratings(settings, monitor)
+                result["outcome"] = run_refresh(
+                    scope, progress, settings, source_config, tracker, monitor)
+            except ApiKeyError:
+                log.exception("Refresh stopped: invalid API key", event="refresh.apikey")
+                result["error"] = 32341
+            except Exception:
+                log.exception("Refresh failed", event="refresh.error")
+                result["error"] = 32347
+            finally:
+                if tracker is not None:
+                    tracker.close()
+                done.set()
+
+        worker = threading.Thread(target=work, name="metamender-refresh")
+        worker.start()
+        heading = (lang(32470).format(scope.title) if scope.season is None
+                   else lang(32471).format(scope.title, scope.season))
+        drive_views(progress, done, lang(32485).format(scope.title),
+                    lambda: show_progress_window(progress, heading, done),
+                    xbmcgui.DialogProgressBG, _take_reopen)
+        worker.join()
+        if "error" in result:
+            notify(lang(result["error"]))
+        else:
+            outcome: RefreshOutcome = result["outcome"]
+            if not outcome.aborted:
+                notify(progress.toast(scope.title, outcome.stopped, outcome.could_not_finish))
+    finally:
+        home.clearProperty(_RUNNING_SHOW)
+        home.clearProperty(_REOPEN)
+        StructuredLogger.stop_scan_log()
+        release_scan_lock()

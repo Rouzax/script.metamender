@@ -26,7 +26,7 @@ import xbmcgui
 
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.kodi import get_item_by_id
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW, MediaType
+from resources.lib.data.media_types import EPISODE, MOVIE, MediaType
 from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
@@ -39,6 +39,12 @@ from resources.lib.service.daemon import (
     tvdb_auth_failed,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
+from resources.lib.service.refresh import (
+    bring_back_or_busy,
+    open_refresh,
+    request_reopen,
+    show_id_of,
+)
 from resources.lib.service.setup import open_setup
 from resources.lib.ui.setup_model import WIZARD
 from resources.lib.utils import (
@@ -57,7 +63,6 @@ log = get_logger('actions')
 # Map a Kodi ListItem.DBType string to its MediaType.
 _DBTYPE_TO_MEDIA_TYPE: Dict[str, MediaType] = {
     "movie": MOVIE,
-    "tvshow": TVSHOW,
     "episode": EPISODE,
 }
 
@@ -113,12 +118,16 @@ def update_now(dbtype: str, dbid: str) -> None:
 
     Runs a reset scan of one library item: it bypasses the disabled-source
     gate, the playback yield, and the cycle-processed skip, treats every
-    enabled field as due, and re-baselines each field's maturity clock.
-    Acquires the shared scan lock so it never runs concurrently with the
-    service/manual scan.
+    enabled field as due, and leaves each field's refresh schedule as it was
+    (a manual refresh is not a sample of the item's ageing). A show or a
+    season refreshes everything under it with a progress window
+    (service/refresh.py). Acquires the shared scan lock so it never runs
+    concurrently with another scan; while one runs, a click inside the show
+    being refreshed brings its window back.
 
     Args:
-        dbtype: Kodi ListItem.DBTYPE ("movie", "tvshow", or "episode").
+        dbtype: Kodi ListItem.DBTYPE ("movie", "tvshow", "season" or
+            "episode").
         dbid: Kodi database ID as a string (from $INFO[ListItem.DBID]).
     """
     _init_logging()
@@ -134,6 +143,15 @@ def update_now(dbtype: str, dbid: str) -> None:
         media_type=dbtype,
         item_id=str(dbid),
     )
+
+    if dbtype in ("tvshow", "season"):
+        try:
+            show_or_season = int(dbid)
+        except (TypeError, ValueError):
+            notify(lang(32343))  # Invalid item
+            return
+        open_refresh(dbtype, show_or_season)
+        return
 
     media_type: Optional[MediaType] = _DBTYPE_TO_MEDIA_TYPE.get(dbtype)
     if media_type is None:
@@ -157,6 +175,11 @@ def update_now(dbtype: str, dbid: str) -> None:
         return
 
     if not acquire_scan_lock():
+        if bring_back_or_busy(show_id_of(dbtype, item_id)) == "reopen":
+            log.info("Refresh running for this show, showing its window",
+                     event="actions.reopen_refresh")
+            request_reopen()
+            return
         log.info(
             "A scan is already running, skipping update now",
             event="actions.locked",

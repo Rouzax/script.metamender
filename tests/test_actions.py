@@ -297,3 +297,32 @@ def test_update_now_opens_no_log_while_a_scan_runs(update_patched, monkeypatch):
     update_patched["acquire"].return_value = False
     actions.update_now("movie", "7")
     start.assert_not_called()
+
+
+@pytest.mark.parametrize("dbtype", ["tvshow", "season"])
+def test_update_now_on_a_show_or_season_opens_the_refresh(update_patched, monkeypatch, dbtype):
+    opened = MagicMock()
+    monkeypatch.setattr(actions, "open_refresh", opened)
+    actions.update_now(dbtype, "7")
+    opened.assert_called_once_with(dbtype, 7)
+    update_patched["run_scan"].assert_not_called()
+    update_patched["acquire"].assert_not_called()
+
+
+def test_update_now_on_an_episode_inside_the_running_refresh_reopens_it(update_patched, monkeypatch):
+    update_patched["acquire"].return_value = False
+    reopen = MagicMock()
+    monkeypatch.setattr(actions, "show_id_of", lambda d, i: 7)
+    monkeypatch.setattr(actions, "bring_back_or_busy", lambda show: "reopen" if show == 7 else "busy")
+    monkeypatch.setattr(actions, "request_reopen", reopen)
+    actions.update_now("episode", "100")
+    reopen.assert_called_once()
+    update_patched["notify"].assert_not_called()
+
+
+def test_update_now_on_a_movie_while_a_refresh_runs_says_busy(update_patched, monkeypatch):
+    update_patched["acquire"].return_value = False
+    monkeypatch.setattr(actions, "show_id_of", lambda d, i: None)
+    monkeypatch.setattr(actions, "bring_back_or_busy", lambda show: "busy")
+    actions.update_now("movie", "7")
+    assert "already running" in update_patched["notify"].call_args[0][0]
