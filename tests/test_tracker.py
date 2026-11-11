@@ -770,3 +770,18 @@ def test_rename_show_episodes(tmp_path):
         "Alfred J. Kwakkel S01E01",
     }
     db.close()
+
+
+def test_forget_disabled_fields_clears_only_other_fields_of_the_media_type(tmp_path):
+    t = _tracker_with_item(tmp_path)
+    t.upsert_item("episode", "Ep", kodi_id=2)
+    t.record_field_fetch("movie", "Air", "plot", None, settings_fp="a")
+    t.record_field_fetch("movie", "Air", "tagline", None, settings_fp="b")
+    t.record_field_fetch("episode", "Ep", "plot", None, settings_fp="c")
+    assert t.forget_disabled_fields("movie", ["tagline"]) == 1
+    assert t.forget_disabled_fields("movie", ["tagline"]) == 0
+    fps = (t.get_field_status("movie", "Air", "plot")["settings_fp"],
+           t.get_field_status("movie", "Air", "tagline")["settings_fp"],
+           t.get_field_status("episode", "Ep", "plot")["settings_fp"])
+    t.close()
+    assert fps == (None, "b", "c")

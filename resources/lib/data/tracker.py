@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Iterable
 from datetime import date
 from typing import Any
 
@@ -604,6 +605,28 @@ class TrackerDB:
             return cur.rowcount
         except sqlite3.Error:
             log.exception("Failed to clear field status", event="tracker.error")
+            return 0
+
+    def forget_disabled_fields(self, media_type: str, enabled: Iterable[str]) -> int:
+        """Clear the settings fingerprint of every field of ``media_type`` not
+        in ``enabled``. A field switched off and on again then no longer
+        matches its fingerprint, so the scan checks it once more, keeping
+        its provenance. Returns the number of rows cleared."""
+        keep = sorted(set(enabled))
+        marks = ",".join("?" * len(keep))
+        not_kept = "AND field NOT IN ({})".format(marks) if keep else ""
+        try:
+            cur = self._conn.execute(
+                "UPDATE field_status SET settings_fp = NULL "
+                "WHERE settings_fp IS NOT NULL {} AND item_id IN "
+                "(SELECT id FROM items WHERE media_type = ?)".format(not_kept),
+                (*keep, media_type),
+            )
+            self._conn.commit()
+            return cur.rowcount
+        except sqlite3.Error:
+            log.exception("Failed to forget disabled fields", event="tracker.error",
+                          media_type=media_type)
             return 0
 
     def commit(self) -> None:
