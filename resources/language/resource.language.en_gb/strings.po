@@ -737,3 +737,67 @@ msgstr ""
 msgctxt "#32469"
 msgid "Setup finished"
 msgstr ""
+
+msgctxt "#32470"
+msgid "Refreshing {}"
+msgstr ""
+
+msgctxt "#32471"
+msgid "Refreshing {}, season {}"
+msgstr ""
+
+msgctxt "#32472"
+msgid "Show details"
+msgstr ""
+
+msgctxt "#32473"
+msgid "Season {}, episode {}: {}"
+msgstr ""
+
+msgctxt "#32474"
+msgid "{} of {} episodes"
+msgstr ""
+
+msgctxt "#32475"
+msgid "About {} minutes left"
+msgstr ""
+
+msgctxt "#32476"
+msgid "Less than a minute left"
+msgstr ""
+
+msgctxt "#32477"
+msgid "{} updated"
+msgstr ""
+
+msgctxt "#32478"
+msgid "{} unchanged"
+msgstr ""
+
+msgctxt "#32479"
+msgid "{} could not be checked"
+msgstr ""
+
+msgctxt "#32480"
+msgid "Stop"
+msgstr ""
+
+msgctxt "#32481"
+msgid "Background"
+msgstr ""
+
+msgctxt "#32482"
+msgid "Updated: {}, {} of {} changed"
+msgstr ""
+
+msgctxt "#32483"
+msgid "Stopped after {} of {} episodes: {}"
+msgstr ""
+
+msgctxt "#32484"
+msgid "Could not finish: {}"
+msgstr ""
+
+msgctxt "#32485"
+msgid "MetaMender: {}"
+msgstr ""
