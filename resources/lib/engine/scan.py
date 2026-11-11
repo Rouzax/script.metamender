@@ -1993,6 +1993,10 @@ def run_scan(
     candidates = _candidate_fields(media_type, enabled_fields)
     if ctx.cert is not None:
         candidates = sorted(set(candidates) | {"mpaa"})
+    forgotten = tracker.forget_disabled_fields(media_type.name, candidates)
+    if forgotten:
+        log.debug("Disabled fields will be checked again when enabled",
+                  event="scan.fields_disabled", media_type=media_type.name, rows=forgotten)
     needed = _needed_providers(media_type, candidates)
 
     log.info(

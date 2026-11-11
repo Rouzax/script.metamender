@@ -2016,6 +2016,43 @@ class TestTransientFieldsAreCounted:
         assert stats["transient"] == 0
 
 
+class TestReenabledFieldIsCheckedAgain:
+    """A field switched off and on again is checked once more, even if it
+    had finished, since Kodi's value may have changed meanwhile."""
+
+    def _finished_plot(self, tracker):
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        for _ in range(8):
+            tracker.record_field_fetch(
+                "movie", _MOVIE_IDENTITY, "plot", next_retry=None,
+                written_value=None, settings_fp=_fp("plot", MOVIE),
+            )
+        tracker.commit()
+
+    @pytest.mark.parametrize("off_scan,fetched", [(False, False), (True, True)])
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_plot_off_then_on(
+        self, mock_fetch, mock_update, off_scan, fetched, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        self._finished_plot(tracker)
+        if off_scan:
+            run_scan(MOVIE, tracker, _make_source_config(), frozenset({"tagline"}),
+                     "k", _make_settings(), items=[_make_movie_item()])
+        tracker.start_new_cycle()  # the field is switched on in a later cycle
+        mock_fetch.reset_mock()
+        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+                 "k", _make_settings(), items=[_make_movie_item()])
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert mock_fetch.called is fetched
+        if fetched:
+            assert row["fetch_count"] == 1
+
+
 class TestConsecutiveCycles:
     """End-to-end guard for the defect where the shipped default configuration
     never started a second cycle: cycle_processed stayed 1 for every item, so
