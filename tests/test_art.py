@@ -42,3 +42,14 @@ def test_xml_reads_only_properties_the_window_sets():
                 "MM.StepIndex", "MM.StepTotal", "MM.Marker", *GOLDEN_HOUR}
     assert used <= produced, used - produced
     assert {"MM.Accent", "MM.StepTotal", "MM.Marker"} <= used
+
+
+def test_addon_xml_declares_the_icon():
+    # Kodi 19 and later read the icon only from <assets>; a root icon.png
+    # without it is never shown, in the add-on browser or on toasts.
+    import xml.etree.ElementTree as ET
+    root = ET.parse("addon.xml").getroot()
+    meta = root.find("extension[@point='xbmc.addon.metadata']")
+    assert meta is not None
+    icon = meta.findtext("assets/icon")
+    assert icon == "icon.png" and os.path.exists(icon)
