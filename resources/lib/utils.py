@@ -30,6 +30,8 @@ import xbmcvfs
 from resources.lib.constants import (
     ADDON_PREFIX,
     DEFAULT_ADDON_ID,
+    LOG_ACTIVITY_MAX_BYTES,
+    LOG_ACTIVITY_ROTATED,
     LOG_DIR_NAME,
     LOG_FILE_PREFIX,
     LOG_MAX_FILES,
@@ -49,6 +51,10 @@ _SECRET_RE = re.compile(
 
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+# A per-scan file, e.g. metamender_2026-11-11_181500.log; the activity log
+# (metamender.log, metamender.1.log, ...) does not match.
+_SCAN_LOG_NAME = re.compile(r"^" + re.escape(LOG_FILE_PREFIX) + r"_\d{4}-\d{2}-\d{2}_\d{6}\.log$")
+LOG_ACTIVITY_FILE = LOG_FILE_PREFIX + ".log"
 _CONTROL_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
 
 
@@ -165,15 +171,17 @@ class StructuredLogger:
     Structured logging with dual output: Kodi log + private file.
 
     Output Routing:
-        - ERROR/WARNING/INFO: Kodi log (always) + scan log file (if open)
-        - DEBUG: scan log file only (never pollutes Kodi log)
+        - ERROR/WARNING/INFO: Kodi log (always) + the private file
+        - DEBUG: the private file only (never pollutes Kodi log)
+        The private file is written only with debug logging on.
 
     File lifecycle:
-        Call ``start_scan_log()`` at the beginning of each scan to open a
-        new timestamped log file. Call ``stop_scan_log()`` when the scan
-        finishes. Between scans no file is open and DEBUG lines are
-        discarded. Old log files beyond LOG_MAX_FILES are cleaned up
-        automatically when a new file is opened.
+        ``start_scan_log()`` opens a new timestamped file for one scan (or
+        one Update now) and ``stop_scan_log()`` closes it; files beyond
+        LOG_MAX_FILES are removed when a new one opens. Between them, lines
+        go to the activity log ``metamender.log``, which every process
+        (service, wizard, context actions) appends to and which rotates at
+        LOG_ACTIVITY_MAX_BYTES, keeping LOG_ACTIVITY_ROTATED older copies.
 
     Thread Safety:
         All file operations protected by threading.Lock().
@@ -282,14 +290,14 @@ class StructuredLogger:
 
     @classmethod
     def _cleanup_old_logs(cls) -> None:
-        """Delete log files beyond LOG_MAX_FILES. Must hold lock."""
+        """Delete scan log files beyond LOG_MAX_FILES; the activity log and
+        its rotations are not scan logs. Must hold lock."""
         if cls._log_dir is None:
             return
         try:
             files = sorted(
                 [
-                    f for f in os.listdir(cls._log_dir)
-                    if f.startswith(LOG_FILE_PREFIX) and f.endswith(".log")
+                    f for f in os.listdir(cls._log_dir) if _SCAN_LOG_NAME.match(f)
                 ],
                 reverse=True,
             )
@@ -341,20 +349,42 @@ class StructuredLogger:
         return "{} [{:5}] {}\n".format(timestamp, level, formatted_message)
 
     def _write_to_file(self, level: str, formatted_message: str) -> None:
-        """Write to scan log file if one is open."""
-        if StructuredLogger._log_file is None:
+        """Write to the open scan log, or else to the activity log; nothing
+        with debug logging off."""
+        if not StructuredLogger._debug_enabled:
             return
 
         line = self._format_file_line(level, formatted_message)
 
         with StructuredLogger._lock:
             try:
-                if StructuredLogger._log_file is None:
-                    return
-                StructuredLogger._log_file.write(line)
-                StructuredLogger._log_file.flush()
+                if StructuredLogger._log_file is not None:
+                    StructuredLogger._log_file.write(line)
+                    StructuredLogger._log_file.flush()
+                elif StructuredLogger._log_dir is not None:
+                    StructuredLogger._append_activity(StructuredLogger._log_dir, line)
             except (IOError, OSError):
                 pass
+
+    @staticmethod
+    def _append_activity(log_dir: str, line: str) -> None:
+        """Append to the activity log, rotating it first when it is full.
+        Each line opens the file in append mode, since the service, the
+        wizard and the context actions write to it from separate processes.
+        Must hold lock."""
+        path = os.path.join(log_dir, LOG_ACTIVITY_FILE)
+        if os.path.exists(path) and os.path.getsize(path) >= LOG_ACTIVITY_MAX_BYTES:
+            stem = path[:-len(".log")]
+            oldest = "{}.{}.log".format(stem, LOG_ACTIVITY_ROTATED)
+            if os.path.exists(oldest):
+                os.remove(oldest)
+            for n in range(LOG_ACTIVITY_ROTATED - 1, 0, -1):
+                older = "{}.{}.log".format(stem, n)
+                if os.path.exists(older):
+                    os.replace(older, "{}.{}.log".format(stem, n + 1))
+            os.replace(path, stem + ".1.log")
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line)
 
     def _ensure_event(self, level: str, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Inject placeholder event= for INFO/WARNING/ERROR if missing."""
@@ -364,8 +394,8 @@ class StructuredLogger:
         return kwargs
 
     def debug(self, message: str, **kwargs: Any) -> None:
-        """DEBUG: file only when a scan log is open. No event= required."""
-        if StructuredLogger._debug_enabled and StructuredLogger._log_file is not None:
+        """DEBUG: the private file only. No event= required."""
+        if StructuredLogger._debug_enabled:
             formatted = self._format_message(message, **kwargs)
             self._write_to_file("DEBUG", formatted)
 
