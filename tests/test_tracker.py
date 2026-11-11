@@ -785,3 +785,16 @@ def test_forget_disabled_fields_clears_only_other_fields_of_the_media_type(tmp_p
            t.get_field_status("episode", "Ep", "plot")["settings_fp"])
     t.close()
     assert fps == (None, "b", "c")
+
+
+def test_record_manual_check_keeps_the_clock(tmp_path):
+    t = _tracker_with_item(tmp_path)
+    for _ in range(3):
+        t.record_field_fetch("movie", "Air", "plot", "2027-01-01", settings_fp="a")
+    t.record_manual_check("movie", "Air", "plot", settings_fp="b",
+                          written_value="P", source="tmdb", from_fallback=True)
+    row = t.get_field_status("movie", "Air", "plot")
+    t.close()
+    assert (row["fetch_count"], row["next_retry"]) == (3, "2027-01-01")
+    assert (row["settings_fp"], row["written_value"], row["source"],
+            row["from_fallback"]) == ("b", "P", "tmdb", 1)

@@ -537,6 +537,55 @@ class TrackerDB:
                 field=field,
             )
 
+    def record_manual_check(
+        self,
+        media_type: str,
+        identity: str,
+        field: str,
+        settings_fp: str | None,
+        written_value: str | None = None,
+        source: str | None = None,
+        vote_count: int | None = None,
+        from_fallback: bool | None = None,
+    ) -> None:
+        """Record what an Update now check left in Kodi without touching the
+        field's schedule: fetch_count, next_retry and fetched_at stay as they
+        were, since a manual refresh is not a sample of the item's ageing.
+        None keeps the stored value, as in record_field_fetch; settings_fp is
+        always overwritten. A value newly from the fallback language starts
+        its recheck count at 0, as a first fallback write does."""
+        item_id = self._get_item_id(media_type, identity)
+        if item_id is None:
+            return
+        fallback = None if from_fallback is None else int(from_fallback)
+        try:
+            self._conn.execute(
+                "UPDATE field_status SET "
+                "source = COALESCE(:source, source), "
+                "vote_count = COALESCE(:vote_count, vote_count), "
+                "written_value = COALESCE(:written_value, written_value), "
+                "fallback_checks = CASE "
+                "WHEN :fallback = 0 THEN 0 "
+                "WHEN :fallback = 1 AND from_fallback = 0 THEN 0 "
+                "ELSE fallback_checks END, "
+                "from_fallback = COALESCE(:fallback, from_fallback), "
+                "settings_fp = :settings_fp "
+                "WHERE item_id = :item_id AND field = :field",
+                {
+                    "item_id": item_id, "field": field, "source": source,
+                    "vote_count": vote_count, "written_value": written_value,
+                    "fallback": fallback, "settings_fp": settings_fp,
+                },
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record manual check",
+                event="tracker.error",
+                media_type=media_type,
+                identity=identity,
+                field=field,
+            )
+
     def reset_field_clock(
         self,
         media_type: str,

@@ -1738,11 +1738,11 @@ class TestRunScanReset:
 
     @patch("resources.lib.data.kodi.update_item")
     @patch("resources.lib.providers.tmdb.fetch_movie")
-    def test_reset_rebaselines_field_clock(
+    def test_reset_keeps_field_clock(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
-        """A reset run re-baselines the field clock (fetch_count 1, next_retry
-        set to a future schedule date) regardless of prior samples."""
+        """A reset run (Update now) leaves the clock of a field with history
+        as it was: a manual refresh is not a sample of the item's ageing."""
         from datetime import date as _date
         item = _make_movie_item(plot="")
         item["premiered"] = "2000-01-01"
@@ -1767,10 +1767,7 @@ class TestRunScanReset:
 
         field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
         assert field is not None
-        assert field["fetch_count"] == 1  # re-baselined
-        # next_retry must be a future date (not None) so young content is
-        # re-sampled on the normal schedule after a manual update.
-        assert field["next_retry"] is not None
+        assert (field["fetch_count"], field["next_retry"]) == (3, "2099-01-01")
         assert field["next_retry"] > _date.today().isoformat()
         tracker.close()
 
@@ -2065,6 +2062,74 @@ class TestReenabledFieldIsCheckedAgain:
         assert mock_fetch.called is fetched
         if fetched:
             assert row["fetch_count"] == 1
+
+
+class TestUpdateNowKeepsCadence:
+    """Update now is a correction the user asked for, not a sample of the
+    item's ageing: it records what it wrote but leaves the schedule alone."""
+
+    def _seed(self, tracker, field="plot", count=4, next_retry="2030-01-01", fp=None):
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        for _ in range(count):
+            tracker.record_field_fetch(
+                "movie", _MOVIE_IDENTITY, field, next_retry=next_retry,
+                settings_fp=fp if fp is not None else _fp(field, MOVIE),
+            )
+        tracker.commit()
+
+    def _run(self, tracker, fields=("plot",), reset=True):
+        return run_scan(MOVIE, tracker, _make_source_config(), frozenset(fields),
+                        "k", _make_settings(), items=[_make_movie_item(plot="Old")],
+                        reset=reset)
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_field_with_history_keeps_its_clock(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
+        mock_fetch.return_value = _tmdb_movie_response(plot="New plot")
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker)
+        self._run(tracker)
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+        assert _written(mock_update, "plot") == "New plot"
+        assert (row["fetch_count"], row["next_retry"]) == (4, "2030-01-01")
+        assert row["written_value"] is not None
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_field_without_history_gets_a_first_sample(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
+        mock_fetch.return_value = _tmdb_movie_response(plot="New plot")
+        tracker = _make_tracker(tmp_path)
+        self._run(tracker)
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+        assert row["fetch_count"] == 1 and row["next_retry"]
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_transient_records_nothing(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
+        from resources.lib.utils import TransientProviderError
+        mock_fetch.side_effect = TransientProviderError("http 503")
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker)
+        before = dict(tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot"))
+        self._run(tracker)
+        after = dict(tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot"))
+        tracker.close()
+        assert after == before
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_changed_settings_in_a_scheduled_scan_still_rebaseline(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="New plot")
+        tracker = _make_tracker(tmp_path)
+        self._seed(tracker, fp="old settings")
+        self._run(tracker, reset=False)
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+        assert row["fetch_count"] == 1
 
 
 class TestConsecutiveCycles:
@@ -4190,7 +4255,7 @@ class TestFallbackRecheck:
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")
-    def test_update_now_restarts_recheck_count_and_keeps_provenance(
+    def test_update_now_keeps_recheck_count_and_provenance(
         self, mock_fetch, mock_update, tmp_path, kodi_stubs
     ):
         from resources.lib.engine.protect import fingerprint
@@ -4207,13 +4272,12 @@ class TestFallbackRecheck:
         tracker.close()
 
         assert not mock_update.called
-        assert row["fetch_count"] == 1
-        assert (row["from_fallback"], row["fallback_checks"]) == (1, 0)
+        assert (row["fetch_count"], row["next_retry"]) == (1, "2020-01-01")
+        assert (row["from_fallback"], row["fallback_checks"]) == (1, 7)
         assert row["written_value"] == fingerprint("English plot")
         assert row["settings_fp"] == settings_fingerprint(
             "plot", _make_settings(), "nl-NL", "movie", "en-US",
         )
-        assert row["next_retry"] <= _today_plus(FALLBACK_RECHECK_DAYS)
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")

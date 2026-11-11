@@ -771,12 +771,12 @@ def run_scan(
             media-type pass so a provider that fails repeatedly stays
             disabled across passes. When None, a fresh per-call breaker
             is created (single-pass / test convenience).
-        reset: Single-item "Update now" re-baseline path. When True every
-            candidate field is treated as due regardless of recorded maturity,
-            the disabled-source gate is skipped (so the action always runs),
-            the playback yield is skipped, and each field's clock is
-            re-baselined (reset_field_clock) instead of advanced. Intended
-            for items=[one_item].
+        reset: The "Update now" path. When True every candidate field is
+            treated as due regardless of recorded maturity, the
+            disabled-source gate and the playback yield are skipped (so the
+            action always runs), and a field with history keeps its clock:
+            only what was written is recorded (record_manual_check). A field
+            without history gets a normal first sample.
         new_only: Library-event scan: process only the items whose Kodi id
             the tracker does not hold for this type. Kodi's dateadded is the
             file's date, not when the item entered the library, so it cannot
@@ -1175,7 +1175,9 @@ def run_scan(
         # Advance a field's clock ONLY when its own providers answered; a
         # transient field is retried next scan instead of being wrongly
         # sampled/finalized. A protected field is answered and advances.
-        # Update now and changed settings re-baseline instead.
+        # Changed settings re-baseline it. Update now leaves the clock of a
+        # field with history alone and records only what it wrote: a manual
+        # refresh is not a sample of the item's ageing.
         premiered = item.get(media_type.date_field, "")
         for f in nonfinal:
             outcome = outcomes[f]
@@ -1223,7 +1225,13 @@ def run_scan(
                 # A certification is rechecked monthly at any age.
                 mature = f == "mpaa" or (age is not None and age >= threshold)
                 next_due = fallback_recheck_due(None if mature else next_due, today)
-            if f in rebaseline:
+            if reset and int(fs.get("fetch_count") or 0) > 0:
+                tracker.record_manual_check(
+                    media_type.name, identity, f, settings_fp=fps[f],
+                    written_value=provenance.get(f), source=source,
+                    vote_count=vote_count, from_fallback=from_fallback,
+                )
+            elif f in rebaseline:
                 tracker.reset_field_clock(
                     media_type.name, identity, f,
                     next_retry=next_due, settings_fp=fps[f],
