@@ -40,7 +40,7 @@ msgid "Rating source"
 msgstr ""
 
 msgctxt "#32027"
-msgid "Which provider to prefer when looking up audience ratings. If the preferred source has no data, the other source is tried as a fallback."
+msgid "Which audience ratings to keep up to date, and which one Kodi shows. \"Follow the scraper\" keeps the rating Kodi's scraper chose to show for each item and refreshes it when it comes from TMDB or IMDb; both are kept up to date, and the shown rating never changes source. The other options prefer or use only TMDB or IMDb, and make that rating the one Kodi shows (except for items with an NFO file, which decides that itself)."
 msgstr ""
 
 msgctxt "#32030"
@@ -480,6 +480,10 @@ msgstr ""
 
 msgctxt "#32400"
 msgid "Replace show and movie titles with the title in the source folder's language from TMDB (and TheTVDB for shows), for example when a Dutch folder was scraped in English. Only a title the provider really has in that language is used; there is no fallback language. Titles from an NFO file are kept, and so are titles of items without a TMDB or IMDb id."
+msgstr ""
+
+msgctxt "#32401"
+msgid "Follow the scraper"
 msgstr ""
 
 msgctxt "#32396"

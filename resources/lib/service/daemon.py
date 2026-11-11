@@ -48,7 +48,7 @@ from resources.lib.data.sources import kodi_ui_language, load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import SiteGate
-from resources.lib.engine.resolve import rating_sources
+from resources.lib.engine.resolve import FOLLOW_SCRAPER, rating_sources
 from resources.lib.engine.scan import run_scan
 from resources.lib.providers import imdb_ratings
 from resources.lib.service.lock import (
@@ -146,7 +146,7 @@ def _load_settings() -> dict[str, Any]:
 
     return {
         "tmdb_api_key": get_setting("tmdb_api_key"),
-        "rating_source": get_int_setting("rating_source", 0),
+        "rating_source": get_int_setting("rating_source", FOLLOW_SCRAPER),
         "text_source_order": get_int_setting("text_source_order", 2),
         "fallback_order": get_int_setting("fallback_order", 0),
         "enabled_fields": frozenset(fields),
@@ -204,7 +204,7 @@ def _prepare_imdb_ratings(settings: dict[str, Any], monitor: Any) -> bool:
     """
     if "rating" not in settings["enabled_fields"]:
         return False
-    if not rating_sources(settings.get("rating_source", 0))[1]:
+    if not rating_sources(settings.get("rating_source", FOLLOW_SCRAPER))[1]:
         return False
 
     def abort() -> bool:

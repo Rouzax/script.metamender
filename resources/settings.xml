@@ -17,9 +17,10 @@
             </group>
             <group id="source_priority" label="32025">
                 <setting id="rating_source" type="integer" label="32026" help="32027">
-                    <default>0</default>
+                    <default>4</default>
                     <constraints>
                         <options>
+                            <option label="32401">4</option>
                             <option label="32030">0</option>
                             <option label="32031">1</option>
                             <option label="32032">2</option>
