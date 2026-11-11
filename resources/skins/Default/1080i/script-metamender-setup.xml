@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Every control is inline: Kodi resolves includes and named colours from the active skin
+     only, never from a script's own skin folder. Fonts are limited to font10/12/13, which
+     every skin defines (Kodi falls back to font13 for any name a skin lacks). -->
+<window>
+    <zorder>1</zorder>
+    <!-- The list is filled in onInit, so it cannot take focus when the window opens. -->
+    <defaultcontrol always="true">21</defaultcontrol>
+    <controls>
+        <control type="image">
+            <left>0</left><top>0</top><width>1920</width><height>1080</height>
+            <texture colordiffuse="E6090A0D">metamender/white.png</texture>
+            <animation effect="fade" start="0" end="100" time="200">WindowOpen</animation>
+            <animation effect="fade" start="100" end="0" time="200">WindowClose</animation>
+        </control>
+        <control type="group">
+            <left>340</left><top>110</top><width>1240</width><height>860</height>
+            <animation type="WindowOpen" reversible="false">
+                <effect type="fade" start="0" end="100" time="300" delay="100"/>
+                <effect type="zoom" start="96" end="100" center="auto" tween="sine" easing="out" time="300" delay="100"/>
+            </animation>
+            <animation type="WindowClose" reversible="false">
+                <effect type="zoom" start="100" end="96" center="auto" tween="sine" easing="out" time="200"/>
+                <effect type="fade" start="100" end="0" tween="cubic" easing="out" time="200"/>
+            </animation>
+            <control type="image">
+                <left>0</left><top>0</top><width>1240</width><height>860</height>
+                <texture colordiffuse="FF12151A">metamender/white.png</texture>
+            </control>
+            <control type="image">
+                <left>0</left><top>0</top><width>1240</width><height>6</height>
+                <texture colordiffuse="FF2EC4B6">metamender/white.png</texture>
+            </control>
+            <control type="label">
+                <left>50</left><top>34</top><width>500</width><height>40</height>
+                <aligny>center</aligny>
+                <font>font12</font>
+                <textcolor>FF9299A6</textcolor>
+                <label>METAMENDER</label>
+            </control>
+            <control type="label">
+                <left>690</left><top>34</top><width>500</width><height>40</height>
+                <align>right</align><aligny>center</aligny>
+                <font>font12</font>
+                <textcolor>FF9299A6</textcolor>
+                <label>$INFO[Window.Property(MM.Step)]</label>
+            </control>
+            <control type="label">
+                <left>50</left><top>84</top><width>1140</width><height>56</height>
+                <aligny>center</aligny>
+                <font>font13</font>
+                <textcolor>FFF1F3F5</textcolor>
+                <label>[B]$INFO[Window.Property(MM.Heading)][/B]</label>
+            </control>
+            <control type="textbox">
+                <left>50</left><top>148</top><width>1140</width><height>150</height>
+                <font>font12</font>
+                <textcolor>FF9299A6</textcolor>
+                <label>$INFO[Window.Property(MM.Text)]</label>
+                <autoscroll delay="6000" time="2000" repeat="8000">true</autoscroll>
+            </control>
+            <control type="list" id="100">
+                <left>50</left><top>318</top><width>1140</width><height>410</height>
+                <orientation>vertical</orientation>
+                <scrolltime>120</scrolltime>
+                <pagecontrol>101</pagecontrol>
+                <ondown>21</ondown>
+                <itemlayout width="1140" height="90">
+                    <control type="image">
+                        <left>0</left><top>0</top><width>1140</width><height>80</height>
+                        <texture colordiffuse="FF1C2129">metamender/white.png</texture>
+                    </control>
+                    <control type="label">
+                        <left>28</left><top>6</top><width>1000</width><height>38</height>
+                        <aligny>center</aligny>
+                        <font>font13</font>
+                        <textcolor>FFF1F3F5</textcolor>
+                        <label>$INFO[ListItem.Label]</label>
+                    </control>
+                    <control type="label">
+                        <left>28</left><top>42</top><width>1000</width><height>32</height>
+                        <aligny>center</aligny>
+                        <font>font10</font>
+                        <textcolor>FF9299A6</textcolor>
+                        <label>$INFO[ListItem.Property(detail)]</label>
+                    </control>
+                    <!-- A filled marker, not a tick glyph: skin fonts are not guaranteed
+                         to carry one. -->
+                    <control type="image">
+                        <left>1078</left><top>28</top><width>24</width><height>24</height>
+                        <texture colordiffuse="FF2EC4B6">metamender/white.png</texture>
+                        <visible>String.IsEqual(ListItem.Property(chosen),true)</visible>
+                    </control>
+                </itemlayout>
+                <focusedlayout width="1140" height="90">
+                    <control type="image">
+                        <left>0</left><top>0</top><width>1140</width><height>80</height>
+                        <texture colordiffuse="FF1C2129">metamender/white.png</texture>
+                    </control>
+                    <control type="image">
+                        <left>0</left><top>0</top><width>1140</width><height>80</height>
+                        <texture colordiffuse="FF263040">metamender/white.png</texture>
+                        <visible>Control.HasFocus(100)</visible>
+                    </control>
+                    <control type="image">
+                        <left>0</left><top>0</top><width>6</width><height>80</height>
+                        <texture colordiffuse="FF2EC4B6">metamender/white.png</texture>
+                        <visible>Control.HasFocus(100)</visible>
+                    </control>
+                    <control type="label">
+                        <left>28</left><top>6</top><width>1000</width><height>38</height>
+                        <aligny>center</aligny>
+                        <font>font13</font>
+                        <textcolor>FFF1F3F5</textcolor>
+                        <label>$INFO[ListItem.Label]</label>
+                    </control>
+                    <control type="label">
+                        <left>28</left><top>42</top><width>1000</width><height>32</height>
+                        <aligny>center</aligny>
+                        <font>font10</font>
+                        <textcolor>FF9299A6</textcolor>
+                        <label>$INFO[ListItem.Property(detail)]</label>
+                    </control>
+                    <!-- A filled marker, not a tick glyph: skin fonts are not guaranteed
+                         to carry one. -->
+                    <control type="image">
+                        <left>1078</left><top>28</top><width>24</width><height>24</height>
+                        <texture colordiffuse="FF2EC4B6">metamender/white.png</texture>
+                        <visible>String.IsEqual(ListItem.Property(chosen),true)</visible>
+                    </control>
+                </focusedlayout>
+            </control>
+            <control type="scrollbar" id="101">
+                <left>1196</left><top>318</top><width>6</width><height>400</height>
+                <orientation>vertical</orientation>
+                <showonepage>false</showonepage>
+                <texturesliderbackground colordiffuse="FF1C2129">metamender/white.png</texturesliderbackground>
+                <texturesliderbar colordiffuse="FF2EC4B6">metamender/white.png</texturesliderbar>
+                <texturesliderbarfocus colordiffuse="FF2EC4B6">metamender/white.png</texturesliderbarfocus>
+                <textureslidernib></textureslidernib>
+                <textureslidernibfocus></textureslidernibfocus>
+                <onleft>100</onleft>
+            </control>
+            <control type="button" id="22">
+                <left>50</left><top>760</top><width>220</width><height>72</height>
+                <align>center</align><aligny>center</aligny>
+                <font>font13</font>
+                <textcolor>FFF1F3F5</textcolor>
+                <focusedcolor>FFF1F3F5</focusedcolor>
+                <pulseonselect>false</pulseonselect>
+                <label>$INFO[Window.Property(MM.Back)]</label>
+                <texturenofocus colordiffuse="FF1C2129">metamender/white.png</texturenofocus>
+                <texturefocus colordiffuse="FF263040">metamender/white.png</texturefocus>
+                <onup>100</onup>
+                <onright>23</onright>
+                <visible>!String.IsEmpty(Window.Property(MM.Back))</visible>
+            </control>
+            <control type="button" id="23">
+                <left>640</left><top>760</top><width>240</width><height>72</height>
+                <align>center</align><aligny>center</aligny>
+                <font>font13</font>
+                <textcolor>FFF1F3F5</textcolor>
+                <focusedcolor>FFF1F3F5</focusedcolor>
+                <pulseonselect>false</pulseonselect>
+                <label>$INFO[Window.Property(MM.Cancel)]</label>
+                <texturenofocus colordiffuse="FF1C2129">metamender/white.png</texturenofocus>
+                <texturefocus colordiffuse="FF263040">metamender/white.png</texturefocus>
+                <onup>100</onup>
+                <onleft>22</onleft>
+                <onright>21</onright>
+            </control>
+            <control type="button" id="21">
+                <left>910</left><top>760</top><width>280</width><height>72</height>
+                <align>center</align><aligny>center</aligny>
+                <font>font13</font>
+                <textcolor>FFF1F3F5</textcolor>
+                <focusedcolor>FF0B0D10</focusedcolor>
+                <pulseonselect>false</pulseonselect>
+                <label>[B]$INFO[Window.Property(MM.Next)][/B]</label>
+                <texturenofocus colordiffuse="FF1C2129">metamender/white.png</texturenofocus>
+                <texturefocus colordiffuse="FF2EC4B6">metamender/white.png</texturefocus>
+                <onup>100</onup>
+                <onleft>23</onleft>
+            </control>
+        </control>
+    </controls>
+</window>
