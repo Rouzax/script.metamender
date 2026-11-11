@@ -158,6 +158,8 @@ BASE_SETTINGS = {
     "enable_fsk": "false", "enable_bbfc": "false", "enable_medieraadet": "false",
     "scan_interval": "24", "rate_limit": "0.25",
     "show_notifications": "false", "logging": "true",
+    # The service scans nothing until the setup wizard has been finished.
+    "setup_complete": "true",
 }
 
 FIELDS = {
