@@ -277,3 +277,23 @@ def test_update_now_opens_wizard_before_setup(update_patched, monkeypatch):
     actions.update_now("movie", "7")
     update_patched["open_setup"].assert_called_once_with("wizard")
     update_patched["run_scan"].assert_not_called()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_update_now_writes_its_own_log(update_patched, monkeypatch, fails):
+    start, stop = MagicMock(return_value="x.log"), MagicMock()
+    monkeypatch.setattr(actions.StructuredLogger, "start_scan_log", start)
+    monkeypatch.setattr(actions.StructuredLogger, "stop_scan_log", stop)
+    if fails:
+        update_patched["run_scan"].side_effect = RuntimeError("boom")
+    actions.update_now("movie", "7")
+    start.assert_called_once()
+    stop.assert_called_once()
+
+
+def test_update_now_opens_no_log_while_a_scan_runs(update_patched, monkeypatch):
+    start = MagicMock()
+    monkeypatch.setattr(actions.StructuredLogger, "start_scan_log", start)
+    update_patched["acquire"].return_value = False
+    actions.update_now("movie", "7")
+    start.assert_not_called()

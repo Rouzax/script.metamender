@@ -165,6 +165,9 @@ def update_now(dbtype: str, dbid: str) -> None:
         return
 
     tracker = None
+    # One log file per Update now, like a scan, so the item's whole check
+    # is in one place when someone reports a wrong value.
+    StructuredLogger.start_scan_log()
     try:
         item = get_item_by_id(media_type, item_id)
         if item is None:
@@ -239,6 +242,7 @@ def update_now(dbtype: str, dbid: str) -> None:
         log.exception("Update now action failed", event="actions.error")
         notify(lang(32347))  # Update failed
     finally:
+        StructuredLogger.stop_scan_log()
         release_scan_lock()
         if tracker is not None:
             tracker.close()

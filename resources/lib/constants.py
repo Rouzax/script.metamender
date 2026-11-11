@@ -15,6 +15,10 @@ ADDON_PREFIX = "MetaMend"
 LOG_DIR_NAME = "logs"
 LOG_FILE_PREFIX = "metamender"
 LOG_MAX_FILES = 10
+# Between scans the debug log goes to one activity file, rotated at this size
+# with this many older copies kept (metamender.1.log is the newest of them).
+LOG_ACTIVITY_MAX_BYTES = 500 * 1024
+LOG_ACTIVITY_ROTATED = 3
 LOG_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 LOG_TIMESTAMP_TRIM = -3  # Trim microseconds to milliseconds
 LOG_MAX_VALUE_LENGTH = 200
