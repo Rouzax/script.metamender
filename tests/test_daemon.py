@@ -481,6 +481,21 @@ def test_setup_settings_shipped():
     assert by_id["run_setup_wizard"].findtext("data") == "RunScript(script.metamender,wizard)"
 
 
+def test_every_setting_has_a_control():
+    # Kodi drops a setting without <control> ("missing <control> tag"): it is
+    # not shown and getSetting returns "" instead of its default, so a
+    # boolean that defaults to true reads as false on a fresh install.
+    import xml.etree.ElementTree as ET
+    root = ET.parse("resources/settings.xml").getroot()
+    expected = {"boolean": "toggle", "string": "edit"}
+    for setting in root.iter("setting"):
+        control = setting.find("control")
+        assert control is not None, setting.get("id")
+        want = expected.get(setting.get("type", ""))
+        if want:
+            assert control.get("type") == want, setting.get("id")
+
+
 def test_setup_buttons_close_the_settings_dialog():
     # Without it Kodi routes the wizard's setSetting calls into the still
     # open settings dialog instead of saving them.
