@@ -272,7 +272,9 @@ class SetupController:
             handler(index)
 
     def _activate_key(self, _index: int) -> None:
-        entered = self._dialogs.input(lang(32412), self.state.api_key).strip()
+        # Never pre-filled: a stored key is not shown in full again, and an
+        # empty entry keeps it.
+        entered = self._dialogs.input(lang(32412), "").strip()
         if entered and entered != self.state.api_key:
             self.state.api_key = entered
             self.state.key_status = ""
@@ -315,6 +317,8 @@ class SetupController:
         if self.step == "key" and not self._key_passes():
             return False
         if not self.flow.can_advance(self.state):
+            if self.step == "country":
+                self._dialogs.ok(lang(32450), lang(32453))
             return False
         if self.mode == FOLDERS or self.step == "summary":
             return self._finish()

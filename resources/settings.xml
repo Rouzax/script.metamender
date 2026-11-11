@@ -109,11 +109,18 @@
             <group id="sources" label="32140">
                 <setting id="run_setup_wizard" type="action" label="32467" help="32468">
                     <data>RunScript(script.metamender,wizard)</data>
-                    <control type="button" format="action" />
+                    <!-- Closing saves the settings dialog first; while it is open,
+                         Kodi routes the wizard's setSetting calls into the dialog
+                         instead of saving them. -->
+                    <control type="button" format="action">
+                        <close>true</close>
+                    </control>
                 </setting>
                 <setting id="configure_sources" type="action" label="32141" help="32142">
                     <data>RunScript(script.metamender,folders)</data>
-                    <control type="button" format="action" />
+                    <control type="button" format="action">
+                        <close>true</close>
+                    </control>
                 </setting>
                 <!-- Set by the wizard's Finish; until then the service does not scan. -->
                 <setting id="setup_complete" type="boolean" label="32469">

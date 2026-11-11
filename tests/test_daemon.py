@@ -479,3 +479,13 @@ def test_setup_settings_shipped():
     assert hidden.findtext("default") == "false"
     assert by_id["configure_sources"].findtext("data") == "RunScript(script.metamender,folders)"
     assert by_id["run_setup_wizard"].findtext("data") == "RunScript(script.metamender,wizard)"
+
+
+def test_setup_buttons_close_the_settings_dialog():
+    # Without it Kodi routes the wizard's setSetting calls into the still
+    # open settings dialog instead of saving them.
+    import xml.etree.ElementTree as ET
+    root = ET.parse("resources/settings.xml").getroot()
+    by_id = {s.get("id"): s for s in root.iter("setting")}
+    for setting_id in ("run_setup_wizard", "configure_sources"):
+        assert by_id[setting_id].find("control").findtext("close") == "true"

@@ -20,6 +20,7 @@ class FakeDialogs:
         self.oks: list[str] = []
 
     def input(self, heading: str, default: str) -> str:
+        self.defaults = getattr(self, "defaults", []) + [default]
         return self.inputs.pop(0) if self.inputs else ""
 
     def select(self, heading: str, options: list[str], preselect: int) -> int:
@@ -172,3 +173,22 @@ def test_feature_rows_toggle():
 def test_step_count_follows_certifications(certifications, expected):
     c, _ = _controller(key="abc", certifications=certifications)
     assert c.flow.total(c.state) == expected
+
+
+def test_stored_key_is_never_prefilled_and_empty_entry_keeps_it():
+    dialogs = FakeDialogs(inputs=[""])
+    c, _ = _controller(key="secret1234", dialogs=dialogs)
+    c.activate(0)
+    assert dialogs.defaults == [""]
+    assert c.state.api_key == "secret1234" and c.state.key_status == KEY_OK
+
+
+def test_country_without_preset_explains_on_next():
+    dialogs = FakeDialogs()
+    c, _ = _controller(key="abc", dialogs=dialogs)
+    c._ui_language = "xx-ZZ"
+    c.flow = type(c.flow)("wizard", "xx-ZZ")
+    while c.step != "country":
+        c.on_next()
+    assert c.on_next() is False
+    assert c.step == "country" and len(dialogs.oks) == 1
