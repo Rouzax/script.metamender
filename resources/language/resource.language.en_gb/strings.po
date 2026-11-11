@@ -733,3 +733,7 @@ msgstr ""
 msgctxt "#32468"
 msgid "Walk through the TMDB key, the library and folder languages and what to fill, starting from your current settings."
 msgstr ""
+
+msgctxt "#32469"
+msgid "Setup finished"
+msgstr ""

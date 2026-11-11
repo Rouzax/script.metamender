@@ -39,12 +39,15 @@ from resources.lib.service.daemon import (
     tvdb_auth_failed,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
+from resources.lib.service.setup import open_setup
+from resources.lib.ui.setup_model import WIZARD
 from resources.lib.utils import (
     ApiKeyError,
     StructuredLogger,
     get_addon,
     get_bool_setting,
     get_logger,
+    is_setup_complete,
     lang,
     notify,
 )
@@ -119,6 +122,11 @@ def update_now(dbtype: str, dbid: str) -> None:
         dbid: Kodi database ID as a string (from $INFO[ListItem.DBID]).
     """
     _init_logging()
+
+    if not is_setup_complete():
+        log.info("Setup not finished, opening the wizard", event="actions.needs_setup")
+        open_setup(WIZARD)
+        return
 
     log.info(
         "Update now action starting",

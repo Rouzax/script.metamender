@@ -107,8 +107,19 @@
                 </setting>
             </group>
             <group id="sources" label="32140">
-                <setting id="configure_sources" type="action" label="32141" help="32142">
+                <setting id="run_setup_wizard" type="action" label="32467" help="32468">
+                    <data>RunScript(script.metamender,wizard)</data>
                     <control type="button" format="action" />
+                </setting>
+                <setting id="configure_sources" type="action" label="32141" help="32142">
+                    <data>RunScript(script.metamender,folders)</data>
+                    <control type="button" format="action" />
+                </setting>
+                <!-- Set by the wizard's Finish; until then the service does not scan. -->
+                <setting id="setup_complete" type="boolean" label="32469">
+                    <level>4</level>
+                    <default>false</default>
+                    <control type="toggle" />
                 </setting>
             </group>
         </category>

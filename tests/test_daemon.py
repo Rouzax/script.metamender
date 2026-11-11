@@ -199,6 +199,7 @@ def _run_daemon_ticks(monkeypatch, scan_side_effect, ticks=5):
             patch.object(daemon, "acquire_scan_lock", return_value=True), \
             patch.object(daemon, "release_scan_lock"), \
             patch.object(daemon, "get_int_setting", return_value=24), \
+            patch.object(daemon, "is_setup_complete", return_value=True), \
             patch.object(daemon.xbmc, "getCondVisibility", return_value=False):
         daemon.run()
 
@@ -253,6 +254,7 @@ def _run_one_cycle(all_stats, resume_interrupted=True):
             patch.object(daemon, "acquire_scan_lock", return_value=True), \
             patch.object(daemon, "release_scan_lock"), \
             patch.object(daemon, "get_int_setting", return_value=24), \
+            patch.object(daemon, "is_setup_complete", return_value=True), \
             patch.object(daemon.xbmc, "getCondVisibility", return_value=False):
         daemon.run()
 
@@ -348,6 +350,7 @@ def _run_daemon_locked(ticks=5):
             patch.object(daemon, "release_scan_lock"), \
             patch.object(daemon, "clear_file_lock", clear), \
             patch.object(daemon, "get_int_setting", return_value=24), \
+            patch.object(daemon, "is_setup_complete", return_value=True), \
             patch.object(daemon.xbmc, "getCondVisibility", return_value=False):
         daemon.run()
     return acquire, clear
@@ -412,3 +415,67 @@ def test_load_settings_cert_defaults(kodi_stubs, settings_mock):
         s = daemon._load_settings()
     assert s["cert_country"] == "NL"  # Automatic
     assert s["cert_prefix_override"] is None and s["cert_not_found"] is None
+
+
+class _PendingMonitor(_FakeMonitor):
+    """A monitor with a library update waiting on every tick."""
+
+    def __init__(self, ticks):
+        super().__init__(ticks)
+        self.cleared = 0
+
+    def has_pending_scan(self, _debounce):
+        return True
+
+    def clear_scan_request(self):
+        self.cleared += 1
+
+
+def _run_gated(setup_complete, ticks):
+    from unittest.mock import patch
+
+    monitor = _PendingMonitor(ticks)
+    scan = MagicMock(return_value=_complete_stats())
+    notify = MagicMock()
+    with patch.object(daemon, "MetaMendMonitor", return_value=monitor), \
+            patch.object(daemon, "TrackerDB"), \
+            patch.object(daemon, "_run_scan", scan), \
+            patch.object(daemon, "_load_settings",
+                         return_value={"tmdb_api_key": "k",
+                                       "resume_interrupted": True,
+                                       "show_notifications": False,
+                                       "orphan_retention_days": 30}), \
+            patch.object(daemon, "load_source_config", return_value={}), \
+            patch.object(daemon, "acquire_scan_lock", return_value=True), \
+            patch.object(daemon, "release_scan_lock"), \
+            patch.object(daemon, "get_int_setting", return_value=24), \
+            patch.object(daemon, "is_setup_complete", return_value=setup_complete), \
+            patch.object(daemon, "notify", notify), \
+            patch.object(daemon.xbmc, "getCondVisibility", return_value=False):
+        daemon.run()
+    return scan, notify, monitor
+
+
+def test_no_scan_before_setup_and_one_notification(kodi_stubs):
+    scan, notify, monitor = _run_gated(False, ticks=4)
+    assert scan.call_count == 0
+    assert notify.call_count == 1
+    assert monitor.cleared >= 1
+
+
+def test_scans_once_setup_is_complete(kodi_stubs):
+    scan, notify, _ = _run_gated(True, ticks=2)
+    assert scan.call_count >= 1
+    assert notify.call_count == 0
+
+
+def test_setup_settings_shipped():
+    import xml.etree.ElementTree as ET
+    root = ET.parse("resources/settings.xml").getroot()
+    by_id = {s.get("id"): s for s in root.iter("setting")}
+    hidden = by_id["setup_complete"]
+    assert hidden.get("type") == "boolean"
+    assert hidden.findtext("level") == "4"
+    assert hidden.findtext("default") == "false"
+    assert by_id["configure_sources"].findtext("data") == "RunScript(script.metamender,folders)"
+    assert by_id["run_setup_wizard"].findtext("data") == "RunScript(script.metamender,wizard)"

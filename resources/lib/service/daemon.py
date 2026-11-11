@@ -66,6 +66,7 @@ from resources.lib.utils import (
     get_int_setting,
     get_logger,
     get_setting,
+    is_setup_complete,
     lang,
     notify,
 )
@@ -399,6 +400,7 @@ def run() -> None:
     tracker: TrackerDB | None = None
     last_scan = 0.0  # Force scan on first loop iteration
     next_retry_after = 0.0  # Backoff gate after a failed scan (both triggers)
+    needs_setup_shown = False
 
     try:
         tracker = TrackerDB(_get_db_path())
@@ -406,6 +408,21 @@ def run() -> None:
         while not monitor.abortRequested():
             try:
                 now = time.time()
+
+                if not is_setup_complete():
+                    # Nothing scans before the wizard has run: no key, and
+                    # no language the user confirmed. The wizard's Finish
+                    # starts the first scan itself, so the schedule counts
+                    # from now and library events seen meanwhile are dropped.
+                    if not needs_setup_shown:
+                        needs_setup_shown = True
+                        log.info("Waiting for setup", event="service.needs_setup")
+                        notify(lang(32466))
+                    last_scan = now
+                    monitor.clear_scan_request()
+                    if monitor.waitForAbort(SERVICE_SLEEP_INTERVAL_SEC):
+                        break
+                    continue
 
                 # Trigger selection (scheduled takes precedence over a
                 # same-tick library event; see _select_trigger). Only the scan
