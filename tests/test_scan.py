@@ -1,6 +1,7 @@
 """Tests for scan orchestrator."""
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
 from datetime import date
 from typing import Any, Dict  # noqa: F401 (used in type comments)
 from unittest.mock import MagicMock, patch
@@ -18,6 +19,20 @@ from resources.lib.engine.scan import (
     _plan_writes,
     run_scan,
 )
+
+
+# Every scan module logs through its own "scan" logger; one mock stands in for
+# all of them, so a test sees an event whichever module emits it.
+_SCAN_LOG_MODULES = ("scan", "scanctx", "ids", "fetch", "text")
+
+
+@contextmanager
+def _scan_log():
+    mock_log = MagicMock()
+    with ExitStack() as stack:
+        for module in _SCAN_LOG_MODULES:
+            stack.enter_context(patch("resources.lib.engine.%s.log" % module, mock_log))
+        yield mock_log
 
 
 @pytest.fixture(autouse=True)
@@ -1157,11 +1172,10 @@ class TestRunScanApiKeyError:
         # The pass stops at the first item (second movie not attempted).
         assert mock_fetch.call_count == 1
 
-    @patch("resources.lib.engine.scan.log")
     @patch("resources.lib.providers.tmdb.fetch_season")
     @patch("resources.lib.providers.tmdb.fetch_movie")
     def test_api_key_error_left_to_the_caller_to_log(
-        self, mock_movie, mock_season, mock_log, tmp_path, kodi_stubs
+        self, mock_movie, mock_season, tmp_path, kodi_stubs
     ):
         # The caller that stops the scan logs the invalid key once; a scan
         # line as well would report the same failure twice.
@@ -1176,7 +1190,7 @@ class TestRunScanApiKeyError:
         for media_type, items, extra in cases:
             (tmp_path / media_type.name).mkdir()
             tracker = _make_tracker(tmp_path / media_type.name)
-            with pytest.raises(ApiKeyError):
+            with _scan_log() as mock_log, pytest.raises(ApiKeyError):
                 run_scan(
                     media_type, tracker, _make_source_config(),
                     frozenset({"plot"}), "bad_key", _make_settings(),
@@ -3247,12 +3261,11 @@ class TestCrossReferenceRecheck:
 
 
 class TestImdbStoreErrorLogging:
-    @patch("resources.lib.engine.scan.log")
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")
     @patch("resources.lib.providers.imdb_ratings.lookup")
     def test_store_error_logged_once_per_scan(
-        self, mock_lookup, mock_tmdb, mock_update, mock_log, tmp_path, kodi_stubs
+        self, mock_lookup, mock_tmdb, mock_update, tmp_path, kodi_stubs
     ):
         mock_lookup.side_effect = RuntimeError("store broken")
         mock_tmdb.return_value = _tmdb_movie_response()
@@ -3264,10 +3277,11 @@ class TestImdbStoreErrorLogging:
         settings["rating_source"] = 3  # IMDb only
 
         tracker = _make_tracker(tmp_path)
-        run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
-            "k", settings, items=items,
-        )
+        with _scan_log() as mock_log:
+            run_scan(
+                MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+                "k", settings, items=items,
+            )
         tracker.close()
 
         failures = [
@@ -4548,12 +4562,11 @@ class TestExtractIds:
 class TestUnmappedLanguage:
     """A folder language TVDB has no id for is logged once per code per scan."""
 
-    @patch("resources.lib.engine.scan.log")
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tvdb.fetch_series_episodes")
     @patch("resources.lib.providers.tmdb.fetch_season", return_value=[])
     def test_logged_once_per_code_per_scan(
-        self, mock_season, mock_tvdb_eps, mock_update, mock_log, tmp_path, kodi_stubs,
+        self, mock_season, mock_tvdb_eps, mock_update, tmp_path, kodi_stubs,
     ):
         first = _make_episode_item(title="")
         first["uniqueid"] = {"tmdb": "1", "tvdb": "888"}
@@ -4569,20 +4582,21 @@ class TestUnmappedLanguage:
         tracker = _make_tracker(tmp_path)
         _register_show(tracker)
 
+        with _scan_log() as mock_log:
+            for _ in range(2):
+                tracker.start_new_cycle()
+                run_scan(
+                    EPISODE, tracker, config, frozenset({"title"}),
+                    "k", settings, items=[first, second], show_id_map={10: "55555"},
+                    reset=True,
+                )
+        tracker.close()
+
         def warnings():
             return [
                 c for c in mock_log.warning.call_args_list
                 if c.kwargs.get("event") == "scan.language_unmapped"
             ]
-
-        for _ in range(2):
-            tracker.start_new_cycle()
-            run_scan(
-                EPISODE, tracker, config, frozenset({"title"}),
-                "k", settings, items=[first, second], show_id_map={10: "55555"},
-                reset=True,
-            )
-        tracker.close()
 
         mock_tvdb_eps.assert_not_called()
         logged = warnings()
@@ -4602,11 +4616,10 @@ def _complete_kwargs(mock_log):
 class TestPerItemOutcomeCounts:
     """Per-item id outcomes log at DEBUG and are counted in scan.complete."""
 
-    @patch("resources.lib.engine.scan.log")
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tvdb.fetch_series_episodes")
     def test_unknown_ids_accepted_counted(
-        self, mock_eps, mock_update, mock_log, tmp_path, kodi_stubs
+        self, mock_eps, mock_update, tmp_path, kodi_stubs
     ):
         items = [
             _episode(100, {"unknown": "340249"}, episode=1),
@@ -4618,10 +4631,11 @@ class TestPerItemOutcomeCounts:
         tracker = _make_tracker(tmp_path)
         _register_checked_show(tracker)
 
-        run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
-            "k", _make_settings(), items=items, show_id_map={},
-        )
+        with _scan_log() as mock_log:
+            run_scan(
+                EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
+                "k", _make_settings(), items=items, show_id_map={},
+            )
         tracker.close()
 
         assert _complete_kwargs(mock_log)["unknown_ids_accepted"] == 2
@@ -4630,12 +4644,11 @@ class TestPerItemOutcomeCounts:
             if c.kwargs.get("event") == "scan.unknown_id_accepted"
         ]
 
-    @patch("resources.lib.engine.scan.log")
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_season")
     @patch("resources.lib.providers.tmdb.find_episode_by_tvdb")
     def test_episodes_found_by_tvdb_counted(
-        self, mock_find, mock_season, mock_update, mock_log, tmp_path, kodi_stubs
+        self, mock_find, mock_season, mock_update, tmp_path, kodi_stubs
     ):
         mock_find.return_value = {
             "tmdb_id": "99999", "show_tmdb_id": "55555", "season": 1, "episode": 1,
@@ -4644,11 +4657,12 @@ class TestPerItemOutcomeCounts:
         tracker = _make_tracker(tmp_path)
         _register_show(tracker)
 
-        run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
-            "k", _make_settings(), items=[_episode(100, {"tvdb": "888"})],
-            show_id_map={10: "55555"},
-        )
+        with _scan_log() as mock_log:
+            run_scan(
+                EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+                "k", _make_settings(), items=[_episode(100, {"tvdb": "888"})],
+                show_id_map={10: "55555"},
+            )
         tracker.close()
 
         assert _complete_kwargs(mock_log)["episodes_found_by_tvdb"] == 1
@@ -5054,7 +5068,7 @@ class TestShowIdConfirmedByEpisodes:
                 patch("resources.lib.data.kodi.get_all_items",
                       **kodi_episodes) as mock_kodi, \
                 patch("resources.lib.data.kodi.update_item", return_value=True), \
-                patch("resources.lib.engine.scan.log") as mock_log:
+                _scan_log() as mock_log:
             stats = run_scan(
                 TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
                 "k", _make_settings(), items=[item or _buurman_show()],
@@ -5581,7 +5595,7 @@ class TestFollowTheScraper:
     scraper made the item, so a TheTVDB library keeps TheTVDB's wording."""
 
     def test_scraper_provider_signals(self):
-        from resources.lib.engine.scan import _scraper_provider
+        from resources.lib.engine.text import _scraper_provider
 
         show = _make_tvshow_item()
         show["episodeguide"] = '<episodeguide>{"tmdb": "1570", "tvdb": "72668"}</episodeguide>'
@@ -5981,7 +5995,7 @@ class TestCertifications:
         self._fake_sites(monkeypatch)
         item = _make_movie_item(plot="")
         tracker = _make_tracker(tmp_path)
-        with patch("resources.lib.engine.scan.log") as log:
+        with _scan_log() as log:
             upd, _s, _g = self._scan(tracker, item, {"NL": "12"}, fields=("mpaa", "plot"),
                                      settings=self._settings(cert_country=None))
         tracker.close()
