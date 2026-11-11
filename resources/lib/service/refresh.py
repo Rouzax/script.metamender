@@ -366,10 +366,19 @@ def open_refresh(dbtype: str, dbid: int) -> None:
         worker.start()
         heading = (lang(32470).format(scope.title) if scope.season is None
                    else lang(32471).format(scope.title, scope.season))
-        drive_views(progress, done, lang(32485).format(scope.title),
-                    lambda: show_progress_window(progress, heading, done),
-                    xbmcgui.DialogProgressBG, _take_reopen)
-        worker.join()
+        try:
+            drive_views(progress, done, lang(32485).format(scope.title),
+                        lambda: show_progress_window(progress, heading, done),
+                        xbmcgui.DialogProgressBG, _take_reopen)
+        except Exception:
+            # Without its window the refresh cannot be followed or stopped,
+            # so it stops; it must also end before the lock is released.
+            log.exception("Refresh window failed", event="refresh.view_error")
+            result.setdefault("error", 32347)
+        finally:
+            if not done.is_set():
+                progress.request_stop()
+            worker.join()
         if "error" in result:
             notify(lang(result["error"]))
         else:

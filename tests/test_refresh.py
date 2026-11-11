@@ -422,3 +422,26 @@ def test_flow_with_the_lock_held_reopens_or_says_busy(flow):
     home.props.clear()
     refresh.open_refresh("season", 31)
     assert notes == ["#32344 {}"]
+
+
+def test_flow_window_failure_stops_the_worker_before_releasing_the_lock(flow, monkeypatch):
+    home, notes, released, state = flow
+    events = []
+
+    def slow_run(scope, progress, settings, source_config, tracker, monitor):
+        for _ in range(200):
+            if progress.stop_requested:
+                break
+            threading.Event().wait(0.01)
+        events.append(("worker done", progress.stop_requested))
+        return refresh.RefreshOutcome(stopped=True)
+
+    def broken_window(progress, heading, done):
+        raise RuntimeError("skin could not load the window")
+
+    monkeypatch.setattr(refresh, "run_refresh", slow_run)
+    monkeypatch.setattr(refresh, "show_progress_window", broken_window)
+    monkeypatch.setattr(refresh, "release_scan_lock", lambda: events.append(("released",)))
+    refresh.open_refresh("tvshow", 7)
+    assert events == [("worker done", True), ("released",)]
+    assert home.props == {} and notes == ["#32347 {}"]
