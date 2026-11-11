@@ -7,7 +7,7 @@ import pytest
 
 from resources.lib.providers.tmdb import KEY_OK, KEY_REFUSED, KEY_UNCHECKED
 from resources.lib.ui.setup_model import FEATURES, initial_state
-from resources.lib.ui.setup_window import SetupController
+from resources.lib.ui.setup_window import SetupController, list_position
 
 _MP = "multipath://%2fa%2f/%2fb%2f/"
 _DISCOVERED = [{"path": _MP, "label": "Kids"}, {"path": "/c/", "label": "Films"}]
@@ -192,3 +192,14 @@ def test_country_without_preset_explains_on_next():
         c.on_next()
     assert c.on_next() is False
     assert c.step == "country" and len(dialogs.oks) == 1
+
+
+def test_list_starts_at_top_on_a_new_step():
+    assert list_position("features", "country", 4, 10) == 0
+    assert list_position(None, "key", 0, 1) == 0
+
+
+def test_list_keeps_position_when_the_step_redraws():
+    assert list_position("features", "features", 4, 9) == 4
+    assert list_position("folders", "folders", 5, 3) == 2
+    assert list_position("folders", "folders", -1, 3) == 0

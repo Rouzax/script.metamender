@@ -399,11 +399,22 @@ class SetupController:
         return lang(_COUNTRY_LABEL_BASE + index)
 
 
+def list_position(shown_step: str | None, step: str, position: int, count: int) -> int:
+    """Where the list's selection goes after a redraw: kept when the same
+    step redraws (a row was toggled), the top row when the step changed,
+    since a position from another step's list points at an unrelated row
+    and can scroll the first rows out of view."""
+    if shown_step != step:
+        return 0
+    return min(max(position, 0), count - 1)
+
+
 class SetupWindow(xbmcgui.WindowXMLDialog):
     """Renders a SetupController. The controller is attached before
     doModal(); every click re-renders the whole step."""
 
     controller: SetupController
+    _shown_step: str | None = None
 
     def onInit(self) -> None:
         self._render()
@@ -442,7 +453,7 @@ class SetupWindow(xbmcgui.WindowXMLDialog):
         self.setProperty("MM.Back", lang(32404) if c.has_back() else "")
         self.setProperty("MM.Cancel", lang(32408))
         control = self._list()
-        position = max(control.getSelectedPosition(), 0)
+        position = control.getSelectedPosition()
         control.reset()
         items = []
         for row in c.rows():
@@ -452,10 +463,11 @@ class SetupWindow(xbmcgui.WindowXMLDialog):
             items.append(item)
         control.addItems(items)
         if items:
-            control.selectItem(min(position, len(items) - 1))
+            control.selectItem(list_position(self._shown_step, c.step, position, len(items)))
             self.setFocusId(_LIST)
         else:
             self.setFocusId(_NEXT)
+        self._shown_step = c.step
 
 
 def run_setup(mode: str, config_path: str) -> bool:
