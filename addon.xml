@@ -21,8 +21,11 @@
     </extension>
     <extension point="xbmc.addon.metadata">
         <summary lang="en_GB">Backfills the metadata Kodi missed.</summary>
-        <description lang="en_GB">Automatically fills missing and stale metadata for movies, TV shows, and episodes from TMDB, TheTVDB and IMDb ratings. Backfills ratings, plots, episode titles, credits, trailers, taglines, and more (show and movie titles optionally), in each source folder's own language, with an optional fallback language per folder. In a folder whose language is not set, existing text is kept and only empty fields are filled, in Kodi's interface language. Age certifications are filled and corrected in the rating system of one country, from TMDB and the FSK, BBFC and Medieraadet websites. Values that come from an NFO file are never changed. Runs in the background with configurable field groups and staleness-aware refreshes.</description>
+        <description lang="en_GB">Automatically fills missing and stale metadata for movies, TV shows, and episodes from TMDB, TheTVDB and IMDb ratings. Backfills ratings, plots, episode titles, credits, trailers, taglines, and more (show and movie titles optionally), in each source folder's own language, with an optional fallback language per folder. In a folder whose language is not set, existing text is kept and only empty fields are filled, in Kodi's interface language. Age certifications are filled and corrected in the rating system of one country, from TMDB and the FSK, BBFC and Medieraadet websites. Values that come from an NFO file are never changed. A setup wizard asks for the TMDB API key, the library's languages and what to fill; nothing is scanned before it has been finished. Ratings follow the scraper by default: the rating Kodi shows keeps its source while metamender keeps the TMDB and IMDb ratings up to date. Runs in the background with configurable field groups and staleness-aware refreshes.</description>
         <platform>all</platform>
-        <license>MIT</license>
+        <license>GPL-3.0-only</license>
+        <assets>
+            <icon>icon.png</icon>
+        </assets>
     </extension>
 </addon>

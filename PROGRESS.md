@@ -96,8 +96,12 @@ feat/7d-provider-replacement.
 - [x] 8.3 Certification chain and site gate (`engine/certchain.py`: per-site pacing, cap per cycle, memo, breaker, abort)
 - [x] 8.4 Integrate certifications into scan engine (`mpaa` producer, `maturity.decide_certification`: real final at once, derived or none rechecked monthly)
 
-## Phase 9: Source Configuration Dialog
-- [ ] 9.1 Custom Kodi dialog for source config (toggle, language picker)
+## Phase 9: Setup wizard
+- [x] 9.1 "Follow the scraper" rating source, the new default: the slot Kodi marks as default decides TMDB or IMDb, and the default mark never moves
+- [x] 9.2 sources.json helpers: multipath sources written per folder, hand-written and disabled entries kept, failed saves reported; the folder list is Kodi's video sources, or, on a client that shares another machine's library database and has none, the top folders derived from the library's file paths
+- [x] 9.3 TMDB key check (ok, refused, not checked)
+- [x] 9.4 Setup wizard (key, library language, folders in another language, what to fill, certification country, summary) as a pure model plus one WindowXMLDialog; the same window is the Folder languages dialog. Styled after the author's other add-ons (navy panel, amber accent from window properties, step dots, checkbox and radio markers); heartbeat-card add-on icon; art rendered by `docs/art/build_art.py`
+- [x] 9.5 Setup gate: nothing scans until the wizard has been finished once; the first Finish starts the first scan
 
 ## Phase 10: Scale, Progress, and Polish
 - [ ] 10.1 Progress notifications (per-scan, summary, resume)

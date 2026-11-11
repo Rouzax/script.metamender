@@ -3,11 +3,13 @@ from __future__ import annotations
 
 from resources.lib.engine.protect import fingerprint
 from resources.lib.engine.resolve import (
+    FOLLOW_SCRAPER,
     IMDB_ONLY,
     PREFER_IMDB,
     PREFER_TMDB,
     TMDB_ONLY,
     build_ratings,
+    effective_rating_pref,
     rating_sources,
     slot_fingerprint,
 )
@@ -282,3 +284,69 @@ def test_nfo_tmdb_slot_from_nfo_is_never_touched():
         {"rating": 7.2, "votes": 150}, None, current, PREFER_TMDB,
         nfo_managed=True, owned_slots={},
     ) == (None, None, None, {})
+
+
+# =============================================================================
+# Tests: Follow the scraper
+# =============================================================================
+
+
+def test_effective_pref_follows_imdb_default():
+    cur = {"imdb": {"rating": 7.0, "votes": 10, "default": True},
+           "themoviedb": {"rating": 6.0, "votes": 5, "default": False}}
+    assert effective_rating_pref(FOLLOW_SCRAPER, cur) == PREFER_IMDB
+
+
+def test_effective_pref_unmanaged_or_missing_default_is_prefer_tmdb():
+    trakt = {"trakt": {"rating": 8.0, "votes": 3, "default": True}}
+    assert effective_rating_pref(FOLLOW_SCRAPER, trakt) == PREFER_TMDB
+    assert effective_rating_pref(FOLLOW_SCRAPER, {}) == PREFER_TMDB
+    tmdb = {"tmdb": {"rating": 8.0, "votes": 3, "default": True}}
+    assert effective_rating_pref(FOLLOW_SCRAPER, tmdb) == PREFER_TMDB
+
+
+def test_effective_pref_fixed_options_unchanged():
+    for p in (PREFER_TMDB, PREFER_IMDB, TMDB_ONLY, IMDB_ONLY):
+        assert effective_rating_pref(p, {"imdb": {"default": True}}) == p
+
+
+def test_follow_keeps_trakt_default_and_refreshes_ours():
+    cur = {"trakt": {"rating": 8.0, "votes": 3, "default": True}}
+    new, source, votes, fps = build_ratings(
+        {"rating": 7.5, "votes": 100}, (7.9, 2000), cur, PREFER_TMDB,
+        keep_default_mark=True)
+    assert new["trakt"]["default"] is True
+    assert new["themoviedb"] == {"rating": 7.5, "votes": 100, "default": False}
+    assert new["imdb"]["default"] is False
+    assert source is None and votes is None
+    assert set(fps) == {"themoviedb", "imdb"}
+
+
+def test_follow_keeps_imdb_default_and_reports_it_as_source():
+    cur = {"imdb": {"rating": 7.0, "votes": 10, "default": True}}
+    new, source, votes, _ = build_ratings(
+        {"rating": 7.5, "votes": 100}, (7.9, 2000), cur, PREFER_IMDB,
+        keep_default_mark=True)
+    assert new["imdb"]["default"] is True
+    assert new["themoviedb"]["default"] is False
+    assert source == "imdb" and votes == 2000
+
+
+def test_follow_with_no_ratings_sets_tmdb_default():
+    new, source, _, _ = build_ratings(
+        {"rating": 7.5, "votes": 100}, None, {}, PREFER_TMDB,
+        keep_default_mark=True)
+    assert source == "themoviedb" and new["themoviedb"]["default"] is True
+
+
+def test_follow_with_ratings_but_no_default_sets_preferred():
+    cur = {"trakt": {"rating": 8.0, "votes": 3, "default": False}}
+    new, source, _, _ = build_ratings(
+        {"rating": 7.5, "votes": 100}, None, cur, PREFER_TMDB,
+        keep_default_mark=True)
+    assert source == "themoviedb" and new["themoviedb"]["default"] is True
+    assert new["trakt"]["default"] is False
+
+
+def test_rating_sources_follow_consults_both():
+    assert rating_sources(FOLLOW_SCRAPER) == (True, True)

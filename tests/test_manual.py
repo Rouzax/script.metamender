@@ -49,6 +49,7 @@ def patched(monkeypatch: pytest.MonkeyPatch) -> Dict[str, MagicMock]:
     monkeypatch.setattr(manual.StructuredLogger, "start_scan_log", MagicMock())
     monkeypatch.setattr(manual.StructuredLogger, "stop_scan_log", MagicMock())
     monkeypatch.setattr(manual, "get_bool_setting", MagicMock(return_value=False))
+    monkeypatch.setattr(manual, "is_setup_complete", MagicMock(return_value=True))
 
     return {
         "tracker": tracker,
@@ -154,3 +155,10 @@ def test_manual_tvdb_auth_failure_notified_once(
     notified = [c.args[0] for c in manual.notify.call_args_list]
     assert notified.count("s32352") == 1
     assert "s32341" not in notified
+
+
+def test_manual_does_not_scan_before_setup(patched, monkeypatch):
+    monkeypatch.setattr(manual, "is_setup_complete", MagicMock(return_value=False))
+    manual.run()
+    patched["run_scan"].assert_not_called()
+    manual.notify.assert_called_once()

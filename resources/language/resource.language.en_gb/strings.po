@@ -40,7 +40,7 @@ msgid "Rating source"
 msgstr ""
 
 msgctxt "#32027"
-msgid "Which provider to prefer when looking up audience ratings. If the preferred source has no data, the other source is tried as a fallback."
+msgid "Which audience ratings to keep up to date, and which one Kodi shows. \"Follow the scraper\" keeps the rating Kodi's scraper chose to show for each item and refreshes it when it comes from TMDB or IMDb; both are kept up to date, and the shown rating never changes source. The other options prefer or use only TMDB or IMDb, and make that rating the one Kodi shows (except for items with an NFO file, which decides that itself)."
 msgstr ""
 
 msgctxt "#32030"
@@ -150,11 +150,11 @@ msgid "Sources"
 msgstr ""
 
 msgctxt "#32141"
-msgid "Configure sources"
+msgid "Folder languages"
 msgstr ""
 
 msgctxt "#32142"
-msgid "Open the source configuration dialog to enable or disable backfill per video source and set the metadata language for each source."
+msgid "Set the language of folders whose titles and plots are in another language than the library language."
 msgstr ""
 
 # --- Certifications (32200-32268) ---
@@ -482,10 +482,254 @@ msgctxt "#32400"
 msgid "Replace show and movie titles with the title in the source folder's language from TMDB (and TheTVDB for shows), for example when a Dutch folder was scraped in English. Only a title the provider really has in that language is used; there is no fallback language. Titles from an NFO file are kept, and so are titles of items without a TMDB or IMDb id."
 msgstr ""
 
+msgctxt "#32401"
+msgid "Follow the scraper"
+msgstr ""
+
 msgctxt "#32396"
 msgid "Fallback language order"
 msgstr ""
 
 msgctxt "#32397"
 msgid "Which provider to ask first for TV show and episode text in a folder's fallback language, for folders that have one. Changing it fetches values filled from the fallback again."
+msgstr ""
+
+msgctxt "#32402"
+msgid "MetaMender setup"
+msgstr ""
+
+msgctxt "#32404"
+msgid "Back"
+msgstr ""
+
+msgctxt "#32405"
+msgid "Next"
+msgstr ""
+
+msgctxt "#32406"
+msgid "Finish"
+msgstr ""
+
+msgctxt "#32407"
+msgid "Save"
+msgstr ""
+
+msgctxt "#32408"
+msgid "Cancel"
+msgstr ""
+
+msgctxt "#32410"
+msgid "TMDB API key"
+msgstr ""
+
+msgctxt "#32411"
+msgid "MetaMender reads metadata from TMDB, which needs your own free API key. Create an account on themoviedb.org, open Settings, then API, and copy the \"API Key\". The longer \"API Read Access Token\" does not work here."
+msgstr ""
+
+msgctxt "#32412"
+msgid "API key"
+msgstr ""
+
+msgctxt "#32413"
+msgid "Not entered"
+msgstr ""
+
+msgctxt "#32414"
+msgid "TMDB refused this key. Check that you copied the API Key, not the API Read Access Token."
+msgstr ""
+
+msgctxt "#32415"
+msgid "TMDB could not be reached, so the key was not checked. It is saved as entered; if it is wrong, the add-on log will say so on the first scan."
+msgstr ""
+
+msgctxt "#32420"
+msgid "Library language"
+msgstr ""
+
+msgctxt "#32421"
+msgid "The language MetaMender fills and refreshes titles, plots and other text in. The optional fallback language is used when a text does not exist in the library language. Folders in another language come next."
+msgstr ""
+
+msgctxt "#32422"
+msgid "Language"
+msgstr ""
+
+msgctxt "#32423"
+msgid "Fallback language"
+msgstr ""
+
+msgctxt "#32424"
+msgid "None"
+msgstr ""
+
+msgctxt "#32425"
+msgid "Folders in another language"
+msgstr ""
+
+msgctxt "#32426"
+msgid "Select a folder whose titles and plots are in another language, then choose its language. Select it again to use the library language. Folders you do not select use the library language."
+msgstr ""
+
+msgctxt "#32427"
+msgid "Kodi has no video sources yet. Add your folders to the library first; you can set their languages later from the add-on settings."
+msgstr ""
+
+msgctxt "#32428"
+msgid "Library language"
+msgstr ""
+
+msgctxt "#32429"
+msgid "Folder languages"
+msgstr ""
+
+msgctxt "#32430"
+msgid "What to fill"
+msgstr ""
+
+msgctxt "#32431"
+msgid "Choose what MetaMender may fill in and keep up to date. Values that come from an NFO file are never changed."
+msgstr ""
+
+msgctxt "#32432"
+msgid "Ratings"
+msgstr ""
+
+msgctxt "#32433"
+msgid "Audience ratings from TMDB and IMDb, kept up to date."
+msgstr ""
+
+msgctxt "#32434"
+msgid "Plots"
+msgstr ""
+
+msgctxt "#32435"
+msgid "Movie, show and episode plots in the folder's language."
+msgstr ""
+
+msgctxt "#32436"
+msgid "Episode titles"
+msgstr ""
+
+msgctxt "#32437"
+msgid "Episode titles in the folder's language."
+msgstr ""
+
+msgctxt "#32438"
+msgid "Show and movie titles"
+msgstr ""
+
+msgctxt "#32439"
+msgid "Replace the title with the one in the folder's language."
+msgstr ""
+
+msgctxt "#32440"
+msgid "Age certifications"
+msgstr ""
+
+msgctxt "#32441"
+msgid "Fill and correct certifications in one country's rating system."
+msgstr ""
+
+msgctxt "#32442"
+msgid "Credits"
+msgstr ""
+
+msgctxt "#32443"
+msgid "Directors and writers."
+msgstr ""
+
+msgctxt "#32444"
+msgid "Trailers"
+msgstr ""
+
+msgctxt "#32445"
+msgid "Trailer links from TMDB."
+msgstr ""
+
+msgctxt "#32446"
+msgid "Taglines"
+msgstr ""
+
+msgctxt "#32447"
+msgid "Movie taglines in the folder's language."
+msgstr ""
+
+msgctxt "#32448"
+msgid "Details"
+msgstr ""
+
+msgctxt "#32449"
+msgid "Studio, country, runtime and first aired date."
+msgstr ""
+
+msgctxt "#32450"
+msgid "Certification country"
+msgstr ""
+
+msgctxt "#32451"
+msgid "Certifications are written in the rating system of one country. Automatic uses the region of Kodi's interface language."
+msgstr ""
+
+msgctxt "#32452"
+msgid "Automatic: {0}"
+msgstr ""
+
+msgctxt "#32453"
+msgid "Automatic: no rating system for this region, choose a country"
+msgstr ""
+
+msgctxt "#32455"
+msgid "Summary"
+msgstr ""
+
+msgctxt "#32456"
+msgid "Finish saves these settings and starts the first scan. Everything else can be changed later in the add-on settings, and this wizard can be run again from there."
+msgstr ""
+
+msgctxt "#32457"
+msgid "Finish saves these settings. They apply from the next scan."
+msgstr ""
+
+msgctxt "#32458"
+msgid "TMDB key"
+msgstr ""
+
+msgctxt "#32459"
+msgid "checked"
+msgstr ""
+
+msgctxt "#32460"
+msgid "not checked"
+msgstr ""
+
+msgctxt "#32461"
+msgid "Folder: {0}"
+msgstr ""
+
+msgctxt "#32462"
+msgid "Fill"
+msgstr ""
+
+msgctxt "#32463"
+msgid "Nothing"
+msgstr ""
+
+msgctxt "#32465"
+msgid "The folder languages could not be saved, so nothing was changed. The add-on log has the details."
+msgstr ""
+
+msgctxt "#32466"
+msgid "MetaMender needs setup. Open it from Add-ons."
+msgstr ""
+
+msgctxt "#32467"
+msgid "Run setup wizard"
+msgstr ""
+
+msgctxt "#32468"
+msgid "Walk through the TMDB key, the library and folder languages and what to fill, starting from your current settings."
+msgstr ""
+
+msgctxt "#32469"
+msgid "Setup finished"
 msgstr ""

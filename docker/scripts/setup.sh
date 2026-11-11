@@ -79,6 +79,7 @@ docker exec "$CONTAINER" mkdir -p "$ADDON_DATA"
 # is not ported yet, so enable_certifications=false and the scrapers stay off.
 SETTINGS_XML="<settings version=\"1\">
     <setting id=\"tmdb_api_key\">${TMDB_API_KEY}</setting>
+    <setting id=\"setup_complete\">true</setting>
     <setting id=\"rating_source\">0</setting>
     <setting id=\"text_source_order\">0</setting>
     <setting id=\"enable_ratings\">true</setting>

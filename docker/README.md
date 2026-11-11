@@ -87,7 +87,9 @@ JSON-RPC on 8100, so run one at a time. Path substitution from
    and on Piers also the `script.module.requests` dependency chain
    (requests, urllib3, chardet, idna, certifi). Enable each new add-on with a
    row in `userdata/Database/Addons33.db` (`installed`, `enabled=1`).
-3. Put `settings.xml` (TMDB key, `logging` on, the field toggles) and
+3. Put `settings.xml` (TMDB key, `setup_complete` set to `true` so the
+   service does not wait for the setup wizard, `logging` on, the field
+   toggles) and
    `sources.json` (one entry per library root with its `language`, e.g.
    `smb://NAS/Data/Kids/TV/` as `nl-NL`, and optionally a
    `fallback_language` for text that language lacks) in

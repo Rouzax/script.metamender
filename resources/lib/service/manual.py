@@ -36,6 +36,7 @@ from resources.lib.utils import (
     get_addon,
     get_bool_setting,
     get_logger,
+    is_setup_complete,
     lang,
     notify,
 )
@@ -52,6 +53,11 @@ def run() -> None:
         debug_on = False
         addon_id = DEFAULT_ADDON_ID
     StructuredLogger.reconfigure(debug_enabled=debug_on, addon_id=addon_id)
+    if not is_setup_complete():
+        # default.py opens the wizard instead; this guards any other caller.
+        log.info("Setup not finished, not scanning", event="manual.needs_setup")
+        notify(lang(32466))
+        return
     StructuredLogger.start_scan_log()
 
     log.info("Manual scan started", event="manual.start")

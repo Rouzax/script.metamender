@@ -4200,7 +4200,7 @@ class TestSettingsFingerprint:
     def test_missing_settings_use_scan_defaults(self):
         from resources.lib.engine.scan import settings_fingerprint as sfp
 
-        explicit = {"rating_source": 0, "text_source_order": 2, "fallback_order": 0}
+        explicit = {"rating_source": 4, "text_source_order": 2, "fallback_order": 0}
         for field in ("rating", "plot", "genre"):
             assert sfp(field, {}, "nl-NL", "episode") == sfp(field, explicit, "nl-NL", "episode")
 
@@ -6006,3 +6006,45 @@ class TestCertificationReviewFixes:
             tracker, item, {}, settings=self._helper._settings(cert_not_found="Unrated"))
         tracker.close()
         assert _written(upd, "mpaa") == "Unrated"
+
+
+class TestFollowScraperRatings:
+    def _scan(self, tmp_path, ratings, rating_source):
+        item = _make_movie_item()
+        item["ratings"] = ratings
+        settings = _make_settings()
+        if rating_source is not None:
+            settings["rating_source"] = rating_source
+        tmp_path.mkdir(exist_ok=True)
+        tracker = _make_tracker(tmp_path)
+        with patch("resources.lib.engine.scan.update_item", return_value=True) as upd, \
+                patch("resources.lib.engine.scan.tmdb_fetch_movie",
+                      return_value=_tmdb_movie_response()), \
+                patch("resources.lib.engine.scan.imdb_rating_lookup",
+                      return_value=(7.9, 2000)):
+            run_scan(
+                MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+                "k", settings, items=[item],
+            )
+            written = _written(upd, "ratings")
+        tracker.close()
+        return written
+
+    def test_follow_is_the_default_and_keeps_trakt_default(self, tmp_path, kodi_stubs):
+        written = self._scan(
+            tmp_path, {"trakt": {"rating": 8.0, "votes": 3, "default": True}}, None)
+        assert written["trakt"]["default"] is True
+        assert written["themoviedb"]["default"] is False
+        assert written["imdb"]["default"] is False
+
+    def test_follow_imdb_default_matches_prefer_imdb(self, tmp_path, kodi_stubs):
+        cur = {"imdb": {"rating": 7.0, "votes": 10, "default": True}}
+        follow = self._scan(tmp_path / "a", dict(cur), 4)
+        fixed = self._scan(tmp_path / "b", dict(cur), 1)
+        assert follow == fixed
+
+    def test_follow_tmdb_default_matches_prefer_tmdb(self, tmp_path, kodi_stubs):
+        cur = {"themoviedb": {"rating": 6.0, "votes": 10, "default": True}}
+        follow = self._scan(tmp_path / "a", dict(cur), 4)
+        fixed = self._scan(tmp_path / "b", dict(cur), 0)
+        assert follow == fixed

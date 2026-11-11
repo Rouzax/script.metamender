@@ -17,9 +17,10 @@
             </group>
             <group id="source_priority" label="32025">
                 <setting id="rating_source" type="integer" label="32026" help="32027">
-                    <default>0</default>
+                    <default>4</default>
                     <constraints>
                         <options>
+                            <option label="32401">4</option>
                             <option label="32030">0</option>
                             <option label="32031">1</option>
                             <option label="32032">2</option>
@@ -58,30 +59,39 @@
             <group id="fields" label="32101">
                 <setting id="enable_ratings" type="boolean" label="32102" help="32103">
                     <default>true</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_plots" type="boolean" label="32104" help="32105">
                     <default>true</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_episode_titles" type="boolean" label="32106" help="32107">
                     <default>false</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_main_titles" type="boolean" label="32399" help="32400">
                     <default>false</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_certifications" type="boolean" label="32108" help="32109">
                     <default>true</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_credits" type="boolean" label="32110" help="32111">
                     <default>false</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_trailers" type="boolean" label="32112" help="32113">
                     <default>false</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_taglines" type="boolean" label="32114" help="32115">
                     <default>false</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_details" type="boolean" label="32116" help="32117">
                     <default>false</default>
+                    <control type="toggle" />
                 </setting>
             </group>
             <group id="freshness" label="32120">
@@ -106,8 +116,26 @@
                 </setting>
             </group>
             <group id="sources" label="32140">
+                <setting id="run_setup_wizard" type="action" label="32467" help="32468">
+                    <data>RunScript(script.metamender,wizard)</data>
+                    <!-- Closing saves the settings dialog first; while it is open,
+                         Kodi routes the wizard's setSetting calls into the dialog
+                         instead of saving them. -->
+                    <control type="button" format="action">
+                        <close>true</close>
+                    </control>
+                </setting>
                 <setting id="configure_sources" type="action" label="32141" help="32142">
-                    <control type="button" format="action" />
+                    <data>RunScript(script.metamender,folders)</data>
+                    <control type="button" format="action">
+                        <close>true</close>
+                    </control>
+                </setting>
+                <!-- Set by the wizard's Finish; until then the service does not scan. -->
+                <setting id="setup_complete" type="boolean" label="32469">
+                    <level>4</level>
+                    <default>false</default>
+                    <control type="toggle" />
                 </setting>
             </group>
         </category>
@@ -142,6 +170,7 @@
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
+                    <control type="toggle" />
                 </setting>
                 <setting id="rating_prefix" type="string" label="32206" help="32207">
                     <level>2</level>
@@ -153,6 +182,9 @@
                     <constraints>
                         <allowempty>true</allowempty>
                     </constraints>
+                    <control type="edit" format="string">
+                        <heading>32206</heading>
+                    </control>
                 </setting>
             </group>
             <group id="scrapers" label="32210">
@@ -161,18 +193,21 @@
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_bbfc" type="boolean" label="32213" help="32214">
                     <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
+                    <control type="toggle" />
                 </setting>
                 <setting id="enable_medieraadet" type="boolean" label="32215" help="32216">
                     <default>true</default>
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
+                    <control type="toggle" />
                 </setting>
             </group>
             <group id="correction" label="32220">
@@ -181,6 +216,7 @@
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
+                    <control type="toggle" />
                 </setting>
             </group>
             <group id="fallback" label="32230">
@@ -189,6 +225,7 @@
                     <dependencies>
                         <dependency type="enable" setting="enable_certifications">true</dependency>
                     </dependencies>
+                    <control type="toggle" />
                 </setting>
                 <setting id="fallback_rating" type="string" label="32233" help="32234">
                     <default>NR</default>
@@ -199,6 +236,9 @@
                     <constraints>
                         <allowempty>false</allowempty>
                     </constraints>
+                    <control type="edit" format="string">
+                        <heading>32233</heading>
+                    </control>
                 </setting>
             </group>
         </category>
@@ -229,9 +269,11 @@
             <group id="notifications" label="32310">
                 <setting id="show_notifications" type="boolean" label="32311" help="32312">
                     <default>true</default>
+                    <control type="toggle" />
                 </setting>
                 <setting id="resume_interrupted" type="boolean" label="32313" help="32314">
                     <default>true</default>
+                    <control type="toggle" />
                 </setting>
             </group>
             <group id="maintenance" label="32330">
@@ -256,6 +298,7 @@
                 <setting id="logging" type="boolean" label="32321" help="32322">
                     <level>2</level>
                     <default>false</default>
+                    <control type="toggle" />
                 </setting>
             </group>
         </category>

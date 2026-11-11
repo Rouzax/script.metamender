@@ -138,8 +138,12 @@ def update_patched(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(actions, "lang", _fake_lang)
     monkeypatch.setattr(actions.StructuredLogger, "initialize", MagicMock())
     monkeypatch.setattr(actions, "get_bool_setting", MagicMock(return_value=False))
+    monkeypatch.setattr(actions, "is_setup_complete", MagicMock(return_value=True))
+    open_setup = MagicMock(return_value=False)
+    monkeypatch.setattr(actions, "open_setup", open_setup)
 
     return {
+        "open_setup": open_setup,
         "tracker": tracker, "notify": notify, "run_scan": run_scan,
         "get_item_by_id": get_item_by_id, "acquire": acquire, "release": release,
         "build_show_id_map": build_show_id_map,
@@ -223,6 +227,7 @@ def test_update_now_runs_on_disabled_source(mock_get, mock_scan, kodi_stubs, set
          patch.object(_actions, "notify"), \
          patch.object(_actions, "lang", _fake_lang), \
          patch.object(_actions, "get_bool_setting", return_value=False), \
+         patch.object(_actions, "is_setup_complete", return_value=True), \
          patch.object(_actions.StructuredLogger, "initialize", MagicMock()):
 
         mock_get.return_value = {
@@ -246,3 +251,10 @@ def test_update_now_tvdb_auth_failure_notified(update_patched, monkeypatch):
     notified = [c.args[0] for c in update_patched["notify"].call_args_list]
     assert notified.count("s32352") == 1
     assert "s32341" not in notified
+
+
+def test_update_now_opens_wizard_before_setup(update_patched, monkeypatch):
+    monkeypatch.setattr(actions, "is_setup_complete", MagicMock(return_value=False))
+    actions.update_now("movie", "7")
+    update_patched["open_setup"].assert_called_once_with("wizard")
+    update_patched["run_scan"].assert_not_called()

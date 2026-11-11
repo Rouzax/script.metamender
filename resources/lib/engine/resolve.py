@@ -2,8 +2,12 @@
 Rating resolution for MetaMender.
 
 Builds the Kodi named-slot ratings map from the TMDB and IMDb ratings under
-the user's rating_source preference: Prefer TMDB, Prefer IMDb, TMDB only,
-IMDb only.
+the user's rating_source preference: Follow the scraper (the default),
+Prefer TMDB, Prefer IMDb, TMDB only, IMDb only.
+
+Follow the scraper keeps the rating Kodi shows where the scraper put it: the
+item's default slot decides which of our sources is preferred, and the
+default flag itself never moves while the item has one.
 
 Logging:
     Logger: 'resolve'
@@ -24,14 +28,37 @@ PREFER_TMDB = 0
 PREFER_IMDB = 1
 TMDB_ONLY = 2
 IMDB_ONLY = 3
+FOLLOW_SCRAPER = 4
 
 
 def rating_sources(rating_pref: int) -> tuple[bool, bool]:
-    """(consults TMDB, consults IMDb) under a rating_source preference."""
+    """(consults TMDB, consults IMDb) under a rating_source preference.
+    Follow the scraper consults both: any item may have an IMDb default."""
     return (
-        rating_pref in (PREFER_TMDB, PREFER_IMDB, TMDB_ONLY),
-        rating_pref in (PREFER_TMDB, PREFER_IMDB, IMDB_ONLY),
+        rating_pref in (PREFER_TMDB, PREFER_IMDB, TMDB_ONLY, FOLLOW_SCRAPER),
+        rating_pref in (PREFER_TMDB, PREFER_IMDB, IMDB_ONLY, FOLLOW_SCRAPER),
     )
+
+
+def _default_slot(current: dict[str, Any]) -> str | None:
+    return next(
+        (name for name, entry in current.items()
+         if isinstance(entry, dict) and entry.get("default")),
+        None,
+    )
+
+
+def effective_rating_pref(rating_pref: int, current_ratings: dict[str, Any]) -> int:
+    """The fixed preference an item is handled under. Follow the scraper
+    resolves per item from the slot Kodi marks as default: an IMDb default
+    prefers IMDb; any other default (TMDB, or a source metamender does not
+    fetch, such as trakt or tvdb) or none prefers TMDB. Fixed options pass
+    through unchanged."""
+    if rating_pref != FOLLOW_SCRAPER:
+        return rating_pref
+    if _default_slot(current_ratings or {}) == _IMDB_SLOT:
+        return PREFER_IMDB
+    return PREFER_TMDB
 
 
 # Kodi rating slot names for our two managed providers. Kodi's TMDB movie
@@ -95,6 +122,7 @@ def build_ratings(
     rating_pref: int,
     nfo_managed: bool = False,
     owned_slots: dict[str, str] | None = None,
+    keep_default_mark: bool = False,
 ) -> tuple[dict[str, Any] | None, str | None, int | None, dict[str, str]]:
     """Build the Kodi ratings map to write.
 
@@ -116,12 +144,20 @@ def build_ratings(
     The exception is an NFO item with no ratings at all: nothing there says
     which rating to show, so the default follows rating_pref, as without an
     NFO, instead of leaving Kodi to pick one.
+
+    With keep_default_mark (Follow the scraper) an item that has a default
+    slot keeps every default flag as it is, NFO or not; without an NFO,
+    default_source is then that slot when this call wrote it, else None. An item without a
+    default slot gets one by rating_pref, as usual.
     """
     current = current_ratings or {}
     owned = owned_slots or {}
+    held_default = _default_slot(current)
     # Whether existing default flags stand: an NFO item's do, unless it has
-    # no ratings to hold one.
-    keep_defaults = nfo_managed and bool(current)
+    # no ratings to hold one; under Follow the scraper, whenever one is set.
+    keep_defaults = (nfo_managed and bool(current)) or (
+        keep_default_mark and held_default is not None
+    )
 
     # Collect in-range candidates honoring the preference's source filter
     use_tmdb, use_imdb = rating_sources(rating_pref)
@@ -160,6 +196,8 @@ def build_ratings(
         new_map[name] = {"rating": r, "votes": v, "default": keep_default}
 
     default_source: str | None = None
+    if keep_default_mark and not nfo_managed and held_default in candidates:
+        default_source = held_default
     if not keep_defaults:
         # Choose the default slot by preference, falling back to whichever exists
         order = [_IMDB_SLOT, tmdb_slot] if rating_pref in (PREFER_IMDB, IMDB_ONLY) \

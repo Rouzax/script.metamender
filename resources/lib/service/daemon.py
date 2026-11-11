@@ -48,7 +48,7 @@ from resources.lib.data.sources import kodi_ui_language, load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import SiteGate
-from resources.lib.engine.resolve import rating_sources
+from resources.lib.engine.resolve import FOLLOW_SCRAPER, rating_sources
 from resources.lib.engine.scan import run_scan
 from resources.lib.providers import imdb_ratings
 from resources.lib.service.lock import (
@@ -66,6 +66,7 @@ from resources.lib.utils import (
     get_int_setting,
     get_logger,
     get_setting,
+    is_setup_complete,
     lang,
     notify,
 )
@@ -146,7 +147,7 @@ def _load_settings() -> dict[str, Any]:
 
     return {
         "tmdb_api_key": get_setting("tmdb_api_key"),
-        "rating_source": get_int_setting("rating_source", 0),
+        "rating_source": get_int_setting("rating_source", FOLLOW_SCRAPER),
         "text_source_order": get_int_setting("text_source_order", 2),
         "fallback_order": get_int_setting("fallback_order", 0),
         "enabled_fields": frozenset(fields),
@@ -204,7 +205,7 @@ def _prepare_imdb_ratings(settings: dict[str, Any], monitor: Any) -> bool:
     """
     if "rating" not in settings["enabled_fields"]:
         return False
-    if not rating_sources(settings.get("rating_source", 0))[1]:
+    if not rating_sources(settings.get("rating_source", FOLLOW_SCRAPER))[1]:
         return False
 
     def abort() -> bool:
@@ -399,6 +400,7 @@ def run() -> None:
     tracker: TrackerDB | None = None
     last_scan = 0.0  # Force scan on first loop iteration
     next_retry_after = 0.0  # Backoff gate after a failed scan (both triggers)
+    needs_setup_shown = False
 
     try:
         tracker = TrackerDB(_get_db_path())
@@ -406,6 +408,21 @@ def run() -> None:
         while not monitor.abortRequested():
             try:
                 now = time.time()
+
+                if not is_setup_complete():
+                    # Nothing scans before the wizard has run: no key, and
+                    # no language the user confirmed. The wizard's Finish
+                    # starts the first scan itself, so the schedule counts
+                    # from now and library events seen meanwhile are dropped.
+                    if not needs_setup_shown:
+                        needs_setup_shown = True
+                        log.info("Waiting for setup", event="service.needs_setup")
+                        notify(lang(32466))
+                    last_scan = now
+                    monitor.clear_scan_request()
+                    if monitor.waitForAbort(SERVICE_SLEEP_INTERVAL_SEC):
+                        break
+                    continue
 
                 # Trigger selection (scheduled takes precedence over a
                 # same-tick library event; see _select_trigger). Only the scan

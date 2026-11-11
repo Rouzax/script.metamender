@@ -108,7 +108,13 @@ from resources.lib.engine.maturity import (
     fallback_recheck_due,
 )
 from resources.lib.engine.protect import fingerprint, is_blank, may_write
-from resources.lib.engine.resolve import build_ratings, rating_sources, slot_fingerprint
+from resources.lib.engine.resolve import (
+    FOLLOW_SCRAPER,
+    build_ratings,
+    effective_rating_pref,
+    rating_sources,
+    slot_fingerprint,
+)
 from resources.lib.providers.imdb_ratings import lookup as imdb_rating_lookup
 from resources.lib.providers.languages import tmdb_language, tvdb_language
 from resources.lib.providers.tmdb import (
@@ -197,7 +203,9 @@ def settings_fingerprint(
     TMDB step, the folder language.
     """
     if field in _RATING_FIELDS:
-        inputs: dict[str, Any] = {"rating_source": settings.get("rating_source", 0)}
+        inputs: dict[str, Any] = {
+            "rating_source": settings.get("rating_source", FOLLOW_SCRAPER),
+        }
     elif field == "mpaa":
         # The certification depends on the configured system and sources,
         # not on the folder language.
@@ -1515,14 +1523,16 @@ def _resolve_ratings(
     Transient when a source rating_source consults did not answer for this
     item; a source it does not consult cannot hold the rating back.
     """
-    use_tmdb, use_imdb = rating_sources(ctx.rating_pref)
+    current = item.get("ratings") or {}
+    pref = effective_rating_pref(ctx.rating_pref, current)
+    use_tmdb, use_imdb = rating_sources(pref)
     imdb = _imdb_rating(ctx, primary, identity) if use_imdb else None
     if (use_tmdb and primary.tmdb is TRANSIENT) or imdb is TRANSIENT:
         return True, None, None, None, {}
     tmdb_data = primary.tmdb if primary.tmdb is not TRANSIENT else None
     new_ratings, source, votes, slot_fps = build_ratings(
-        tmdb_data or {}, imdb, item.get("ratings") or {},
-        ctx.rating_pref, nfo_managed=nfo_managed, owned_slots=owned_slots,
+        tmdb_data or {}, imdb, current, pref, nfo_managed=nfo_managed,
+        owned_slots=owned_slots, keep_default_mark=ctx.rating_pref == FOLLOW_SCRAPER,
     )
     return False, new_ratings, source, votes, slot_fps
 
@@ -1969,7 +1979,7 @@ def run_scan(
         logged_once=set(),
         counts={"unknown_ids_accepted": 0, "episodes_found_by_tvdb": 0},
         schedule=schedule,
-        rating_pref=settings.get("rating_source", 0),
+        rating_pref=settings.get("rating_source", FOLLOW_SCRAPER),
         text_order=settings.get("text_source_order", TEXT_FOLLOW_SCRAPER),
         fallback_order=settings.get("fallback_order", FALLBACK_TVDB_FIRST),
         default_fallback=str(source_config.get("fallback_language") or ""),
