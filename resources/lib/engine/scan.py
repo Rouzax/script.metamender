@@ -240,6 +240,10 @@ def _make_stats() -> dict[str, Any]:
         # field values not written because an NFO supplied the field.
         "unreachable": 0,
         "protected": 0,
+        # Fields left unchecked because a provider failed transiently, plus
+        # items skipped while an id lookup had no answer: Update now tells
+        # "could not check" from "nothing changed" by it.
+        "transient": 0,
         "fields": {},
         # True when the pass stopped before reaching the end of the library
         # (shutdown, or every provider disabled). The caller must not treat
@@ -2202,6 +2206,8 @@ def run_scan(
             _finish_lookups(ctx, identity, ids, today)
             tracker.mark_cycle_processed(media_type.name, identity)
             stats["skipped"] += 1
+            if ids.tvdb_transient or ids.tmdb_transient:
+                stats["transient"] += 1
             continue
 
         log.debug(
@@ -2331,7 +2337,10 @@ def run_scan(
         premiered = item.get(media_type.date_field, "")
         for f in nonfinal:
             outcome = outcomes[f]
-            if outcome.transient or f in write_failed:
+            if outcome.transient:
+                stats["transient"] += 1
+                continue
+            if f in write_failed:
                 continue
             fs = fs_map.get(f, {})
             new_count = 1 if f in rebaseline else int(fs.get("fetch_count") or 0) + 1

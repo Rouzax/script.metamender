@@ -416,6 +416,10 @@ msgctxt "#32352"
 msgid "TheTVDB rejected the add-on's credentials; TV titles and plots from TheTVDB are paused"
 msgstr ""
 
+msgctxt "#32353"
+msgid "Could not check now: {}"
+msgstr ""
+
 # --- Reset tracker dialog (32360-32362) ---
 
 msgctxt "#32360"

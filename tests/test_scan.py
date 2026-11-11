@@ -1980,6 +1980,42 @@ class TestEpisodeTransientDoesNotAdvanceClock:
         assert fs_map == {}
 
 
+class TestTransientFieldsAreCounted:
+    """Update now tells "could not check" from "no changes" by this count."""
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_transient_fetch_counts_each_unchecked_field(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        mock_fetch.side_effect = TransientProviderError("http 503")
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot", "tagline"}),
+            "k", _make_settings(), items=[_make_movie_item()],
+        )
+        tracker.close()
+
+        assert stats["transient"] == 2 and stats["updated"] == 0
+
+    @patch("resources.lib.engine.scan.update_item", return_value=True)
+    @patch("resources.lib.engine.scan.tmdb_fetch_movie")
+    def test_answered_fields_count_nothing(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            "k", _make_settings(), items=[_make_movie_item()],
+        )
+        tracker.close()
+
+        assert stats["transient"] == 0
+
+
 class TestConsecutiveCycles:
     """End-to-end guard for the defect where the shipped default configuration
     never started a second cycle: cycle_processed stayed 1 for every item, so

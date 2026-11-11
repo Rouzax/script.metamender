@@ -218,9 +218,16 @@ def update_now(dbtype: str, dbid: str) -> None:
             media_type=media_type.name,
             title=title,
             updated=updated,
+            unreachable=stats.get("unreachable", 0),
+            transient=stats.get("transient", 0),
+            aborted=bool(stats.get("aborted")),
         )
+        unchecked = (stats.get("unreachable") or stats.get("transient")
+                     or stats.get("aborted"))
         if updated:
             notify(lang(32350).format(title))  # Updated: {}
+        elif unchecked:
+            notify(lang(32353).format(title))  # Could not check now: {}
         else:
             notify(lang(32351).format(title))  # No changes: {}
         if tvdb_auth_failed([stats]):

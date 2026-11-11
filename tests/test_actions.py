@@ -21,6 +21,7 @@ _LANG = {
     32347: "Update failed",
     32350: "Updated: {}",
     32351: "No changes: {}",
+    32353: "Could not check now: {}",
     32360: "Reset tracker?",
     32361: "This will clear all field status records so the next scan re-fetches everything.",
     32362: "Reset complete: {} fields cleared",
@@ -202,6 +203,24 @@ def test_update_now_no_changes_notifies(update_patched):
     actions.update_now("movie", "7")
     msg = update_patched["notify"].call_args[0][0]
     assert "No changes" in msg or "no changes" in msg.lower()
+
+
+@pytest.mark.parametrize("stats", [
+    {"updated": 0, "unreachable": 1},
+    {"updated": 0, "transient": 2},
+    {"updated": 0, "aborted": True},
+])
+def test_update_now_says_could_not_check(update_patched, stats):
+    update_patched["run_scan"].return_value = stats
+    actions.update_now("movie", "7")
+    msg = update_patched["notify"].call_args[0][0]
+    assert msg == "Could not check now: Air"
+
+
+def test_update_now_reports_an_update_even_if_a_field_was_unchecked(update_patched):
+    update_patched["run_scan"].return_value = {"updated": 1, "transient": 1}
+    actions.update_now("movie", "7")
+    assert update_patched["notify"].call_args[0][0] == "Updated: Air"
 
 
 @patch("resources.lib.service.actions.run_scan")
