@@ -203,6 +203,40 @@ def get_item_by_id(
     return detail
 
 
+def _details(method: str, id_field: str, item_id: int, key: str,
+             properties: list[str]) -> dict[str, Any] | None:
+    """One GetXDetails call returning the detail dict, or None when the item
+    does not exist or the query fails."""
+    query = {"jsonrpc": "2.0", "method": method, "id": 1,
+             "params": {id_field: item_id, "properties": properties}}
+    try:
+        data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
+    except Exception:
+        log.exception("Failed to query item details", event="kodi.query",
+                      method=method, item_id=item_id)
+        return None
+    detail = (data.get("result") or {}).get(key)
+    return detail or None
+
+
+def get_season_info(seasonid: int) -> tuple[int, int] | None:
+    """The show id and season number of a season node, or None."""
+    detail = _details("VideoLibrary.GetSeasonDetails", "seasonid", seasonid,
+                      "seasondetails", ["tvshowid", "season"])
+    if not detail or "tvshowid" not in detail or "season" not in detail:
+        return None
+    return int(detail["tvshowid"]), int(detail["season"])
+
+
+def get_episode_show_id(episodeid: int) -> int | None:
+    """The show id of an episode, or None."""
+    detail = _details("VideoLibrary.GetEpisodeDetails", "episodeid", episodeid,
+                      "episodedetails", ["tvshowid"])
+    if not detail or "tvshowid" not in detail:
+        return None
+    return int(detail["tvshowid"])
+
+
 def update_item(
     item_id: int,
     media_type: MediaType,

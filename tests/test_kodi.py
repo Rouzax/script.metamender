@@ -306,3 +306,29 @@ def test_get_all_items_warns_at_ceiling(kodi_stubs, monkeypatch):
     monkeypatch.setattr(kodi.log, "warning", lambda *a, **k: warnings.append((a, k)))
     kodi.get_all_items(MOVIE)
     assert any(k.get("event") == "kodi.truncated" for a, k in warnings)
+
+
+def _answers(by_method):
+    def answer(raw):
+        return json.dumps(by_method.get(json.loads(raw)["method"], {"error": {"code": -32602}}))
+    return MagicMock(side_effect=answer)
+
+
+def test_get_season_info(kodi_stubs):
+    from resources.lib.data.kodi import get_season_info
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({"VideoLibrary.GetSeasonDetails": {
+        "result": {"seasondetails": {"seasonid": 31, "tvshowid": 7, "season": 2}}}})
+    assert get_season_info(31) == (7, 2)
+
+
+def test_get_season_info_missing(kodi_stubs):
+    from resources.lib.data.kodi import get_season_info
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({})
+    assert get_season_info(31) is None
+
+
+def test_get_episode_show_id(kodi_stubs):
+    from resources.lib.data.kodi import get_episode_show_id
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({"VideoLibrary.GetEpisodeDetails": {
+        "result": {"episodedetails": {"episodeid": 100, "tvshowid": 7}}}})
+    assert get_episode_show_id(100) == 7
