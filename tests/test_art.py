@@ -8,7 +8,7 @@ from PIL import Image
 
 MEDIA = "resources/skins/Default/media/metamender/"
 XML = "resources/skins/Default/1080i/script-metamender-setup.xml"
-TEXTURES = ["panel", "frame", "glow", "button", "row", "check_off", "check_on", "radio_off",
+TEXTURES = ["panel", "frame", "button", "row", "check_off", "check_on", "radio_off",
             "radio_on", "badge", "pulse", "dot", "divider"]
 
 
@@ -53,3 +53,11 @@ def test_addon_xml_declares_the_icon():
     assert meta is not None
     icon = meta.findtext("assets/icon")
     assert icon == "icon.png" and os.path.exists(icon)
+
+
+def test_every_colour_the_window_sets_is_used():
+    from resources.lib.ui.setup_window import GOLDEN_HOUR
+    with open(XML) as handle:
+        text = handle.read()
+    used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))
+    assert set(GOLDEN_HOUR) <= used, set(GOLDEN_HOUR) - used

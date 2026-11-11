@@ -211,7 +211,7 @@ def test_list_keeps_position_when_the_step_redraws():
 
 
 def test_golden_hour_values():
-    assert GOLDEN_HOUR == {"MM.Accent": "FFF5A623", "MM.AccentGlow": "FFF5C564",
+    assert GOLDEN_HOUR == {"MM.Accent": "FFF5A623",
                            "MM.ButtonFocus": "FFD4912A", "MM.ButtonTextFocused": "FF0D1117"}
 
 

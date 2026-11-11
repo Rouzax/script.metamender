@@ -3,7 +3,7 @@
      only, never from a script's own skin folder. Fonts are limited to font10/12/13, which
      every skin defines (Kodi falls back to font13 for any name a skin lacks). Textures are
      white and tinted here; the accent colours come from window properties (MM.Accent,
-     MM.AccentGlow, MM.ButtonFocus, MM.ButtonTextFocused) set by setup_window.py. -->
+     MM.ButtonFocus, MM.ButtonTextFocused) set by setup_window.py. -->
 <window>
     <zorder>1</zorder>
     <!-- The list is filled in onInit, so it cannot take focus when the window opens. -->
@@ -26,12 +26,6 @@
                 <effect type="fade" start="100" end="0" tween="cubic" easing="out" time="200"/>
             </animation>
 
-            <!-- Soft glow: a pre-blurred halo behind the panel (Kodi cannot blur). -->
-            <control type="image">
-                <left>-24</left><top>-24</top><width>1288</width><height>908</height>
-                <texture border="48" colordiffuse="$INFO[Window.Property(MM.AccentGlow)]">metamender/glow.png</texture>
-                <animation effect="fade" start="25" end="25" time="0" condition="true">Conditional</animation>
-            </control>
             <control type="image">
                 <left>0</left><top>0</top><width>1240</width><height>860</height>
                 <texture border="20" colordiffuse="FF1A1D23">metamender/panel.png</texture>

@@ -405,7 +405,6 @@ class SetupController:
 
 GOLDEN_HOUR = {
     "MM.Accent": "FFF5A623",
-    "MM.AccentGlow": "FFF5C564",
     "MM.ButtonFocus": "FFD4912A",
     "MM.ButtonTextFocused": "FF0D1117",
 }

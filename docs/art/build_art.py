@@ -9,7 +9,7 @@ Writes icon.png (512x512, full colour) and the textures under
 resources/skins/Default/media/metamender/. The textures are white on
 transparent so the window XML tints each one with colordiffuse; the nine-slice
 ones (panel, frame, button, row) are 64x64 with their rounding inside a 20px
-border; glow is 128x128 with a 48px border. Also writes docs/art/preview-small.png, the icon at Kodi toast sizes,
+border. Also writes docs/art/preview-small.png, the icon at Kodi toast sizes,
 for checking that it still reads when small (not committed).
 
 Needs rsvg-convert (librsvg) and Pillow. This folder is under docs/, which the
@@ -157,12 +157,6 @@ def textures() -> dict[str, tuple[str, int]]:
     return {
         "panel": (_svg(64, 64, _rounded(64, 18)), 64),
         "frame": (_svg(64, 64, _rounded(64, 17, inset=1.5, stroke=3)), 64),
-        # A soft halo for behind the panel frame: a rounded outline blurred in
-        # the texture itself, since Kodi cannot blur. Nine-slice border 48.
-        "glow": (_svg(128, 128, '<defs><filter id="b" x="-50%" y="-50%" width="200%" '
-                                'height="200%"><feGaussianBlur stdDeviation="7"/></filter></defs>'
-                                '<rect x="24" y="24" width="80" height="80" rx="22" fill="none" '
-                                'stroke="#fff" stroke-width="20" filter="url(#b)"/>'), 128),
         "button": (_svg(64, 64, _rounded(64, 14)), 64),
         "row": (_svg(64, 64, _rounded(64, 10)), 64),
         "check_off": (_svg(64, 64, _rounded(64, 12, inset=5, stroke=6)), 64),
