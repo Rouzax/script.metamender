@@ -27,6 +27,8 @@ Logging:
           the item is NFO-managed and the field holds a value metamender did
           not write
         - scan.abort (INFO): Scan interrupted by Kodi shutdown
+        - scan.stopped (INFO): A progress callback stopped the pass (the
+          user pressed Stop in the refresh window)
         - scan.processing (DEBUG): Starting to process a single item
         - scan.updated (INFO): Item metadata written to Kodi
         - scan.breaker (WARNING): A provider tripped, or every provider the
@@ -52,6 +54,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -210,6 +213,9 @@ def _make_stats() -> dict[str, Any]:
         # (shutdown, or every provider disabled). The caller must not treat
         # such a pass as a completed cycle.
         "aborted": False,
+        # True when a progress callback stopped the pass (the user pressed
+        # Stop); unlike "aborted" this is not a failure.
+        "stopped": False,
         # True when TheTVDB has rejected the add-on's credentials this cycle
         # (in this pass or an earlier one sharing the breaker), so the caller
         # can tell the user TVDB text is paused.
@@ -737,6 +743,7 @@ def run_scan(
     reset: bool = False,
     new_only: bool = False,
     cert_gate: SiteGate | None = None,
+    progress: Callable[[int, dict[str, Any], dict[str, Any]], bool] | None = None,
 ) -> dict[str, int]:
     """Run a single scan cycle for one media type.
 
@@ -782,6 +789,9 @@ def run_scan(
             file's date, not when the item entered the library, so it cannot
             pick out new items. A re-scraped item gets a new Kodi id and is
             included.
+        progress: Called before each item with its index, the item and the
+            live stats dict. Returning False stops the pass before that item
+            (stats["stopped"]); an item is never stopped half-way.
 
     Returns:
         Stats dict with processed, skipped, updated, errors, and
@@ -847,7 +857,7 @@ def run_scan(
     if items is None:
         items = _new_items(tracker, media_type) if new_only else kodi.get_all_items(media_type)
 
-    for item in items:
+    for index, item in enumerate(items):
         # Check for Kodi shutdown
         if monitor is not None and monitor.abortRequested():
             log.info(
@@ -857,6 +867,16 @@ def run_scan(
                 processed=stats["processed"],
             )
             stats["aborted"] = True
+            break
+
+        if progress is not None and not progress(index, item, stats):
+            log.info(
+                "Scan stopped by the user",
+                event="scan.stopped",
+                media_type=media_type.name,
+                processed=stats["processed"],
+            )
+            stats["stopped"] = True
             break
 
         # Yield: pause while video is playing. The reset path (Update now)

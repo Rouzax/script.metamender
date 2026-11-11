@@ -2132,6 +2132,50 @@ class TestUpdateNowKeepsCadence:
         assert row["fetch_count"] == 1
 
 
+class TestProgressHook:
+    """run_scan reports each item before it starts and can be stopped
+    between items (a show or season refresh in a progress window)."""
+
+    def _items(self):
+        return [_make_movie_item(title=t, tmdb_id=str(100 + n), movie_id=n + 1, plot="")
+                for n, t in enumerate("ABC")]
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_progress_called_before_each_item_with_live_stats(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="New plot")
+        seen = []
+
+        def progress(index, item, stats):
+            seen.append((index, item["title"], stats["updated"]))
+            return True
+
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+                 _make_settings(), items=self._items(), reset=True, progress=progress)
+        tracker.close()
+        assert seen == [(0, "A", 0), (1, "B", 1), (2, "C", 2)]
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_progress_false_stops_before_that_item(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="New plot")
+        tracker = _make_tracker(tmp_path)
+        items = self._items()
+        stats = run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+                         _make_settings(), items=items, reset=True,
+                         progress=lambda index, item, stats: index < 1)
+        second = tracker.get_field_status_map("movie", compute_identity(items[1], MOVIE))
+        tracker.close()
+        assert mock_fetch.call_count == 1
+        assert stats["stopped"] is True and stats["aborted"] is False
+        assert second == {}
+
+
 class TestConsecutiveCycles:
     """End-to-end guard for the defect where the shipped default configuration
     never started a second cycle: cycle_processed stayed 1 for every item, so
