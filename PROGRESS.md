@@ -102,6 +102,7 @@ feat/7d-provider-replacement.
 - [x] 9.3 TMDB key check (ok, refused, not checked)
 - [x] 9.4 Setup wizard (key, library language, folders in another language, what to fill, certification country, summary) as a pure model plus one WindowXMLDialog; the same window is the Folder languages dialog. Styled after the author's other add-ons (navy panel, amber accent from window properties, step dots, checkbox and radio markers); heartbeat-card add-on icon; art rendered by `docs/art/build_art.py`
 - [x] 9.5 Setup gate: nothing scans until the wizard has been finished once; the first Finish starts the first scan
+- [x] 9.6 Update now on a TV show (the show and all its episodes) or a season (its episodes), with a progress window (Stop, Background to Kodi's background bar, brought back by Update now inside the same show); Update now no longer moves a field's refresh schedule
 
 ## Phase 10: Scale, Progress, and Polish
 - [ ] 10.1 Progress notifications (per-scan, summary, resume)
