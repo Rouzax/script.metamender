@@ -8,15 +8,20 @@ Logging:
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from resources.lib.data.kodi import (
+    get_all_items,
     get_episode_show_id,
     get_item_by_id,
     get_season_info,
 )
-from resources.lib.data.media_types import TVSHOW
+from resources.lib.data.media_types import EPISODE, TVSHOW, MediaType
+from resources.lib.data.tracker import TrackerDB
+from resources.lib.engine.breaker import CircuitBreaker
+from resources.lib.engine.scan import run_scan
 from resources.lib.utils import get_logger, lang
 
 log = get_logger('refresh')
@@ -134,3 +139,92 @@ class RefreshProgress:
             if self.unchecked:
                 return lang(32353).format(title)
             return lang(32351).format(title)
+
+
+@dataclass
+class RefreshOutcome:
+    """How a refresh ended: stopped by the user, cut short because every
+    provider it needed was down, or interrupted by Kodi shutting down."""
+    stopped: bool = False
+    could_not_finish: bool = False
+    aborted: bool = False
+
+
+def _label(media_type: MediaType, item: dict[str, Any]) -> str:
+    if media_type is TVSHOW:
+        return lang(32472)
+    return lang(32473).format(item.get("season", ""), item.get("episode", ""),
+                              item.get("title", ""))
+
+
+def _pass(
+    media_type: MediaType,
+    items: list[dict[str, Any]],
+    progress: RefreshProgress,
+    settings: dict[str, Any],
+    source_config: dict[str, Any],
+    tracker: TrackerDB,
+    monitor: Any,
+    breaker: CircuitBreaker,
+    show_id_map: dict[int, str] | None = None,
+) -> dict[str, Any]:
+    """One run_scan pass over ``items``, counting each finished item into
+    ``progress``: an item is counted when the next one starts or the pass
+    ends, by what it changed in the stats."""
+    pending: list[dict[str, Any]] = []
+
+    def on_item(index: int, item: dict[str, Any], stats: dict[str, Any]) -> bool:
+        if pending:
+            progress.item_finished(pending.pop(), stats)
+        if progress.stop_requested:
+            return False
+        pending.append(dict(stats))
+        progress.item_started(_label(media_type, item))
+        return True
+
+    stats = run_scan(
+        media_type, tracker, source_config, settings["enabled_fields"],
+        settings["tmdb_api_key"], settings, monitor=monitor, items=items,
+        reset=True, breaker=breaker, show_id_map=show_id_map, progress=on_item,
+    )
+    if pending:
+        progress.item_finished(pending.pop(), stats)
+    return stats
+
+
+def run_refresh(
+    scope: Scope,
+    progress: RefreshProgress,
+    settings: dict[str, Any],
+    source_config: dict[str, Any],
+    tracker: TrackerDB,
+    monitor: Any,
+) -> RefreshOutcome:
+    """Refresh a show (its record, then every episode) or a season (its
+    episodes), as Update now does for one item. The episode pass builds its
+    show id map after the show pass, so it uses the ids that pass found."""
+    episodes = get_all_items(EPISODE, tvshowid=scope.tvshowid, season=scope.season)
+    show = get_item_by_id(TVSHOW, scope.tvshowid) if scope.season is None else None
+    progress.begin(len(episodes) + (1 if show else 0), now=time.monotonic())
+    log.info("Refresh starting", event="refresh.start", tvshowid=scope.tvshowid,
+             season=scope.season, episodes=len(episodes))
+    breaker = CircuitBreaker()
+    passes: list[dict[str, Any]] = []
+    if show:
+        passes.append(_pass(TVSHOW, [show], progress, settings, source_config,
+                            tracker, monitor, breaker))
+    if episodes and not (passes and (passes[-1]["stopped"] or passes[-1]["aborted"])):
+        passes.append(_pass(EPISODE, episodes, progress, settings, source_config,
+                            tracker, monitor, breaker, tracker.get_show_id_map()))
+    shutdown = bool(monitor is not None and monitor.abortRequested())
+    outcome = RefreshOutcome(
+        stopped=any(s.get("stopped") for s in passes),
+        could_not_finish=not shutdown and any(s.get("aborted") for s in passes),
+        aborted=shutdown,
+    )
+    log.info("Refresh finished", event="refresh.finish", tvshowid=scope.tvshowid,
+             season=scope.season, done=progress.done, total=progress.total,
+             updated=progress.updated, unchecked=progress.unchecked,
+             stopped=outcome.stopped, could_not_finish=outcome.could_not_finish,
+             aborted=outcome.aborted)
+    return outcome
