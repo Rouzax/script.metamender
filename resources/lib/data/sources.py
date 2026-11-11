@@ -14,9 +14,11 @@ Logging:
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 from typing import Any
+from urllib.parse import unquote
 
 import xbmc
 
@@ -24,6 +26,8 @@ from resources.lib.utils import get_logger, log_timing
 
 log = get_logger('sources')
 
+
+_MULTIPATH = "multipath://"
 
 # Used when Kodi does not report a usable UI language.
 _FALLBACK_UI_LANGUAGE = "en-US"
@@ -92,35 +96,123 @@ def load_source_config(config_path: str) -> dict[str, Any]:
     return config
 
 
-def save_source_config(config_path: str, config: dict[str, Any]) -> None:
-    """Write source configuration to a JSON file.
-
-    Creates parent directories if they do not exist.
-
-    Args:
-        config_path: Absolute path to the sources.json file.
-        config: The config dict to write.
-    """
-    parent = os.path.dirname(config_path)
-    if parent and not os.path.exists(parent):
-        os.makedirs(parent, exist_ok=True)
-
+def save_source_config(config_path: str, config: dict[str, Any]) -> bool:
+    """Write source configuration to a JSON file, creating parent
+    directories as needed. False when the file could not be written."""
     try:
+        parent = os.path.dirname(config_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as fh:
             json.dump(config, fh, indent=2)
-    except (IOError, OSError):
+    except OSError:
         log.exception(
             "Failed to save source config",
             event="sources.save_fail",
             path=config_path,
         )
-        return
+        return False
 
     log.info(
         "Source config saved",
         event="sources.save",
         path=config_path,
     )
+    return True
+
+
+def source_paths(path: str) -> list[str]:
+    """The folders a Kodi source covers. A source with several folders is
+    reported by Files.GetSources as one `multipath://` URL of URL-encoded
+    folders separated by "/"; a file path never starts with it, so each
+    folder needs its own sources.json entry."""
+    if not path.startswith(_MULTIPATH):
+        return [path]
+    return [unquote(part) for part in path[len(_MULTIPATH):].split("/") if part]
+
+
+def apply_folder_languages(
+    config: dict[str, Any],
+    discovered: list[dict[str, str]],
+    default_language: str,
+    fallback_language: str,
+    exceptions: dict[str, tuple[str, str]],
+) -> dict[str, Any]:
+    """A copy of ``config`` with the wizard's languages applied.
+
+    ``exceptions`` maps a discovered source's path (possibly multipath) to
+    (language, fallback language, "" for none). Every folder of a discovered
+    source loses its language unless the source is an exception, in which
+    case each of its folders gets one; `enabled: false` is kept. Entries for
+    folders no discovered source names exactly (hand-written subfolders,
+    removed sources) are left as they are.
+    """
+    out = copy.deepcopy(config)
+    out["default_language"] = default_language
+    if fallback_language:
+        out["fallback_language"] = fallback_language
+    else:
+        out.pop("fallback_language", None)
+
+    wanted: dict[str, tuple[str, str] | None] = {}
+    for source in discovered:
+        raw = source.get("path", "")
+        for folder in source_paths(raw):
+            wanted[folder] = exceptions.get(raw)
+
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in out.get("sources") or []:
+        path = entry.get("path", "")
+        if path not in wanted:
+            entries.append(entry)
+            continue
+        seen.add(path)
+        updated = _with_languages(entry, wanted[path])
+        if updated is not None:
+            entries.append(updated)
+    for folder, langs in wanted.items():
+        if folder not in seen and langs is not None:
+            new_entry = _with_languages({"path": folder}, langs)
+            if new_entry is not None:
+                entries.append(new_entry)
+    out["sources"] = entries
+    return out
+
+
+def folder_exceptions(
+    config: dict[str, Any], discovered: list[dict[str, str]],
+) -> dict[str, tuple[str, str]]:
+    """The exceptions apply_folder_languages would need to reproduce
+    ``config``: a discovered source whose folders have an entry with a
+    language, mapped to the first such entry's languages."""
+    by_path = {e.get("path"): e for e in config.get("sources") or []}
+    result: dict[str, tuple[str, str]] = {}
+    for source in discovered:
+        raw = source.get("path", "")
+        for folder in source_paths(raw):
+            entry = by_path.get(folder)
+            if entry and entry.get("language"):
+                result[raw] = (entry["language"], entry.get("fallback_language", ""))
+                break
+    return result
+
+
+def _with_languages(
+    entry: dict[str, Any], langs: tuple[str, str] | None,
+) -> dict[str, Any] | None:
+    """``entry`` with its languages set from ``langs`` (cleared when None),
+    or None when nothing worth keeping is left: only a disabled flag or a
+    language changes how a folder is scanned."""
+    kept: dict[str, Any] = {"path": entry["path"]}
+    if entry.get("enabled") is False:
+        kept["enabled"] = False
+    if langs is not None:
+        language, fallback = langs
+        kept["language"] = language
+        if fallback:
+            kept["fallback_language"] = fallback
+    return kept if len(kept) > 1 else None
 
 
 def discover_sources() -> list[dict[str, str]]:

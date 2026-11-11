@@ -6,10 +6,13 @@ import os
 from unittest.mock import patch
 
 from resources.lib.data.sources import (
+    apply_folder_languages,
+    folder_exceptions,
     kodi_ui_language,
     load_source_config,
     match_source,
     save_source_config,
+    source_paths,
 )
 
 
@@ -98,3 +101,68 @@ def test_kodi_ui_language_falls_back_to_en_us():
     for answer in ("", None, 3):
         with patch("resources.lib.data.sources.xbmc.getLanguage", return_value=answer):
             assert kodi_ui_language() == "en-US"
+
+
+# =============================================================================
+# Wizard helpers
+# =============================================================================
+
+_MP = "multipath://%2fa%2f/%2fb%2f/"
+
+
+def test_source_paths_multipath():
+    mp = "multipath://%2fmnt%2fa%2fFilms%2f/smb%3a%2f%2fnas%2fFilms%2f/"
+    assert source_paths(mp) == ["/mnt/a/Films/", "smb://nas/Films/"]
+    assert source_paths("/mnt/b/") == ["/mnt/b/"]
+
+
+def test_apply_sets_defaults_and_exceptions_for_every_multipath_part():
+    out = apply_folder_languages(
+        {"sources": []},
+        [{"path": _MP, "label": "Kids"}, {"path": "/c/", "label": "Films"}],
+        "en-US", "", {_MP: ("nl-NL", "en-US")},
+    )
+    assert out["default_language"] == "en-US" and "fallback_language" not in out
+    assert {"path": "/a/", "language": "nl-NL", "fallback_language": "en-US"} in out["sources"]
+    assert {"path": "/b/", "language": "nl-NL", "fallback_language": "en-US"} in out["sources"]
+    assert not any(e["path"] == "/c/" for e in out["sources"])
+
+
+def test_apply_sets_top_level_fallback_and_omits_empty_entry_fallback():
+    out = apply_folder_languages(
+        {"sources": [], "fallback_language": "de-DE"},
+        [{"path": "/c/", "label": "Films"}], "nl-NL", "en-US", {"/c/": ("fr-FR", "")},
+    )
+    assert out["fallback_language"] == "en-US"
+    assert out["sources"] == [{"path": "/c/", "language": "fr-FR"}]
+
+
+def test_apply_keeps_disabled_and_foreign_entries():
+    cfg = {"sources": [{"path": "/c/", "enabled": False, "language": "de-DE"},
+                       {"path": "/c/sub/", "language": "fr-FR"}]}
+    out = apply_folder_languages(cfg, [{"path": "/c/", "label": "Films"}],
+                                 "en-US", "", {})
+    assert {"path": "/c/", "enabled": False} in out["sources"]
+    assert {"path": "/c/sub/", "language": "fr-FR"} in out["sources"]
+
+
+def test_apply_drops_emptied_entries_and_does_not_mutate_input():
+    cfg = {"sources": [{"path": "/c/", "label": "Films", "enabled": True,
+                        "language": "de-DE"}]}
+    out = apply_folder_languages(cfg, [{"path": "/c/", "label": "Films"}],
+                                 "en-US", "", {})
+    assert out["sources"] == []
+    assert cfg["sources"][0]["language"] == "de-DE"
+
+
+def test_folder_exceptions_round_trip():
+    disc = [{"path": _MP, "label": "Kids"}, {"path": "/c/", "label": "Films"}]
+    out = apply_folder_languages({"sources": []}, disc, "en-US", "", {_MP: ("nl-NL", "")})
+    assert folder_exceptions(out, disc) == {_MP: ("nl-NL", "")}
+
+
+def test_save_source_config_reports_failure(tmp_path):
+    target = tmp_path / "dir"
+    target.mkdir()
+    assert save_source_config(str(target), {"sources": []}) is False
+    assert save_source_config(str(tmp_path / "s.json"), {"sources": []}) is True
