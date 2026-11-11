@@ -7,12 +7,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from resources.lib.providers.tmdb import (
+    KEY_OK,
+    KEY_REFUSED,
+    KEY_UNCHECKED,
     _normalize_certs,
     _parse_directors,
     _parse_movie_certifications,
     _parse_trailer,
     _parse_tv_certifications,
     _parse_writers,
+    check_api_key,
     fetch_episode_external_ids,
     fetch_movie,
     fetch_season,
@@ -880,3 +884,39 @@ class TestTitles:
         ))
         assert fetch_tvshow("1", "k", language="nl-NL")["title"] == ""
         assert fetch_tvshow("1", "k", language="en-US")["title"] == "The Night Agent"
+
+
+# =============================================================================
+# Tests: check_api_key
+# =============================================================================
+
+
+@patch("resources.lib.providers.tmdb.provider_get", return_value={"images": {}})
+def test_check_api_key_ok(mock_get):
+    assert check_api_key("abc") == KEY_OK
+    assert mock_get.call_args.kwargs["params"] == {"api_key": "abc"}
+    assert mock_get.call_args.args[0].endswith("/configuration")
+
+
+@patch("resources.lib.providers.tmdb.provider_get", side_effect=ApiKeyError("tmdb"))
+def test_check_api_key_refused_on_401(mock_get):
+    assert check_api_key("abc") == KEY_REFUSED
+
+
+@patch("resources.lib.providers.tmdb.provider_get",
+       side_effect=TransientProviderError("http 503", status=503))
+def test_check_api_key_unchecked_on_transient(mock_get):
+    assert check_api_key("abc") == KEY_UNCHECKED
+
+
+@patch("resources.lib.providers.tmdb.provider_get", return_value=None)
+def test_check_api_key_unchecked_on_no_answer(mock_get):
+    assert check_api_key("abc") == KEY_UNCHECKED
+
+
+@patch("resources.lib.providers.tmdb.provider_get", return_value={})
+def test_check_api_key_strips_and_rejects_empty(mock_get):
+    assert check_api_key("   ") == KEY_REFUSED
+    mock_get.assert_not_called()
+    check_api_key(" abc ")
+    assert mock_get.call_args.kwargs["params"] == {"api_key": "abc"}

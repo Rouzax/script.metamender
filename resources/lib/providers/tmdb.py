@@ -20,7 +20,12 @@ from typing import Any
 
 from resources.lib.constants import TMDB_BASE_URL
 from resources.lib.providers.http import provider_get
-from resources.lib.utils import get_logger, log_timing
+from resources.lib.utils import (
+    ApiKeyError,
+    TransientProviderError,
+    get_logger,
+    log_timing,
+)
 
 log = get_logger('tmdb')
 
@@ -34,6 +39,12 @@ _CERT_NORMALIZE = {
         "Från 15 år": "15",
     },
 }
+
+
+# check_api_key outcomes
+KEY_OK = "ok"
+KEY_REFUSED = "refused"
+KEY_UNCHECKED = "unchecked"
 
 
 # =============================================================================
@@ -509,3 +520,27 @@ def fetch_tvshow_external_ids(
         has_tvdb="tvdb_id" in ids,
     )
     return ids or None
+
+
+def check_api_key(api_key: str) -> str:
+    """Whether TMDB accepts ``api_key`` (a v3 API key): KEY_OK, KEY_REFUSED
+    (TMDB answered 401, or the key is empty), or KEY_UNCHECKED when TMDB
+    gave no usable answer. One request to the configuration endpoint, which
+    needs nothing but the key."""
+    key = api_key.strip()
+    if not key:
+        return KEY_REFUSED
+    try:
+        data = provider_get(
+            "{}/configuration".format(TMDB_BASE_URL), logger=log,
+            label="tmdb.key_check", params={"api_key": key}, provider="tmdb",
+        )
+    except ApiKeyError:
+        log.info("TMDB refused the API key", event="tmdb.key_check", outcome="refused")
+        return KEY_REFUSED
+    except TransientProviderError:
+        return KEY_UNCHECKED
+    if data is None:
+        return KEY_UNCHECKED
+    log.info("TMDB accepted the API key", event="tmdb.key_check", outcome="ok")
+    return KEY_OK
