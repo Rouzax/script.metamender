@@ -24,6 +24,7 @@ from urllib.parse import unquote
 
 import xbmc
 
+from resources.lib.providers.languages import tmdb_language
 from resources.lib.utils import get_logger, log_timing
 
 log = get_logger('sources')
@@ -49,14 +50,17 @@ def _default_match() -> dict[str, Any]:
 
 def kodi_ui_language() -> str:
     """Kodi's interface language with its region (e.g. "nl-NL"), the best
-    guess for a folder whose language is not configured. "en-US" when Kodi
-    reports nothing usable."""
+    guess for a folder whose language is not configured. Kodi answers "en-"
+    when no region is set, so a missing region becomes TMDB's primary one
+    for the language. "en-US" when Kodi reports nothing usable."""
     try:
         code = xbmc.getLanguage(xbmc.ISO_639_1, region=True)
     except Exception:
         log.exception("Failed to read Kodi's UI language", event="sources.ui_language")
         return _FALLBACK_UI_LANGUAGE
-    return code if isinstance(code, str) and code.strip() else _FALLBACK_UI_LANGUAGE
+    if not isinstance(code, str) or not code.strip():
+        return _FALLBACK_UI_LANGUAGE
+    return tmdb_language(code) or _FALLBACK_UI_LANGUAGE
 
 
 def load_source_config(config_path: str) -> dict[str, Any]:

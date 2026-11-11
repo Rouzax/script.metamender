@@ -99,6 +99,13 @@ def test_kodi_ui_language_with_region():
     assert get.call_args.kwargs == {"region": True}
 
 
+def test_kodi_ui_language_without_region_gets_the_primary_one():
+    # Kodi answers "en-" when no region is set; that is no language code.
+    for answer, expected in (("en-", "en-US"), ("nl-", "nl-NL"), ("de", "de-DE")):
+        with patch("resources.lib.data.sources.xbmc.getLanguage", return_value=answer):
+            assert kodi_ui_language() == expected
+
+
 def test_kodi_ui_language_falls_back_to_en_us():
     for answer in ("", None, 3):
         with patch("resources.lib.data.sources.xbmc.getLanguage", return_value=answer):
