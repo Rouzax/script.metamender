@@ -28,7 +28,7 @@ import xbmcgui
 from resources.lib.constants import COUNTRY_CODES
 from resources.lib.data.presets import country_for_setting
 from resources.lib.data.sources import (
-    discover_sources,
+    discover_folders,
     kodi_ui_language,
     load_source_config,
     save_source_config,
@@ -475,7 +475,7 @@ def run_setup(mode: str, config_path: str) -> bool:
     True when the user finished and everything was saved."""
     ui_language = kodi_ui_language()
     config = load_source_config(config_path)
-    discovered = discover_sources()
+    discovered = discover_folders()
     settings: dict[str, Any] = {f: get_bool_setting(f) for f in FEATURES}
     settings["tmdb_api_key"] = get_setting("tmdb_api_key")
     settings["country"] = get_int_setting("country", 0)

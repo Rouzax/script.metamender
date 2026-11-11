@@ -17,6 +17,8 @@ from __future__ import annotations
 import copy
 import json
 import os
+from collections import Counter
+from collections.abc import Iterable
 from typing import Any
 from urllib.parse import unquote
 
@@ -257,6 +259,84 @@ def discover_sources() -> list[dict[str, str]]:
     )
 
     return discovered
+
+
+_NOT_FOLDERS = ("plugin://", "videodb://", "http://", "https://")
+
+
+def _parent(path: str) -> str | None:
+    """The folder holding ``path`` (a file, or a folder with or without its
+    trailing separator), ending in that folder's own separator, or None
+    when there is none. Kodi paths use "/" or, on Windows, "\\"."""
+    stripped = path.rstrip("/\\")
+    cut = max(stripped.rfind("/"), stripped.rfind("\\"))
+    return stripped[:cut + 1] if cut > 0 else None
+
+
+def _folder_label(path: str) -> str:
+    """The last two parts of a folder path, e.g. "TVSeries/EN": enough to
+    tell library folders apart without the server name."""
+    bare = path.split("://", 1)[-1]
+    parts = [p for p in bare.replace("\\", "/").split("/") if p]
+    return "/".join(parts[-2:])
+
+
+def library_folders(
+    movie_files: Iterable[str], show_folders: Iterable[str],
+) -> list[dict[str, str]]:
+    """The library's top folders, derived from item paths, in the shape of
+    ``discover_sources``: a show's folder sits in a library folder; a movie
+    file sits in a library folder when other movies share its folder, else
+    in a folder of its own one level down. Folders inside another listed
+    folder are dropped, since a source entry covers everything below it."""
+    movie_dirs: Counter[str] = Counter()
+    for file in movie_files:
+        if file.startswith("stack://"):
+            file = file[len("stack://"):].split(" , ")[0]
+        if file and not file.startswith(_NOT_FOLDERS):
+            folder = _parent(file)
+            if folder:
+                movie_dirs[folder] += 1
+    roots = set()
+    for folder, count in movie_dirs.items():
+        root = folder if count > 1 else _parent(folder)
+        if root:
+            roots.add(root)
+    for show in show_folders:
+        if show and not show.startswith(_NOT_FOLDERS):
+            root = _parent(show)
+            if root:
+                roots.add(root)
+    top = sorted(r for r in roots if not any(o != r and r.startswith(o) for o in roots))
+    return [{"path": r, "label": _folder_label(r)} for r in top]
+
+
+def _library_files(method: str, key: str) -> list[str]:
+    query = {"jsonrpc": "2.0", "method": method,
+             "params": {"properties": ["file"]}, "id": 1}
+    try:
+        data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
+    except Exception:
+        log.exception("Failed to read library paths", event="sources.library", method=method)
+        return []
+    items = data.get("result", {}).get(key, [])
+    return [item.get("file", "") for item in items]
+
+
+def discover_folders() -> list[dict[str, str]]:
+    """The folders the setup screens offer: Kodi's video sources, or, when
+    Kodi lists none (a client sharing another machine's library database
+    has no sources of its own), the folders derived from the library."""
+    sources = discover_sources()
+    if sources:
+        return sources
+    with log_timing(log, "library_folders"):
+        folders = library_folders(
+            _library_files("VideoLibrary.GetMovies", "movies"),
+            _library_files("VideoLibrary.GetTVShows", "tvshows"),
+        )
+    log.info("Library folders derived", event="sources.library", count=len(folders))
+    return folders
 
 
 def _path_matches(file_path: str, source_path: str) -> bool:
