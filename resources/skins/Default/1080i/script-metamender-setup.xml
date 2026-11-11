@@ -26,21 +26,11 @@
                 <effect type="fade" start="100" end="0" tween="cubic" easing="out" time="200"/>
             </animation>
 
-            <!-- Soft glow: the frame drawn larger and fainter behind the panel. -->
+            <!-- Soft glow: a pre-blurred halo behind the panel (Kodi cannot blur). -->
             <control type="image">
-                <left>-14</left><top>-14</top><width>1268</width><height>888</height>
-                <texture border="20" colordiffuse="$INFO[Window.Property(MM.AccentGlow)]">metamender/frame.png</texture>
-                <animation effect="fade" start="18" end="18" time="0" condition="true">Conditional</animation>
-            </control>
-            <control type="image">
-                <left>-8</left><top>-8</top><width>1256</width><height>876</height>
-                <texture border="20" colordiffuse="$INFO[Window.Property(MM.AccentGlow)]">metamender/frame.png</texture>
-                <animation effect="fade" start="35" end="35" time="0" condition="true">Conditional</animation>
-            </control>
-            <control type="image">
-                <left>-4</left><top>-4</top><width>1248</width><height>868</height>
-                <texture border="20" colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/frame.png</texture>
-                <animation effect="fade" start="55" end="55" time="0" condition="true">Conditional</animation>
+                <left>-24</left><top>-24</top><width>1288</width><height>908</height>
+                <texture border="48" colordiffuse="$INFO[Window.Property(MM.AccentGlow)]">metamender/glow.png</texture>
+                <animation effect="fade" start="25" end="25" time="0" condition="true">Conditional</animation>
             </control>
             <control type="image">
                 <left>0</left><top>0</top><width>1240</width><height>860</height>
@@ -124,7 +114,7 @@
                 <animation effect="fade" start="70" end="70" time="0" condition="true">Conditional</animation>
             </control>
             <control type="textbox">
-                <left>80</left><top>150</top><width>1080</width><height>96</height>
+                <left>80</left><top>150</top><width>1080</width><height>116</height>
                 <align>center</align>
                 <font>font12</font>
                 <textcolor>FFA8AEB8</textcolor>
@@ -133,7 +123,7 @@
             </control>
 
             <control type="list" id="100">
-                <left>50</left><top>262</top><width>1140</width><height>420</height>
+                <left>50</left><top>282</top><width>1140</width><height>420</height>
                 <orientation>vertical</orientation>
                 <scrolltime>120</scrolltime>
                 <pagecontrol>101</pagecontrol>
@@ -259,7 +249,7 @@
                 </focusedlayout>
             </control>
             <control type="scrollbar" id="101">
-                <left>1200</left><top>262</top><width>6</width><height>410</height>
+                <left>1200</left><top>282</top><width>6</width><height>410</height>
                 <orientation>vertical</orientation>
                 <showonepage>false</showonepage>
                 <texturesliderbackground colordiffuse="FF222731">metamender/white.png</texturesliderbackground>
@@ -273,7 +263,7 @@
             <!-- Back, Cancel and Next centred together; a hidden Back drops out of the
                  group, so Cancel and Next re-centre on the first step. -->
             <control type="grouplist" id="40">
-                <left>50</left><top>740</top><width>1140</width><height>72</height>
+                <left>50</left><top>752</top><width>1140</width><height>72</height>
                 <orientation>horizontal</orientation>
                 <align>center</align>
                 <itemgap>28</itemgap>

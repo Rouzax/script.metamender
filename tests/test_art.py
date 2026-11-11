@@ -8,7 +8,7 @@ from PIL import Image
 
 MEDIA = "resources/skins/Default/media/metamender/"
 XML = "resources/skins/Default/1080i/script-metamender-setup.xml"
-TEXTURES = ["panel", "frame", "button", "row", "check_off", "check_on", "radio_off",
+TEXTURES = ["panel", "frame", "glow", "button", "row", "check_off", "check_on", "radio_off",
             "radio_on", "badge", "pulse", "dot", "divider"]
 
 
