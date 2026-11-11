@@ -562,20 +562,20 @@ def test_5_old_content_final_after_one_fetch(t):
 
     # Scan 2: content is old (age >= stale_threshold_days), decide_field returns FINAL,
     # no fetch is triggered, fetch_count must NOT advance.
-    import resources.lib.engine.scan as scan_mod
+    import resources.lib.providers.tmdb as tmdb_mod
     call_count = [0]
-    orig_tmdb = scan_mod.tmdb_fetch_movie
+    orig_tmdb = tmdb_mod.fetch_movie
 
     def counting_tmdb(*args, **kwargs):
         call_count[0] += 1
         return orig_tmdb(*args, **kwargs)
 
     tracker.start_new_cycle()
-    scan_mod.tmdb_fetch_movie = counting_tmdb
+    tmdb_mod.fetch_movie = counting_tmdb
     try:
         stats2 = run_targeted_scan(MOVIE, [item], tracker)
     finally:
-        scan_mod.tmdb_fetch_movie = orig_tmdb
+        tmdb_mod.fetch_movie = orig_tmdb
 
     t.check("scan2: item skipped (all fields FINAL)", stats2["skipped"] >= 1,
             "processed={} skipped={}".format(stats2["processed"], stats2["skipped"]))
@@ -657,13 +657,13 @@ def test_7_transient_failure_no_advance(t):
 
     item = get_movie(372)
 
-    import resources.lib.engine.scan as scan_mod
-    orig_tmdb = scan_mod.tmdb_fetch_movie
+    import resources.lib.providers.tmdb as tmdb_mod
+    orig_tmdb = tmdb_mod.fetch_movie
 
     def raising_tmdb(*a, **kw):
         raise TransientProviderError("simulated transient")
 
-    scan_mod.tmdb_fetch_movie = raising_tmdb
+    tmdb_mod.fetch_movie = raising_tmdb
     try:
         tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
@@ -682,7 +682,7 @@ def test_7_transient_failure_no_advance(t):
 
         tracker.close()
     finally:
-        scan_mod.tmdb_fetch_movie = orig_tmdb
+        tmdb_mod.fetch_movie = orig_tmdb
 
 
 # ---------------------------------------------------------------------------
@@ -870,7 +870,7 @@ def test_11_tvdb_series_verification(t):
     tmp = tempfile.mkdtemp(dir=_SCRATCH)
     tracker = make_tracker(tmp)
     try:
-        with patch("resources.lib.engine.scan.update_item", return_value=True):
+        with patch("resources.lib.data.kodi.update_item", return_value=True):
             run_scan(
                 media_type=TVSHOW, tracker=tracker,
                 source_config={
@@ -1075,7 +1075,7 @@ def test_17_tmdb_only(t):
     # type: (TestResult) -> None
     """TMDB-only ratings make no IMDb lookup; prefer-IMDb does."""
     from resources.lib.data.media_types import MOVIE
-    import resources.lib.engine.scan as scan_mod
+    import resources.lib.providers.imdb_ratings as imdb_mod
 
     print("\n--- Test 17: rating_source TMDB only vs prefer IMDb (Air) ---")
 
@@ -1085,13 +1085,13 @@ def test_17_tmdb_only(t):
         return
     movie_id = found["movieid"]
     calls = [0]
-    orig_lookup = scan_mod.imdb_rating_lookup
+    orig_lookup = imdb_mod.lookup
 
     def counting(*args, **kwargs):
         calls[0] += 1
         return orig_lookup(*args, **kwargs)
 
-    scan_mod.imdb_rating_lookup = counting
+    imdb_mod.lookup = counting
     try:
         tracker = make_tracker(tempfile.mkdtemp(dir=_SCRATCH))
         stats = run_scan_with_settings(MOVIE, [get_movie(movie_id)], tracker,
@@ -1109,7 +1109,7 @@ def test_17_tmdb_only(t):
             t.check("prefer IMDb: IMDb consulted", calls[0] >= 1, "got {}".format(calls[0]))
             tracker.close()
     finally:
-        scan_mod.imdb_rating_lookup = orig_lookup
+        imdb_mod.lookup = orig_lookup
 
 
 # ===========================================================================
@@ -1311,9 +1311,9 @@ def test_23_idempotent_rescan(t):
 
         # Second scan with no provider data change: same-value skip means no write,
         # but because content may be young, fetch_count still advances.
-        import resources.lib.engine.scan as scan_mod
+        import resources.lib.providers.tmdb as tmdb_mod
         call_count = [0]
-        orig_tmdb = scan_mod.tmdb_fetch_movie
+        orig_tmdb = tmdb_mod.fetch_movie
 
         def counting_tmdb(*args, **kwargs):
             call_count[0] += 1
@@ -1327,7 +1327,7 @@ def test_23_idempotent_rescan(t):
         )
         tracker._conn.commit()
         tracker.start_new_cycle()
-        scan_mod.tmdb_fetch_movie = counting_tmdb
+        tmdb_mod.fetch_movie = counting_tmdb
         try:
             item2 = get_movie(6)
             # Young content so the field stays volatile and a due refetch happens
@@ -1335,7 +1335,7 @@ def test_23_idempotent_rescan(t):
             item2["premiered"] = (date.today() - timedelta(days=1)).isoformat()
             stats2 = run_scan_with_settings(MOVIE, [item2], tracker)
         finally:
-            scan_mod.tmdb_fetch_movie = orig_tmdb
+            tmdb_mod.fetch_movie = orig_tmdb
 
         # The same-value skip means no Kodi write, but the fetch still happened
         t.check("second scan had a provider call (field was due)", call_count[0] >= 1,
@@ -1418,14 +1418,14 @@ def test_25_both_providers_none_no_error(t):
     air = get_movie(6)
     orig_plot = air["plot"]
 
-    import resources.lib.engine.scan as scan_mod
-    orig_tmdb = scan_mod.tmdb_fetch_movie
+    import resources.lib.providers.tmdb as tmdb_mod
+    orig_tmdb = tmdb_mod.fetch_movie
 
     def null_tmdb(*a, **kw):
         return None
 
     set_movie(6, plot="")
-    scan_mod.tmdb_fetch_movie = null_tmdb
+    tmdb_mod.fetch_movie = null_tmdb
     try:
         tmp = tempfile.mkdtemp(dir=_SCRATCH)
         tracker = make_tracker(tmp)
@@ -1448,7 +1448,7 @@ def test_25_both_providers_none_no_error(t):
 
         tracker.close()
     finally:
-        scan_mod.tmdb_fetch_movie = orig_tmdb
+        tmdb_mod.fetch_movie = orig_tmdb
         set_movie(6, plot=orig_plot)
 
 
@@ -1803,22 +1803,22 @@ def test_33_skip_not_due(t):
                                    "plot", _default_settings(), "en-US", "movie"))
     tracker.commit()
 
-    import resources.lib.engine.scan as scan_mod
+    import resources.lib.providers.tmdb as tmdb_mod
     call_count = [0]
-    orig_tmdb = scan_mod.tmdb_fetch_movie
+    orig_tmdb = tmdb_mod.fetch_movie
 
     def counting_tmdb(*args, **kwargs):
         call_count[0] += 1
         return orig_tmdb(*args, **kwargs)
 
-    scan_mod.tmdb_fetch_movie = counting_tmdb
+    tmdb_mod.fetch_movie = counting_tmdb
     try:
         # Scope to only the pre-seeded field, so the item-level decision reflects
         # plot's SKIP_NOT_DUE (other fields would be first-encounter and fetch).
         stats = run_targeted_scan(MOVIE, [item], tracker,
                                   enabled_fields=frozenset({"plot"}))
     finally:
-        scan_mod.tmdb_fetch_movie = orig_tmdb
+        tmdb_mod.fetch_movie = orig_tmdb
 
     t.check("item skipped (all fields SKIP_NOT_DUE or already set)",
             stats["skipped"] >= 1,

@@ -67,8 +67,9 @@ from resources.lib.constants import (
     PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
     parse_refetch_schedule,
 )
+from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
-from resources.lib.data.kodi import get_all_items, get_item_by_id, update_item
+from resources.lib.data.kodi import get_item_by_id
 from resources.lib.data.media_types import EPISODE, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import Preset, load_preset
@@ -115,21 +116,8 @@ from resources.lib.engine.resolve import (
     rating_sources,
     slot_fingerprint,
 )
-from resources.lib.providers.imdb_ratings import lookup as imdb_rating_lookup
+from resources.lib.providers import imdb_ratings, tmdb, tvdb
 from resources.lib.providers.languages import tmdb_language, tvdb_language
-from resources.lib.providers.tmdb import (
-    fetch_episode_external_ids as tmdb_fetch_episode_ids,
-    fetch_movie as tmdb_fetch_movie,
-    fetch_season as tmdb_fetch_season,
-    fetch_tvshow as tmdb_fetch_tvshow,
-    fetch_tvshow_external_ids as tmdb_fetch_tvshow_ids,
-    find_episode_by_tvdb as tmdb_find_episode,
-    resolve_id,
-)
-from resources.lib.providers.tvdb import (
-    fetch_series as tvdb_fetch_series,
-    fetch_series_episodes as tvdb_fetch_series_episodes,
-)
 from resources.lib.utils import (
     ApiKeyError,
     KodiQueryError,
@@ -342,7 +330,7 @@ def _get_season_data(
     """
     key = "{}:{}:{}".format(show_tmdb_id, season_number, language)
     if key not in cache:
-        cache[key] = tmdb_fetch_season(show_tmdb_id, season_number, api_key, language)
+        cache[key] = tmdb.fetch_season(show_tmdb_id, season_number, api_key, language)
     return cache[key]
 
 
@@ -662,7 +650,7 @@ def _enrich_imdb_id(
     """Write a discovered IMDB ID back to Kodi and the tracker."""
     uid = item.get("uniqueid", {})
     uid["imdb"] = new_imdb
-    update_item(kodi_id, ctx.media_type, title, uniqueid=uid)
+    kodi.update_item(kodi_id, ctx.media_type, title, uniqueid=uid)
     ctx.tracker.upsert_item(ctx.media_type.name, identity, imdb_id=new_imdb)
     log.info(
         "Enriched IMDB ID from TMDB",
@@ -859,7 +847,7 @@ def _verify_unknown_show(
     "Alfred J. Kwak"), while the episode ids are TVDB's own."""
     series = _tvdb_cached(
         ctx, "series", unknown_id, _verification_lang(ctx, folder_lang),
-        tvdb_fetch_series, identity,
+        tvdb.fetch_series, identity,
     )
     if series is TRANSIENT:
         _unknown_verdict(ctx, ids, identity, unknown_id, TRANSIENT, "")
@@ -896,9 +884,9 @@ def _confirmed_by_episodes(
     Kodi here, for this show only.
     """
     try:
-        episodes = get_all_items(EPISODE, tvshowid=item.get("tvshowid"))
+        episodes = kodi.get_all_items(EPISODE, tvshowid=item.get("tvshowid"))
     except KodiQueryError:
-        # get_all_items logged it; the next scan asks again.
+        # kodi.get_all_items logged it; the next scan asks again.
         return TRANSIENT
     candidates = {_extract_ids(ep)[3] for ep in episodes}
     candidates.discard(None)
@@ -906,7 +894,7 @@ def _confirmed_by_episodes(
         return False
     listed = _tvdb_cached(
         ctx, "episodes", unknown_id, _verification_lang(ctx, folder_lang),
-        tvdb_fetch_series_episodes, identity,
+        tvdb.fetch_series_episodes, identity,
     )
     if listed is TRANSIENT:
         return TRANSIENT
@@ -935,7 +923,7 @@ def _verify_unknown_episode(
         return
     episodes = _tvdb_cached(
         ctx, "episodes", show_tvdb_id, _verification_lang(ctx, folder_lang),
-        tvdb_fetch_series_episodes, identity,
+        tvdb.fetch_series_episodes, identity,
     )
     if episodes is TRANSIENT:
         _unknown_verdict(ctx, ids, identity, unknown_id, TRANSIENT, "")
@@ -951,7 +939,7 @@ def _resolve_tmdb_by_external(ctx: _ScanCtx, identity: str, ids: _Ids) -> None:
     """Movie/show TMDB id from its TVDB or IMDb id via TMDB /find."""
     resolved = _lookup(
         "tmdb",
-        lambda: resolve_id(
+        lambda: tmdb.resolve_id(
             ctx.tmdb_api_key, ctx.media_type.name, tvdb_id=ids.tvdb, imdb_id=ids.imdb,
         ),
         ctx, identity,
@@ -970,7 +958,7 @@ def _show_tvdb_from_tmdb(ctx: _ScanCtx, identity: str, ids: _Ids) -> None:
     """Show TVDB id from TMDB's curated external ids."""
     tmdb_id = ids.tmdb or ""
     found = _lookup(
-        "tmdb", lambda: tmdb_fetch_tvshow_ids(ctx.tmdb_api_key, tmdb_id),
+        "tmdb", lambda: tmdb.fetch_tvshow_external_ids(ctx.tmdb_api_key, tmdb_id),
         ctx, identity,
     )
     if found is TRANSIENT:
@@ -1003,7 +991,7 @@ def _episode_tmdb_from_tvdb(
         return
     tvdb_id = ids.tvdb or ""
     found = _lookup(
-        "tmdb", lambda: tmdb_find_episode(ctx.tmdb_api_key, tvdb_id),
+        "tmdb", lambda: tmdb.find_episode_by_tvdb(ctx.tmdb_api_key, tvdb_id),
         ctx, identity,
     )
     if found is TRANSIENT:
@@ -1114,7 +1102,7 @@ def _fetch_movie_or_show(
     if ids.tmdb_transient or (tmdb_id and ctx.breaker.is_disabled("tmdb")):
         tmdb_data = TRANSIENT
     elif tmdb_id:
-        fetch = tmdb_fetch_movie if ctx.media_type.name == "movie" else tmdb_fetch_tvshow
+        fetch = tmdb.fetch_movie if ctx.media_type.name == "movie" else tmdb.fetch_tvshow
         tmdb_data = _call_provider(
             "tmdb",
             lambda: fetch(tmdb_id, ctx.tmdb_api_key, language),
@@ -1156,7 +1144,7 @@ def _episode_cross_ids(
     """
     found = _call_provider(
         "tmdb",
-        lambda: tmdb_fetch_episode_ids(
+        lambda: tmdb.fetch_episode_external_ids(
             ep_show_tmdb_id, season_number, episode_number, ctx.tmdb_api_key,
         ),
         ctx, identity, best_effort=True,
@@ -1340,7 +1328,7 @@ class _TextSources:
         if ctx.breaker.is_disabled("tmdb"):
             return TRANSIENT
         if ctx.media_type.name != "episode":
-            fetch = tmdb_fetch_movie if ctx.media_type.name == "movie" else tmdb_fetch_tvshow
+            fetch = tmdb.fetch_movie if ctx.media_type.name == "movie" else tmdb.fetch_tvshow
             return _call_provider(
                 "tmdb",
                 lambda: fetch(tmdb_id, ctx.tmdb_api_key, lang),
@@ -1375,7 +1363,7 @@ class _TextSources:
             return None
         if ctx.media_type.name == "tvshow":
             series = _tvdb_cached(
-                ctx, "series", tvdb_id, lang, tvdb_fetch_series, self._identity,
+                ctx, "series", tvdb_id, lang, tvdb.fetch_series, self._identity,
             )
             if series is TRANSIENT or series is None:
                 return series
@@ -1385,7 +1373,7 @@ class _TextSources:
             if not show_tvdb_id:
                 return None if _show_checked(ctx, self._item) else TRANSIENT
             episodes = _tvdb_cached(
-                ctx, "episodes", show_tvdb_id, lang, tvdb_fetch_series_episodes,
+                ctx, "episodes", show_tvdb_id, lang, tvdb.fetch_series_episodes,
                 self._identity,
             )
             if episodes is TRANSIENT or episodes is None:
@@ -1500,7 +1488,7 @@ def _imdb_rating(ctx: _ScanCtx, primary: _Primary, identity: str) -> Any:
     if not primary.imdb_id:
         return None
     try:
-        return imdb_rating_lookup(primary.imdb_id)
+        return imdb_ratings.lookup(primary.imdb_id)
     except TransientProviderError:
         return TRANSIENT
     except Exception:
@@ -1646,7 +1634,7 @@ def _write_fields(
     write_succeeded = False
 
     if fields_to_write:
-        write_succeeded = update_item(kodi_id, ctx.media_type, title, **fields_to_write)
+        write_succeeded = kodi.update_item(kodi_id, ctx.media_type, title, **fields_to_write)
         if write_succeeded:
             stats["updated"] += 1
             for field_name in fields_to_write:
@@ -1872,7 +1860,7 @@ def _new_items(tracker: TrackerDB, media_type: MediaType) -> list[dict[str, Any]
     """The library's items whose Kodi id the tracker does not know yet, with
     full details. An id listed but gone by the details call is skipped."""
     known = tracker.known_kodi_ids(media_type.name)
-    listed = get_all_items(media_type, ids_only=True)
+    listed = kodi.get_all_items(media_type, ids_only=True)
     fresh = [
         i[media_type.kodi_id_field] for i in listed
         if i.get(media_type.kodi_id_field) not in known
@@ -2007,7 +1995,7 @@ def run_scan(
     )
 
     if items is None:
-        items = _new_items(tracker, media_type) if new_only else get_all_items(media_type)
+        items = _new_items(tracker, media_type) if new_only else kodi.get_all_items(media_type)
 
     for item in items:
         # Check for Kodi shutdown
