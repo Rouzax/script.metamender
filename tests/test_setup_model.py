@@ -135,16 +135,17 @@ def test_config_to_write_applies_languages():
     assert {"path": "/a/", "language": "de-DE"} in out["sources"]
 
 
-def test_mask_key():
-    assert mask_key("abcdef1234") == "******1234"
-    assert mask_key("abc") == "***"
+def test_mask_key_hides_the_length():
+    assert mask_key("abcdef1234") == "****1234"
+    assert mask_key("x" * 28 + "1234") == "****1234"
+    assert mask_key("abc") == "****"
 
 
 def test_summary_lines():
     state = _state(tmdb_api_key="abcdef1234")
     state.exceptions = {"/c/": ("de-DE", "en-US")}
     lines = dict(summary_lines(state, _DISCOVERED))
-    assert lines["key"] == "******1234"
+    assert lines["key"] == "****1234"
     assert lines["key_status"] == KEY_OK
     assert lines["language"] == "nl-NL"
     assert lines["folder:Films"] == "de-DE,en-US"

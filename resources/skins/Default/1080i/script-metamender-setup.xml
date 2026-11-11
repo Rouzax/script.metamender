@@ -60,25 +60,38 @@
                 <autoscroll delay="6000" time="2000" repeat="8000">true</autoscroll>
             </control>
             <control type="list" id="100">
-                <left>50</left><top>318</top><width>1140</width><height>410</height>
+                <left>50</left><top>318</top><width>1140</width><height>420</height>
                 <orientation>vertical</orientation>
                 <scrolltime>120</scrolltime>
                 <pagecontrol>101</pagecontrol>
+                <!-- Without an onup that is not the list itself, Up on the first row
+                     wraps to the last. -->
+                <onup>noop</onup>
                 <ondown>21</ondown>
-                <itemlayout width="1140" height="90">
+                <itemlayout width="1140" height="84">
                     <control type="image">
-                        <left>0</left><top>0</top><width>1140</width><height>80</height>
+                        <left>0</left><top>0</top><width>1140</width><height>74</height>
                         <texture colordiffuse="FF1C2129">metamender/white.png</texture>
                     </control>
+                    <!-- A row without a detail line centres its label. -->
                     <control type="label">
-                        <left>28</left><top>6</top><width>1000</width><height>38</height>
+                        <left>28</left><top>0</top><width>1000</width><height>74</height>
                         <aligny>center</aligny>
                         <font>font13</font>
                         <textcolor>FFF1F3F5</textcolor>
                         <label>$INFO[ListItem.Label]</label>
+                        <visible>String.IsEmpty(ListItem.Property(detail))</visible>
                     </control>
                     <control type="label">
-                        <left>28</left><top>42</top><width>1000</width><height>32</height>
+                        <left>28</left><top>4</top><width>1000</width><height>36</height>
+                        <aligny>center</aligny>
+                        <font>font13</font>
+                        <textcolor>FFF1F3F5</textcolor>
+                        <label>$INFO[ListItem.Label]</label>
+                        <visible>!String.IsEmpty(ListItem.Property(detail))</visible>
+                    </control>
+                    <control type="label">
+                        <left>28</left><top>38</top><width>1000</width><height>30</height>
                         <aligny>center</aligny>
                         <font>font10</font>
                         <textcolor>FF9299A6</textcolor>
@@ -87,35 +100,45 @@
                     <!-- A filled marker, not a tick glyph: skin fonts are not guaranteed
                          to carry one. -->
                     <control type="image">
-                        <left>1078</left><top>28</top><width>24</width><height>24</height>
+                        <left>1078</left><top>25</top><width>24</width><height>24</height>
                         <texture colordiffuse="FF2EC4B6">metamender/white.png</texture>
                         <visible>String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                 </itemlayout>
-                <focusedlayout width="1140" height="90">
+                <focusedlayout width="1140" height="84">
                     <control type="image">
-                        <left>0</left><top>0</top><width>1140</width><height>80</height>
+                        <left>0</left><top>0</top><width>1140</width><height>74</height>
                         <texture colordiffuse="FF1C2129">metamender/white.png</texture>
                     </control>
                     <control type="image">
-                        <left>0</left><top>0</top><width>1140</width><height>80</height>
+                        <left>0</left><top>0</top><width>1140</width><height>74</height>
                         <texture colordiffuse="FF263040">metamender/white.png</texture>
                         <visible>Control.HasFocus(100)</visible>
                     </control>
                     <control type="image">
-                        <left>0</left><top>0</top><width>6</width><height>80</height>
+                        <left>0</left><top>0</top><width>6</width><height>74</height>
                         <texture colordiffuse="FF2EC4B6">metamender/white.png</texture>
                         <visible>Control.HasFocus(100)</visible>
                     </control>
+                    <!-- A row without a detail line centres its label. -->
                     <control type="label">
-                        <left>28</left><top>6</top><width>1000</width><height>38</height>
+                        <left>28</left><top>0</top><width>1000</width><height>74</height>
                         <aligny>center</aligny>
                         <font>font13</font>
                         <textcolor>FFF1F3F5</textcolor>
                         <label>$INFO[ListItem.Label]</label>
+                        <visible>String.IsEmpty(ListItem.Property(detail))</visible>
                     </control>
                     <control type="label">
-                        <left>28</left><top>42</top><width>1000</width><height>32</height>
+                        <left>28</left><top>4</top><width>1000</width><height>36</height>
+                        <aligny>center</aligny>
+                        <font>font13</font>
+                        <textcolor>FFF1F3F5</textcolor>
+                        <label>$INFO[ListItem.Label]</label>
+                        <visible>!String.IsEmpty(ListItem.Property(detail))</visible>
+                    </control>
+                    <control type="label">
+                        <left>28</left><top>38</top><width>1000</width><height>30</height>
                         <aligny>center</aligny>
                         <font>font10</font>
                         <textcolor>FF9299A6</textcolor>
@@ -124,14 +147,14 @@
                     <!-- A filled marker, not a tick glyph: skin fonts are not guaranteed
                          to carry one. -->
                     <control type="image">
-                        <left>1078</left><top>28</top><width>24</width><height>24</height>
+                        <left>1078</left><top>25</top><width>24</width><height>24</height>
                         <texture colordiffuse="FF2EC4B6">metamender/white.png</texture>
                         <visible>String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                 </focusedlayout>
             </control>
             <control type="scrollbar" id="101">
-                <left>1196</left><top>318</top><width>6</width><height>400</height>
+                <left>1196</left><top>318</top><width>6</width><height>410</height>
                 <orientation>vertical</orientation>
                 <showonepage>false</showonepage>
                 <texturesliderbackground colordiffuse="FF1C2129">metamender/white.png</texturesliderbackground>

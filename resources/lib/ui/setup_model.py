@@ -143,12 +143,13 @@ def config_to_write(
 
 
 def mask_key(key: str) -> str:
-    """The key with all but its last four characters hidden; a key that
-    short is hidden entirely."""
+    """Four stars and the key's last four characters, so the mask tells
+    keys apart without showing how long the key is; a key that short is
+    hidden entirely."""
     key = key.strip()
     if len(key) <= 4:
-        return "*" * len(key)
-    return "*" * (len(key) - 4) + key[-4:]
+        return "****"
+    return "****" + key[-4:]
 
 
 def summary_lines(
