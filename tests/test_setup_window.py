@@ -7,7 +7,12 @@ import pytest
 
 from resources.lib.providers.tmdb import KEY_OK, KEY_REFUSED, KEY_UNCHECKED
 from resources.lib.ui.setup_model import FEATURES, initial_state
-from resources.lib.ui.setup_window import SetupController, list_position
+from resources.lib.ui.setup_window import (
+    GOLDEN_HOUR,
+    SetupController,
+    list_position,
+    window_properties,
+)
 
 _MP = "multipath://%2fa%2f/%2fb%2f/"
 _DISCOVERED = [{"path": _MP, "label": "Kids"}, {"path": "/c/", "label": "Films"}]
@@ -203,3 +208,45 @@ def test_list_keeps_position_when_the_step_redraws():
     assert list_position("features", "features", 4, 9) == 4
     assert list_position("folders", "folders", 5, 3) == 2
     assert list_position("folders", "folders", -1, 3) == 0
+
+
+def test_golden_hour_values():
+    assert GOLDEN_HOUR == {"MM.Accent": "FFF5A623", "MM.AccentGlow": "FFF5C564",
+                           "MM.ButtonFocus": "FFD4912A", "MM.ButtonTextFocused": "FF0D1117"}
+
+
+def test_window_properties_always_carry_every_key():
+    c, _ = _controller(key="abc")
+    props = window_properties(c)
+    assert set(props) == {"MM.Heading", "MM.Text", "MM.Next", "MM.Back", "MM.Cancel",
+                          "MM.StepIndex", "MM.StepTotal", "MM.Marker", *GOLDEN_HOUR}
+    assert props["MM.StepIndex"] == "1" and props["MM.StepTotal"] == "6"
+    assert props["MM.Back"] == "" and props["MM.Marker"] == ""
+
+
+def test_dot_count_follows_certifications_live():
+    c, _ = _controller(key="abc")
+    while c.step != "features":
+        c.on_next()
+    assert window_properties(c)["MM.StepTotal"] == "6"
+    c.activate(FEATURES.index("enable_certifications"))
+    assert window_properties(c)["MM.StepTotal"] == "5"
+
+
+def test_marker_kind_per_step():
+    c, _ = _controller(key="abc")
+    seen = {}
+    while True:  # ui language nl-NL: Automatic resolves, so Next passes country
+        seen[c.step] = window_properties(c)["MM.Marker"]
+        if c.step == "summary":
+            break
+        c.on_next()
+    assert seen == {"key": "", "language": "", "folders": "check", "features": "check",
+                    "country": "radio", "summary": ""}
+
+
+def test_folders_dialog_has_no_dots():
+    c, _ = _controller(mode="folders")
+    props = window_properties(c)
+    assert props["MM.StepIndex"] == "" and props["MM.StepTotal"] == ""
+    assert props["MM.Marker"] == "check"

@@ -194,10 +194,14 @@ class SetupController:
             return lang(32427)
         return lang(_STEP_TEXT[self.step][1])
 
-    def step_label(self) -> str:
-        if self.mode == FOLDERS:
-            return ""
-        return lang(32403).format(self.flow.index(self.state), self.flow.total(self.state))
+    def marker_kind(self) -> str:
+        """The row marker the step shows: checkboxes where several rows can
+        be ticked, a radio marker where exactly one is chosen."""
+        if self.step in (FOLDERS, "features"):
+            return "check"
+        if self.step == "country":
+            return "radio"
+        return ""
 
     def next_label(self) -> str:
         if self.mode == FOLDERS:
@@ -399,6 +403,32 @@ class SetupController:
         return lang(_COUNTRY_LABEL_BASE + index)
 
 
+GOLDEN_HOUR = {
+    "MM.Accent": "FFF5A623",
+    "MM.AccentGlow": "FFF5C564",
+    "MM.ButtonFocus": "FFD4912A",
+    "MM.ButtonTextFocused": "FF0D1117",
+}
+
+
+def window_properties(c: SetupController) -> dict[str, str]:
+    """Every window property the XML reads. The accent colours are always
+    set: a property the XML reads but nobody set tints a texture white."""
+    wizard = c.mode == WIZARD
+    props = {
+        "MM.Heading": c.heading(),
+        "MM.Text": c.explanation(),
+        "MM.Next": c.next_label(),
+        "MM.Back": lang(32404) if c.has_back() else "",
+        "MM.Cancel": lang(32408),
+        "MM.StepIndex": str(c.flow.index(c.state)) if wizard else "",
+        "MM.StepTotal": str(c.flow.total(c.state)) if wizard else "",
+        "MM.Marker": c.marker_kind(),
+    }
+    props.update(GOLDEN_HOUR)
+    return props
+
+
 def list_position(shown_step: str | None, step: str, position: int, count: int) -> int:
     """Where the list's selection goes after a redraw: kept when the same
     step redraws (a row was toggled), the top row when the step changed,
@@ -446,12 +476,8 @@ class SetupWindow(xbmcgui.WindowXMLDialog):
 
     def _render(self) -> None:
         c = self.controller
-        self.setProperty("MM.Heading", c.heading())
-        self.setProperty("MM.Text", c.explanation())
-        self.setProperty("MM.Step", c.step_label())
-        self.setProperty("MM.Next", c.next_label())
-        self.setProperty("MM.Back", lang(32404) if c.has_back() else "")
-        self.setProperty("MM.Cancel", lang(32408))
+        for key, value in window_properties(c).items():
+            self.setProperty(key, value)
         control = self._list()
         position = control.getSelectedPosition()
         control.reset()
