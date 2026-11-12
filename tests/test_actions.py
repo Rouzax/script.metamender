@@ -385,7 +385,9 @@ def test_addon_context_menu_is_one_metamender_submenu():
     po = (root_dir / "resources/language/resource.language.en_gb/strings.po").read_text()
     strings = dict(re.findall(r'msgctxt "#(\d+)"\nmsgid "(.*)"', po))
     assert strings[submenu.findtext("label")] == "MetaMender"
-    assert _dbtypes(submenu.findtext("visible")) == {"movie", "episode", "tvshow", "season"}
+    # Kodi's schema allows no condition on a submenu; Kodi shows it while any
+    # of its items is visible (ContextMenuManager::IsVisible).
+    assert submenu.find("visible") is None
 
     items = {i.get("library"): i for i in submenu.findall("item")}
     assert set(items) == {"context.py", "context_details.py"}

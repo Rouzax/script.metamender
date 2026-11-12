@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import default
+from resources.lib.service import entry as default
 from resources.lib.service import setup
 
 
