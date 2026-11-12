@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="460" viewBox="0 0 960 460" font-family="Noto Sans, DejaVu Sans, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Where MetaMender reads from and writes to</title>
+  <desc id="d">MetaMender reads your Kodi library, TMDB, TheTVDB, IMDb's public ratings and whether an item has an NFO file. It writes the fields it manages into your Kodi library and keeps its own records. It never writes NFO files, scraper settings, or anything back to the sites.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#F5A623"/>
+    </marker>
+  </defs>
+  <rect width="960" height="460" rx="16" fill="#1A1D23"/>
+
+  <!-- Reads from -->
+  <text x="40" y="44" fill="#F5A623" font-size="17" font-weight="700">Reads from</text>
+  <g font-size="15" fill="#F1F3F5">
+    <rect x="30" y="60" width="270" height="52" rx="10" fill="#262B35"/>
+    <text x="46" y="83">Your Kodi library</text>
+    <text x="46" y="102" font-size="12.5" fill="#A8AEB8">what your scraper put there</text>
+    <rect x="30" y="122" width="270" height="52" rx="10" fill="#262B35"/>
+    <text x="46" y="145">TMDB</text>
+    <text x="46" y="164" font-size="12.5" fill="#A8AEB8">most fields, in your folder's language</text>
+    <rect x="30" y="184" width="270" height="52" rx="10" fill="#262B35"/>
+    <text x="46" y="207">TheTVDB</text>
+    <text x="46" y="226" font-size="12.5" fill="#A8AEB8">TV titles and plots</text>
+    <rect x="30" y="246" width="270" height="52" rx="10" fill="#262B35"/>
+    <text x="46" y="269">IMDb ratings</text>
+    <text x="46" y="288" font-size="12.5" fill="#A8AEB8">IMDb's public data, downloaded</text>
+    <rect x="30" y="308" width="270" height="52" rx="10" fill="#262B35"/>
+    <text x="46" y="331">Age rating sites</text>
+    <text x="46" y="350" font-size="12.5" fill="#A8AEB8">FSK, BBFC, Medieraadet</text>
+    <rect x="30" y="370" width="270" height="52" rx="10" fill="#262B35"/>
+    <text x="46" y="393">Your NFO files</text>
+    <text x="46" y="412" font-size="12.5" fill="#A8AEB8">only whether an item has one</text>
+  </g>
+
+  <!-- MetaMender -->
+  <path d="M308 240 H382" stroke="#F5A623" stroke-width="3" marker-end="url(#a)"/>
+  <rect x="392" y="170" width="190" height="140" rx="14" fill="#2A2112" stroke="#F5A623" stroke-width="2.5"/>
+  <text x="487" y="212" text-anchor="middle" fill="#F5A623" font-size="19" font-weight="700">MetaMender</text>
+  <g font-size="13" fill="#F1F3F5" text-anchor="middle">
+    <text x="487" y="240">picks one value per field,</text>
+    <text x="487" y="259">in the folder's language,</text>
+    <text x="487" y="278">by your settings</text>
+  </g>
+  <path d="M590 210 H664" stroke="#F5A623" stroke-width="3" marker-end="url(#a)"/>
+  <path d="M590 280 H664" stroke="#F5A623" stroke-width="3" marker-end="url(#a)"/>
+
+  <!-- Writes to -->
+  <text x="680" y="44" fill="#F5A623" font-size="17" font-weight="700">Writes to</text>
+  <g font-size="15" fill="#F1F3F5">
+    <rect x="672" y="170" width="258" height="70" rx="10" fill="#262B35"/>
+    <text x="688" y="196">Your Kodi library</text>
+    <text x="688" y="215" font-size="12.5" fill="#A8AEB8">the fields you ticked in setup</text>
+    <text x="688" y="232" font-size="12.5" fill="#A8AEB8">(and only those)</text>
+    <rect x="672" y="250" width="258" height="70" rx="10" fill="#262B35"/>
+    <text x="688" y="276">Its own records</text>
+    <text x="688" y="295" font-size="12.5" fill="#A8AEB8">ids it found, when it checked,</text>
+    <text x="688" y="312" font-size="12.5" fill="#A8AEB8">original values, your locks</text>
+  </g>
+
+  <!-- Never -->
+  <rect x="672" y="338" width="258" height="84" rx="10" fill="none" stroke="#E07A7A" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="688" y="362" fill="#E07A7A" font-size="14" font-weight="700">Never writes</text>
+  <g font-size="12.5" fill="#F1F3F5">
+    <text x="688" y="382">• your NFO files or scraper settings</text>
+    <text x="688" y="400">• anything back to TMDB, TheTVDB,</text>
+    <text x="698" y="416">IMDb or the rating sites</text>
+  </g>
+</svg>

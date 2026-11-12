@@ -93,7 +93,7 @@ an NFO file is never changed, whatever you tick here.
 | Credits | Directors and writers | No |
 | Trailers | Trailer links from TMDB | No |
 | Taglines | Movie taglines in the folder's language | No |
-| Details | Studio, country, runtime and first aired date | No |
+| Details | Genre, studio, country, runtime and first aired date | No |
 
 **Show and movie titles** is the only choice that replaces a title your
 scraper set, so it is off at first. Turn it on when a folder was scraped in

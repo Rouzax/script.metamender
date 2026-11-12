@@ -80,3 +80,39 @@ def test_relative_links_resolve():
             if re.match(r"[a-z]+:", target):
                 continue
             assert os.path.exists(os.path.join(DOCS, target)), f"{path}: {target}"
+
+
+def _settings_labels() -> dict[str, str]:
+    """Setting id -> its English label, for every setting a user can see."""
+    with open("resources/settings.xml", encoding="utf-8") as handle:
+        xml = handle.read()
+    with open("resources/language/resource.language.en_gb/strings.po", encoding="utf-8") as handle:
+        po = handle.read()
+    strings = {int(k): v.replace('\\"', '"')
+               for k, v in re.findall(r'msgctxt "#(\d+)"\nmsgid "(.*)"', po)}
+    labels = {}
+    for match in re.finditer(r'<setting id="(\w+)" type="\w+" label="(\d+)"(.*?)</setting>',
+                             xml, re.DOTALL):
+        body = match.group(3)
+        # Level 4 is internal: Kodi never shows it.
+        if "<level>4</level>" in body:
+            continue
+        labels[match.group(1)] = strings[int(match.group(2))]
+    return labels
+
+
+def test_settings_page_covers_every_setting():
+    with open(DOCS + "settings.md", encoding="utf-8") as handle:
+        page = handle.read()
+    for setting, label in _settings_labels().items():
+        assert f"**{label}**" in page, f"{setting}: **{label}** is not on settings.md"
+
+
+def test_settings_page_names_no_setting_that_does_not_exist():
+    with open(DOCS + "settings.md", encoding="utf-8") as handle:
+        page = handle.read()
+    labels = set(_settings_labels().values())
+    # Every setting is introduced as a definition term: "**Label**" at the
+    # start of a line.
+    for term in re.findall(r"^\*\*(.+?)\*\*", page, re.MULTILINE):
+        assert term in labels, f"settings.md describes {term!r}, which is not a setting"

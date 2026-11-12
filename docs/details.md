@@ -53,7 +53,7 @@ Select a field to see on the right:
 | The window says | What it means |
 |---|---|
 | Kodi already has this value, so nothing needed to change. | The sites agree with what is there. |
-| Your NFO file sets this field, so MetaMender only fills it when it is empty. | An NFO file next to the video provides this value. MetaMender never overwrites it. |
+| Your NFO file sets this field, so MetaMender only fills it when it is empty. | The item has an NFO file, so its values are yours: MetaMender only fills fields that are empty and never overwrites one. |
 | This folder has no language set, so MetaMender only fills empty fields and keeps this value. | Without a folder language MetaMender cannot tell whether existing text is in the right language, so it keeps it. Set the folder's language in [setup](setup.md#3-folders-in-another-language). |
 | The sites MetaMender asks have nothing for this field yet. | TMDB and TheTVDB have no value; MetaMender checks again later. For an old item that is settled: "had nothing for this field". |
 | The sites could not be reached at the last check, so MetaMender tries again. | A temporary problem; the next scan tries again. |

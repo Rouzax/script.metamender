@@ -7,7 +7,7 @@ you see while it works.
 ## When MetaMender scans
 
 - **Every day.** A background scan runs once every 24 hours (change this with
-  **Scan interval** in the [settings](settings.md)). The first one
+  **Scan interval (hours)** in the [settings](settings.md)). The first one
   starts when Kodi starts.
 - **After a library update.** When Kodi finishes updating or cleaning the
   video library, MetaMender waits five minutes and then looks at the items
@@ -48,8 +48,8 @@ Some exceptions:
 - **A field MetaMender could not check** (a site did not answer) is tried
   again at the next scan; a failed check never counts as a check.
 
-The exact schedule is in the settings: **Staleness threshold** (the one year)
-and **Refresh schedule** (the week, month and three months; shown at the
+The exact schedule is in the settings: **Staleness threshold (days)** (the one year)
+and **Refresh schedule (days)** (the week, month and three months; shown at the
 Advanced settings level). The [Details window](details.md)
 shows, per field, when it was last checked and when it is due next.
 
