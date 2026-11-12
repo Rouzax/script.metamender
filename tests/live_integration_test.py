@@ -13,9 +13,10 @@ Usage:
 Requires:
     - Kodi running at localhost:8101 (KODI_URL to change it)
     - TMDB_API_KEY in the environment (TheTVDB uses the add-on's own key)
-    - the media share mounted read-only at MEDIA_ROOT (default
-      /mnt/media/Data/), the target of the rig's smb://NAS/Data/ path
-      substitution, so NFO detection sees the real files
+    - the media share mounted read-only at MEDIA_ROOT, the target of the
+      rig's path substitution from MEDIA_SHARE (the share the library's
+      paths start with), so NFO detection sees the real files; both are in
+      docker/.env (see .env.example)
     - IMDBRATINGS_LIB pointing at script.module.imdbratings/lib for the IMDb
       rating scenarios (16, 17)
 
@@ -69,8 +70,8 @@ _xbmc_stub.Monitor.return_value.abortRequested.return_value = False
 # The library stores smb:// paths; the host reaches the same share through its
 # read-only mount, so NFO detection sees the real files the way Kodi's own
 # path substitution would.
-MEDIA_FROM = "smb://NAS/Data/"
-MEDIA_TO = os.environ.get("MEDIA_ROOT", "/mnt/media/Data/")
+MEDIA_FROM = os.environ.get("MEDIA_SHARE", "smb://NAS/Data/")
+MEDIA_TO = os.environ.get("MEDIA_ROOT", "/mnt/media/Data").rstrip("/") + "/"
 # Trackers and the IMDb ratings store of one run live here and go with it.
 _SCRATCH = tempfile.mkdtemp(prefix="mm_live_")
 atexit.register(shutil.rmtree, _SCRATCH, True)

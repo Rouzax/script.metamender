@@ -19,7 +19,9 @@ services:
     volumes:
       - kodi-data:/config/.kodi
       - ../..:/addon-metamender:ro
-      - /mnt/media/Data:/media:ro
+      # The host's mount of the media share: MEDIA_ROOT from docker/.env (run.py
+      # passes it).
+      - ${MEDIA_ROOT:-/mnt/media/Data}:/media:ro
     environment:
       - TZ=Europe/Amsterdam
     restart: "no"

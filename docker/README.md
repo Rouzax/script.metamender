@@ -63,8 +63,9 @@ python3 tests/live_integration_test.py providers  # one group (see GROUPS)
 It talks to the headless container on 8101 by default; set
 `KODI_URL=http://localhost:8100/jsonrpc` to use a running Flatpak Kodi instead.
 
-NFO detection reads the share through `/mnt/media/Data/` (`MEDIA_ROOT`), the
-same target as the rig's path substitution. `IMDBRATINGS_LIB` points at the
+NFO detection reads the share through `MEDIA_ROOT`, the same target as the
+rig's path substitution from `MEDIA_SHARE` (both in `docker/.env`, see
+`.env.example`; export them with `set -a; . docker/.env; set +a`). `IMDBRATINGS_LIB` points at the
 module's `lib/` folder in any Kodi profile that has it installed; the first IMDb
 scenario downloads IMDb's ratings dataset (about 9 MB) into a temp folder.
 
@@ -72,7 +73,7 @@ scenario downloads IMDb's ratings dataset (about 9 MB) into a temp folder.
 
 The real service, scanning the whole library. Both Flatpak branches serve
 JSON-RPC on 8100, so run one at a time. Path substitution from
-`smb://NAS/Data/` to `/mnt/media/Data/` is already in both profiles'
+`MEDIA_SHARE` to `MEDIA_ROOT` is already in both profiles'
 `advancedsettings.xml`; a new profile needs it too.
 
 | Kodi | Flatpak branch | Profile | Library |

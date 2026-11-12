@@ -128,6 +128,6 @@ feat/7d-provider-replacement.
 
 ## Additions Beyond Plan
 - [x] Targeted scan support: `kodi_filter` param on get_all_items, `items` param on run_scan
-- [x] Docker infrastructure: media mount (/mnt/media/Data), path substitution, MetaMender volume
+- [x] Docker infrastructure: media mount (MEDIA_ROOT), path substitution, MetaMender volume
 - [x] Live integration test suite (10 scenarios, 53 checks, runs against Docker Kodi)
 

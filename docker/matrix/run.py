@@ -40,7 +40,18 @@ REPO = HERE.parent.parent
 COMPOSE = ["docker", "compose", "-f", str(HERE / "compose.yaml")]
 CONTAINER = "kodi-matrix"
 URL = "http://127.0.0.1:8102/jsonrpc"
-HOST_MEDIA = "/mnt/media/Data"
+def _env_value(key: str, default: str) -> str:
+    """A value from docker/.env (the rig's private settings), else default."""
+    env = REPO / "docker" / ".env"
+    if env.is_file():
+        for line in env.read_text().splitlines():
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1].strip()
+    return default
+
+
+# Where the host mounts the media share (MEDIA_ROOT in docker/.env).
+HOST_MEDIA = _env_value("MEDIA_ROOT", "/mnt/media/Data").rstrip("/")
 SUBSET_DIR = "/config/subset"
 KODI_HOME = "/config/.kodi"
 ADDON_ID = "script.metamender"
@@ -237,8 +248,10 @@ def rpc(method: str, params: dict[str, Any] | None = None, timeout: int = 60) ->
     return data["result"]
 
 
-def sh(*cmd: str, stdin: str | None = None, check: bool = True) -> str:
-    out = subprocess.run(cmd, input=stdin, capture_output=True, text=True, check=False)
+def sh(*cmd: str, stdin: str | None = None, check: bool = True,
+       env: dict[str, str] | None = None) -> str:
+    out = subprocess.run(cmd, input=stdin, capture_output=True, text=True, check=False,
+                         env=env)
     if check and out.returncode != 0:
         raise RuntimeError(f"{' '.join(cmd[:4])}...: {out.stderr.strip()}")
     return out.stdout
@@ -316,7 +329,7 @@ def update_scrapers() -> None:
 
 def fresh_kodi() -> None:
     sh(*COMPOSE, "down", "-v")
-    sh(*COMPOSE, "up", "-d")
+    sh(*COMPOSE, "up", "-d", env={**os.environ, "MEDIA_ROOT": HOST_MEDIA})
     wait_ready(library=False)
     sh("docker", "cp", str(HERE / "advancedsettings.xml"),
        f"{CONTAINER}:{KODI_HOME}/userdata/advancedsettings.xml")

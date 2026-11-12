@@ -6,6 +6,7 @@ CLAUDE.md); these checks run without it.
 """
 from __future__ import annotations
 
+import getpass
 import glob
 import os
 import re
@@ -62,7 +63,10 @@ def test_published_text_has_no_em_dash():
 
 
 def test_published_text_leaks_nothing_private():
-    private = re.compile(r"/home/|builder|\b[0-9a-f]{32,}\b", re.IGNORECASE)
+    # The builder's own user name and home folder, read here rather than
+    # spelled out, so this test names no one either.
+    user = re.escape(getpass.getuser())
+    private = re.compile(r"/home/|" + user + r"|\b[0-9a-f]{32,}\b", re.IGNORECASE)
     for path in _published_text():
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as handle:
