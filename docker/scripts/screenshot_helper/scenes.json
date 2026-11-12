@@ -166,5 +166,13 @@
     "kind": "details",
     "preset": "episode-dutch",
     "focus": "plot"
+  },
+  "details-keep": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "title",
+    "button": true
   }
 }

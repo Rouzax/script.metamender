@@ -93,24 +93,41 @@ notice than one with no plot.
 
 ## Restore original and the lock
 
+A field can be **locked**: MetaMender then leaves it alone, in scans, in
+Update now and after a settings change. There are two ways to lock one, and
+the button under the field shows the one that applies.
+
+### Keep this value
+
+**Keep this value** locks the field exactly as it is now. Use it for a value
+you corrected by hand in Kodi, or a value from your scraper you prefer to
+what the sites say. Nothing in Kodi changes; MetaMender just stops checking
+the field.
+
+![Keep this value on an episode title](screenshots/details/details-keep.png)
+
+### Restore original
+
 When MetaMender replaced a value and kept the old one, the field has a
-**Restore original** button.
+**Restore original** button instead.
 
 ![Restore original on an age rating](screenshots/details/details-restore.png)
 
-**Restore original** writes the old value back to Kodi and **locks** the field:
-from then on MetaMender leaves it alone, in scans, in Update now and after a
-settings change. If the old value was empty (MetaMender filled an empty
+**Restore original** writes the old value back to Kodi and locks the field.
+If the old value was empty (MetaMender filled an empty
 field), restoring empties the field again and locks it, for example for a
 trailer or tagline you do not want.
 
-A locked field shows **Let MetaMender update this again** instead. That removes
-the lock; MetaMender checks the field at the next scan and may update it again.
+### Unlocking
+
+A locked field shows **Let MetaMender update this again**. That removes the
+lock; MetaMender checks the field at the next scan and may update it again.
 
 Restore is only offered while the field still holds the value MetaMender wrote,
 so it never overwrites a newer value of your own or from a re-scrape. Ratings
-have no Restore: MetaMender adds its own rating entries beside your scraper's,
-which stay.
+cannot be locked or restored: MetaMender adds its own rating entries beside
+your scraper's, which stay. A field switched off in the settings has no button,
+since MetaMender does not touch it anyway.
 
 Restoring a show's title also moves MetaMender's records of its episodes along
 with it; should that fail, a notification says so.

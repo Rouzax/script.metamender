@@ -20,12 +20,13 @@ Sometimes, on purpose, and never where you told it not to:
   field is settled: a value that differs from the site is replaced. That
   includes an edit you made by hand in Kodi, if the field is checked again
   before it is settled.
+- **To keep a value as it is**, for example after you corrected it by hand,
+  open the item's Details window, select the field and choose **Keep this
+  value**. MetaMender then leaves it alone for good.
 - **When MetaMender replaced a value**, it kept the old one. **Restore
-  original** in the Details window puts it back and locks the field, so
-  MetaMender leaves it alone for good.
+  original** in the Details window puts it back and locks the field.
 
-To protect your own edits from the start, use NFO files for those items, or
-switch the field off in setup.
+NFO files, or switching a field off in setup, protect values from the start.
 
 ### Why did it leave this field alone?
 
