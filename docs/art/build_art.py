@@ -6,7 +6,10 @@ Run from the repository root:
     python3 docs/art/build_art.py
 
 Writes icon.png (512x512, full colour) and the textures under
-resources/skins/Default/media/metamender/. The textures are white on
+resources/skins/Default/media/metamender/, then the docs art: the wordmark
+(icon, a light "Meta" and a heavy amber "Mender") for dark and for light
+backgrounds, the docs banner and the GitHub social preview, under
+docs/assets/, with the landing page's copies under site/images/. The textures are white on
 transparent so the window XML tints each one with colordiffuse; the nine-slice
 ones (panel, frame, button, row) are 64x64 with their rounding inside a 20px
 border. Also writes docs/art/preview-small.png, the icon at Kodi toast sizes,
@@ -18,6 +21,8 @@ release zip check refuses, so none of it ships with the add-on.
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 
@@ -25,6 +30,8 @@ from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MEDIA = os.path.join(ROOT, "resources", "skins", "Default", "media", "metamender")
+DOCS_ASSETS = os.path.join(ROOT, "docs", "assets")
+SITE_IMAGES = os.path.join(ROOT, "site", "images")
 ART = os.path.dirname(os.path.abspath(__file__))
 
 AMBER = "#F5A623"
@@ -32,6 +39,12 @@ AMBER_LIGHT = "#F5C564"
 AMBER_DARK = "#D4912A"
 NAVY = "#1A1D23"
 INK = "#060607"
+LIGHT_TEXT = "#F1F3F5"
+
+TAGLINE = "No gaps. No stale scores. Age ratings you can trust."
+# Noto Sans Display carries both weights the wordmark contrasts; rsvg finds
+# it through fontconfig.
+WORDMARK_FONT = "Noto Sans Display"
 
 # The heartbeat as drawn on the icon's badge (centre 372,356, radius 92).
 PULSE = "300,360 334,360 352,322 374,396 394,340 408,360 444,360"
@@ -73,7 +86,9 @@ def _pattern() -> str:
     return '<g opacity="0.055">{}</g>'.format("".join(marks))
 
 
-def icon_svg() -> str:
+def icon_svg(backdrop: bool = True) -> str:
+    """The add-on icon. Without backdrop the square of ink behind the rounded
+    tile is left out, for the wordmark on any background."""
     defs = """
 <defs>
   <radialGradient id="tile" cx="50%" cy="42%" r="70%">
@@ -102,11 +117,11 @@ def icon_svg() -> str:
   <clipPath id="tileclip"><rect x="24" y="24" width="464" height="464" rx="44"/></clipPath>
 </defs>""".format(navy=NAVY, light=AMBER_LIGHT, amber=AMBER, dark=AMBER_DARK)
     tile = """
-<rect width="512" height="512" fill="{ink}"/>
-<rect x="24" y="24" width="464" height="464" rx="44" fill="url(#tile)"/>
+{backdrop}<rect x="24" y="24" width="464" height="464" rx="44" fill="url(#tile)"/>
 <g clip-path="url(#tileclip)">{pattern}</g>
 <rect x="24" y="24" width="464" height="464" rx="44" fill="none" stroke="{amber}"
-      stroke-width="6" filter="url(#glow)"/>""".format(ink=INK, pattern=_pattern(), amber=AMBER)
+      stroke-width="6" filter="url(#glow)"/>""".format(backdrop='<rect width="512" height="512" fill="{}"/>'.format(INK) if backdrop else "",
+           pattern=_pattern(), amber=AMBER)
     card = """
 <g transform="rotate(-6 236 238)" filter="url(#shadow)">
   <rect x="70" y="120" width="330" height="236" rx="22" fill="url(#card)"/>
@@ -185,12 +200,92 @@ def preview_small(icon_path: str, out: str) -> None:
     strip.save(out)
 
 
+def _icon_at(x: int, y: int, size: int) -> str:
+    """The icon as a nested SVG placed at (x, y), size pixels square."""
+    return re.sub(r'width="512" height="512"', 'x="{}" y="{}" width="{}" height="{}"'.format(
+        x, y, size, size), icon_svg(backdrop=False), count=1)
+
+
+def wordmark_svg(dark_text: bool) -> str:
+    """The icon, a light "Meta" and a heavy amber "Mender". Navy lettering
+    (dark_text) for light backgrounds, near-white for dark ones. The canvas is
+    roomier than the mark; _render_trimmed crops it."""
+    meta = NAVY if dark_text else LIGHT_TEXT
+    text = ('<text x="250" y="160" font-family="{font}" font-size="120">'
+            '<tspan fill="{meta}" font-weight="300">Meta</tspan>'
+            '<tspan fill="{amber}" font-weight="800">Mender</tspan></text>').format(
+                font=WORDMARK_FONT, meta=meta, amber=AMBER)
+    return _svg(1300, 240, _icon_at(40, 30, 180) + text)
+
+
+def _render_trimmed(svg: str, out: str, width: int, pad: int = 8) -> None:
+    """Render, then crop to the drawn pixels plus pad on every side."""
+    _render(svg, out, width)
+    image = Image.open(out).convert("RGBA")
+    box = image.getchannel("A").getbbox()
+    if box:
+        left, top, right, bottom = box
+        image = image.crop((max(left - pad, 0), max(top - pad, 0),
+                            min(right + pad, image.width), min(bottom + pad, image.height)))
+    image.save(out)
+
+
+def _backdrop_svg(width: int, height: int, tagline_y: int, tagline_size: int) -> str:
+    """Navy with the icon's faint pattern and an amber rule, the tagline
+    centred under where the wordmark goes."""
+    defs = ('<defs><radialGradient id="bg" cx="50%" cy="40%" r="80%">'
+            '<stop offset="0" stop-color="#262a33"/><stop offset="1" stop-color="{navy}"/>'
+            '</radialGradient></defs>').format(navy=NAVY)
+    # Fainter than on the icon: here it sits behind the lettering.
+    tiles = '<g opacity="0.5">{}</g>'.format("".join(
+        '<g transform="translate({} {})">{}</g>'.format(x, y, _pattern())
+        for x in range(0, width, 512) for y in range(0, height, 512)))
+    rule = '<rect x="0" y="{}" width="{}" height="6" fill="{}"/>'.format(height - 6, width, AMBER)
+    tagline = ('<text x="{x}" y="{y}" text-anchor="middle" font-family="{font}" '
+               'font-size="{size}" fill="{fill}">{text}</text>').format(
+                   x=width // 2, y=tagline_y, font=WORDMARK_FONT, size=tagline_size,
+                   fill="#A8AEB8", text=TAGLINE)
+    return _svg(width, height, defs + '<rect width="{}" height="{}" fill="url(#bg)"/>'.format(
+        width, height) + tiles + rule + tagline)
+
+
+def _poster(out: str, size: tuple[int, int], mark_width: int, mark_top: int,
+            tagline_y: int, tagline_size: int) -> None:
+    """A backdrop with the wordmark centred on it."""
+    width, height = size
+    _render(_backdrop_svg(width, height, tagline_y, tagline_size), out, width)
+    with tempfile.TemporaryDirectory() as tmp:
+        mark_path = os.path.join(tmp, "mark.png")
+        _render_trimmed(wordmark_svg(dark_text=False), mark_path, 2600, pad=0)
+        mark = Image.open(mark_path).convert("RGBA")
+    mark = mark.resize((mark_width, round(mark.height * mark_width / mark.width)),
+                       Image.Resampling.LANCZOS)
+    poster = Image.open(out).convert("RGBA")
+    poster.alpha_composite(mark, ((width - mark_width) // 2, mark_top))
+    poster.convert("RGB").save(out)
+
+
+def docs_art() -> None:
+    os.makedirs(DOCS_ASSETS, exist_ok=True)
+    os.makedirs(SITE_IMAGES, exist_ok=True)
+    _render_trimmed(wordmark_svg(dark_text=False),
+                    os.path.join(DOCS_ASSETS, "wordmark-on-dark.png"), 1300)
+    _render_trimmed(wordmark_svg(dark_text=True),
+                    os.path.join(DOCS_ASSETS, "wordmark-on-light.png"), 1300)
+    _poster(os.path.join(DOCS_ASSETS, "banner.png"), (1600, 400), 1000, 80, 330, 40)
+    _poster(os.path.join(DOCS_ASSETS, "social-preview.png"), (1280, 640), 980, 190, 470, 40)
+    for name in ("wordmark-on-dark.png", "social-preview.png"):
+        shutil.copyfile(os.path.join(DOCS_ASSETS, name), os.path.join(SITE_IMAGES, name))
+    shutil.copyfile(os.path.join(ROOT, "icon.png"), os.path.join(SITE_IMAGES, "icon.png"))
+
+
 def main() -> None:
     icon_path = os.path.join(ROOT, "icon.png")
     _render(icon_svg(), icon_path, 512)
     for name, (svg, width) in textures().items():
         _render(svg, os.path.join(MEDIA, name + ".png"), width)
     preview_small(icon_path, os.path.join(ART, "preview-small.png"))
+    docs_art()
 
 
 if __name__ == "__main__":

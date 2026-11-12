@@ -99,3 +99,37 @@ def test_progress_buttons_and_bar_match_the_window_code():
 def test_context_menu_shows_on_seasons():
     with open("addon.xml") as handle:
         assert "String.IsEqual(ListItem.DBType,season)" in handle.read()
+
+
+DOCS_ASSETS = "docs/assets/"
+SITE_IMAGES = "site/images/"
+
+
+def _has_transparency(path):
+    alpha = Image.open(path).convert("RGBA").getchannel("A")
+    return alpha.getextrema()[0] == 0
+
+
+def test_wordmarks_are_wide_and_transparent():
+    # One for dark backgrounds (light lettering), one for light ones.
+    for name in ("wordmark-on-dark.png", "wordmark-on-light.png"):
+        width, height = Image.open(DOCS_ASSETS + name).size
+        assert width > 3 * height, name
+        assert _has_transparency(DOCS_ASSETS + name), name
+
+
+def test_banner_is_1600x400():
+    assert Image.open(DOCS_ASSETS + "banner.png").size == (1600, 400)
+
+
+def test_social_preview_is_1280x640():
+    # GitHub's recommended social preview size.
+    assert Image.open(DOCS_ASSETS + "social-preview.png").size == (1280, 640)
+
+
+def test_site_images_match_docs_assets():
+    for name in ("wordmark-on-dark.png", "social-preview.png"):
+        with open(DOCS_ASSETS + name, "rb") as a, open(SITE_IMAGES + name, "rb") as b:
+            assert a.read() == b.read(), name
+    with open("icon.png", "rb") as a, open(SITE_IMAGES + "icon.png", "rb") as b:
+        assert a.read() == b.read()
