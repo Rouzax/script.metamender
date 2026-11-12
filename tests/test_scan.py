@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict  # noqa: F401 (used in type comments)
 from unittest.mock import MagicMock, patch
 
@@ -3332,9 +3332,11 @@ class TestCrossReferenceRecheck:
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.find_episode_by_tvdb", return_value=None)
-    def test_answered_empty_find_not_repeated_next_scan(
+    def test_update_now_repeats_answered_empty_find(
         self, mock_find, mock_update, tmp_path, kodi_stubs
     ):
+        """Update now asks again although the last answer is a day old; a
+        scheduled scan waits (test_answered_empty_find_rechecked_after_30_days)."""
         item = _episode(100, {"tvdb": "888"})
         tracker = _make_tracker(tmp_path)
         _register_show(tracker)
@@ -3347,7 +3349,7 @@ class TestCrossReferenceRecheck:
             )
         tracker.close()
 
-        assert mock_find.call_count == 1
+        assert mock_find.call_count == 2
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_tvshow", return_value=None)
@@ -6299,3 +6301,53 @@ class TestEpisodesWithoutUsableIds:
         assert row["ids_checked"] is None and row["tmdb_id"] is None
         assert not fs.get("plot", {}).get("fetch_count")
         assert not mock_update.called
+
+
+class TestUpdateNowReasksEmptyLookups:
+    """Update now asks again at once for lookups that answered empty, instead
+    of waiting out FALLBACK_RECHECK_DAYS."""
+
+    @staticmethod
+    def _yesterday():
+        return (date.today() - timedelta(days=1)).isoformat()
+
+    @pytest.mark.parametrize("reset", [True, False])
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    def test_update_now_retries_empty_find_within_recheck_window(
+        self, mock_update, reset, tmp_path, kodi_stubs,
+    ):
+        item = _make_movie_item(plot="Old")
+        item["uniqueid"] = {"imdb": "tt0000001"}
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", "imdb:tt0000001", kodi_id=item["movieid"],
+                            imdb_id="tt0000001", ids_checked=self._yesterday())
+        with patch("resources.lib.providers.tmdb.resolve_id", return_value=None) as find:
+            run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+                     "k", _make_settings(), items=[item], reset=reset)
+        tracker.close()
+        assert find.called is reset
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_season")
+    def test_update_now_rechecks_number_match(
+        self, mock_season, mock_update, tmp_path, kodi_stubs,
+    ):
+        """A stored match that no longer passes is dropped on Update now,
+        although its lookups answered only yesterday."""
+        ep = _make_episode_item(title="Pilot")
+        ep["uniqueid"] = {"tvmaze": "1"}
+        mock_season.return_value = [
+            _tmdb_episode_data(title="Something else", firstaired="2025-01-15"),
+        ]
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("tvshow", "tmdb:55555", kodi_id=10, tmdb_id="55555",
+                            ids_checked="2026-01-01")
+        tracker.upsert_item("episode", "Test Show S01E01", tmdb_id="99999",
+                            tmdb_season=1, number_matched=1, orig_title="Pilot",
+                            orig_aired="2020-01-01", ids_checked=self._yesterday())
+        run_scan(EPISODE, tracker, _make_source_config(), frozenset({"plot"}),
+                 "k", _make_settings(), items=[ep], show_id_map={10: "55555"},
+                 reset=True)
+        row = tracker.get_item("episode", "Test Show S01E01")
+        tracker.close()
+        assert (row["number_matched"], row["tmdb_id"]) == (0, None)

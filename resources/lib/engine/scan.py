@@ -1057,6 +1057,7 @@ def run_scan(
             ctx, item, identity, kodi_ids, stored, language,
             _lookup_allowed(
                 stored.get("ids_checked"), today, due, media_type.name == "tvshow",
+                reset,
             ),
         )
 

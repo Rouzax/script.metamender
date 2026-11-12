@@ -95,7 +95,7 @@ class _Ids:
 
 
 def _lookup_allowed(
-    checked: str | None, today: str, due: bool, is_show: bool,
+    checked: str | None, today: str, due: bool, is_show: bool, reset: bool = False,
 ) -> bool:
     """Whether an item's id lookups may run this scan.
 
@@ -104,8 +104,12 @@ def _lookup_allowed(
     FALLBACK_RECHECK_DAYS. A show that has never been looked up is resolved
     even when none of its own fields is due: its episodes depend on its ids,
     and they can only tell "the show is not on TMDB" from "not resolved yet"
-    once the show's lookups have answered.
+    once the show's lookups have answered. Update now (``reset``) always
+    asks: the user wants the item refreshed now, and a provider may have
+    added the item since the last answer.
     """
+    if reset:
+        return True
     if not checked:
         return due or is_show
     if not due:
