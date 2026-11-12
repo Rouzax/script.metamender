@@ -209,6 +209,18 @@ def _cross_ids(ctx: _ScanCtx, show_tmdb_id: str, kept: _Kept, identity: str) -> 
     return found if found is TRANSIENT else (found or {})
 
 
+def _drop_match(ctx: _ScanCtx, identity: str, ids: _Ids, kodi_imdb: str | None) -> None:
+    """Forget a stored number match: its ids leave the tracker and ``ids``;
+    an IMDb id of the episode's own stays."""
+    ctx.tracker.clear_number_match(ctx.media_type.name, identity)
+    ids.tmdb = ids.tvdb = None
+    ids.tmdb_season = None
+    ids.imdb = kodi_imdb
+    ids.number_matched = False
+    if kodi_imdb:
+        ctx.tracker.upsert_item(ctx.media_type.name, identity, imdb_id=kodi_imdb)
+
+
 def match_episode_by_number(
     ctx: _ScanCtx,
     item: dict[str, Any],
@@ -257,7 +269,10 @@ def match_episode_by_number(
 
     if not _show_checked(ctx, item):
         if _show_kodi_id(item) not in ctx.tracked_shows:
-            # The show has no ids of its own: nothing to ask, now or later.
+            # The show has no ids of its own: nothing to ask, now or later,
+            # and nothing a stored match can still rest on.
+            if recheck:
+                _drop_match(ctx, identity, ids, kodi_imdb)
             return
         ids.tmdb_transient = ids.tvdb_transient = True
         ids.defer()
@@ -286,6 +301,8 @@ def match_episode_by_number(
     if not show_tmdb_id and not show_tvdb_id:
         # The show answered that neither site has it: nothing to ask, and
         # derived without a call, so not recorded as a lookup.
+        if recheck:
+            _drop_match(ctx, identity, ids, kodi_imdb)
         return
 
     tmdb_list = (
@@ -315,13 +332,7 @@ def match_episode_by_number(
     tvdb_ep = tvdb_verdict.episode
     cross_tvdb = cross.get("tvdb_id")
     if recheck:
-        ctx.tracker.clear_number_match(ctx.media_type.name, identity)
-        ids.tmdb = ids.tvdb = None
-        ids.tmdb_season = None
-        ids.imdb = kodi_imdb
-        ids.number_matched = False
-        if kodi_imdb:
-            ctx.tracker.upsert_item(ctx.media_type.name, identity, imdb_id=kodi_imdb)
+        _drop_match(ctx, identity, ids, kodi_imdb)
     if tmdb_ep and tvdb_ep and cross_tvdb and str(cross_tvdb) != tvdb_ep.ep_id:
         log.info(
             "TMDB and TheTVDB number matches name different episodes, neither used",

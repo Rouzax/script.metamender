@@ -298,3 +298,21 @@ def test_one_site_transient_marks_both(tracker, providers):
     providers.numbers.side_effect = TransientProviderError("down")
     ids = _run(_ctx(tracker), ids=_ids(imdb="tt5"), kodi_ids=(None, "tt5", None, None))
     assert ids.tmdb_transient and ids.tvdb_transient and ids.lookup_failed
+
+
+def test_recheck_drops_match_when_show_lost_its_ids(tracker, providers):
+    """Update now on an episode whose show now answers with neither id: the
+    stored match has nothing left to rest on and is dropped."""
+    stored = _stored_match(tracker)
+    ids = _run(_ctx(tracker, reset=True, show_tmdb=None, show_tvdb=None),
+               ids=_ids(tmdb="502", tvdb="702"), stored=stored)
+    assert not ids.any() and not ids.number_matched
+    assert tracker.get_item("episode", ID)["number_matched"] == 0
+
+
+def test_recheck_drops_match_when_show_is_untracked(tracker, providers):
+    stored = _stored_match(tracker)
+    ids = _run(_ctx(tracker, reset=True, checked=False, show_tmdb=None, show_tvdb=None,
+                    tracked=False), ids=_ids(tmdb="502", tvdb="702"), stored=stored)
+    assert not ids.any() and not ids.number_matched
+    assert tracker.get_item("episode", ID)["number_matched"] == 0
