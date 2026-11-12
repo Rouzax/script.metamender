@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MetaMender: No gaps. No stale scores. Age ratings you can trust.</title>
+    <meta name="description" content="MetaMender is a Kodi add-on that fills the gaps in your video library, keeps scores from freezing at their first-week number, and gives every movie and show an age rating from your own country.">
+    <meta property="og:title" content="MetaMender for Kodi">
+    <meta property="og:description" content="No gaps. No stale scores. Age ratings you can trust.">
+    <meta property="og:image" content="https://rouzax.github.io/script.metamender/images/social-preview.png">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary_large_image">
+    <link rel="icon" type="image/png" href="images/icon.png">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site-header">
+    <div class="header-inner">
+        <a href="./" class="wordmark"><img src="images/wordmark-on-dark.png" alt="MetaMender" height="36"></a>
+        <nav class="nav-links">
+            <a href="docs/">Documentation</a>
+            <a href="https://ko-fi.com/O0W221GBUG" class="nav-support" target="_blank" rel="noopener">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2,21H20V19H2M20,8H18V5H20M20,3H4V13A4,4 0 0,0 8,17H14A4,4 0 0,0 18,13V11H20A2,2 0 0,0 22,9V5C22,3.89 21.1,3 20,3Z"/></svg>
+                Support
+            </a>
+            <a href="https://github.com/Rouzax/script.metamender" class="nav-github" target="_blank" rel="noopener" aria-label="MetaMender on GitHub">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.1c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.8.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
+            </a>
+        </nav>
+    </div>
+</header>
+
+<main>
+
+    <section class="hero">
+        <div class="section-inner">
+            <h1>No gaps. No stale scores. Age ratings you can trust.</h1>
+            <p class="lead">MetaMender works quietly in the background of Kodi. It fills in what your scraper left empty, keeps scores from freezing at their first-week number, and gives every movie and show an age rating from your own country.</p>
+            <div class="hero-buttons">
+                <a href="docs/install/" class="btn btn-primary">Install MetaMender</a>
+                <a href="docs/" class="btn btn-secondary">Documentation</a>
+                <a href="https://github.com/Rouzax/script.metamender" class="btn btn-secondary" target="_blank" rel="noopener">View on GitHub</a>
+            </div>
+            <div class="hero-screenshot">
+                <img src="docs/screenshots/update-now/update-now-progress.png" alt="MetaMender refreshing a TV show: 9 of 24 episodes done, 6 updated">
+            </div>
+        </div>
+    </section>
+
+    <section class="wins">
+        <div class="section-inner">
+            <h2>Three things it fixes</h2>
+            <div class="wins-grid">
+                <article class="win">
+                    <h3>Gaps get filled</h3>
+                    <p>Missing plots, episode titles, credits, taglines and more, from TMDB and TheTVDB, in each folder's own language, with an optional fallback language.</p>
+                    <div class="before-after">
+                        <div><span class="ba-label">Before</span><span class="ba-bad">No plot</span></div>
+                        <div><span class="ba-label">After</span><span class="ba-good">"The night crossing to the islands is delayed..."</span></div>
+                    </div>
+                </article>
+                <article class="win">
+                    <h3>Scores that keep up</h3>
+                    <p>Scrapers fetch a new episode's score once, when it has a handful of votes. MetaMender checks it again while the votes come in, then leaves it alone once it settles.</p>
+                    <div class="before-after">
+                        <div><span class="ba-label">First week</span><span class="ba-bad">9.4 (12 votes)</span></div>
+                        <div><span class="ba-label">Three months on</span><span class="ba-good">7.8 (4,210 votes)</span></div>
+                    </div>
+                </article>
+                <article class="win">
+                    <h3>Age ratings you can trust</h3>
+                    <p>Every movie and show gets an age rating in your own country's system, for nine countries, so you can decide what the kids may watch.</p>
+                    <div class="before-after">
+                        <div><span class="ba-label">Before</span><span class="ba-bad">Rated PG-13</span></div>
+                        <div><span class="ba-label">After</span><span class="ba-good">NL:12</span></div>
+                    </div>
+                </article>
+            </div>
+            <p class="note">Example values.</p>
+        </div>
+    </section>
+
+    <section class="demo">
+        <div class="section-inner">
+            <h2>See exactly what it did</h2>
+            <p class="section-desc">For any movie, show or episode, the Details window says where each value came from, what it replaced and why a field was left alone. Try it: pick a field.</p>
+            <div class="details" data-theme="golden-hour">
+                <div class="details-head">
+                    <span class="badge" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="11" fill="currentColor"/><polyline points="4,12.5 8,12.5 10,8 13,17 15.5,10 17,12.5 20,12.5" fill="none" stroke="#1A1D23" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/></svg></span>
+                    <div>
+                        <div class="details-title">The Night Ferry · Season 1, episode 1</div>
+                        <div class="details-sub">English folder · last looked at 12 Nov 2026</div>
+                    </div>
+                </div>
+                <div class="details-body">
+                    <ul class="details-list" role="listbox" aria-label="Fields">
+                        <li class="group">Updated by MetaMender</li>
+                        <li role="option" tabindex="0" data-field="plot" aria-selected="true"><span>Plot</span><span class="hint">TMDB</span></li>
+                        <li role="option" tabindex="0" data-field="rating"><span>Rating</span><span class="hint">IMDb</span></li>
+                        <li role="option" tabindex="0" data-field="runtime"><span>Runtime</span><span class="hint">TMDB</span></li>
+                        <li class="group">Left as it is</li>
+                        <li role="option" tabindex="0" data-field="aired"><span>Aired</span><span class="hint">settled</span></li>
+                        <li role="option" tabindex="0" data-field="title"><span>Title</span><span class="hint">scraper</span></li>
+                        <li class="group">Waiting</li>
+                        <li role="option" tabindex="0" data-field="director"><span>Director</span><span class="hint">15 Nov</span></li>
+                    </ul>
+                    <div class="details-pane" aria-live="polite">
+                        <div class="pane-title">Plot</div>
+                        <div class="pane-value">The night crossing to the islands is delayed when a passenger who boarded at the harbour cannot be found anywhere on the ferry. The crew has until dawn to work out who saw her last.</div>
+                        <dl class="pane-lines">
+                            <dt>From</dt><dd>TMDB, in English</dd>
+                            <dt>Replaced</dt><dd>empty</dd>
+                            <dt>Last checked</dt><dd>12 Nov 2026</dd>
+                            <dt>Next check</dt><dd>19 Nov 2026</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+            <div class="swatches" role="radiogroup" aria-label="Window colours">
+                <button type="button" class="swatch" data-theme="golden-hour" aria-checked="true" role="radio"><span></span>Golden Hour</button>
+                <button type="button" class="swatch" data-theme="ultraviolet" aria-checked="false" role="radio"><span></span>Ultraviolet</button>
+                <button type="button" class="swatch" data-theme="ember" aria-checked="false" role="radio"><span></span>Ember</button>
+                <button type="button" class="swatch" data-theme="nightfall" aria-checked="false" role="radio"><span></span>Nightfall</button>
+            </div>
+            <p class="note">Your NFO files and the fields you lock are never overwritten. <a href="docs/where-data-comes-from/">Where your data comes from</a></p>
+        </div>
+    </section>
+
+    <section class="install">
+        <div class="section-inner">
+            <h2>Install in a few minutes</h2>
+            <ol class="steps">
+                <li><span class="step-n">1</span><strong>Add the Rouzax repository</strong>Install its zip with Install from zip file.</li>
+                <li><span class="step-n">2</span><strong>Install MetaMender</strong>From the repository. Kodi adds the IMDb Ratings module with it.</li>
+                <li><span class="step-n">3</span><strong>Run the setup</strong>A free TMDB key, your library's languages, what to fill.</li>
+                <li><span class="step-n">4</span><strong>That's it</strong>The first scan starts; after that MetaMender looks after itself.</li>
+            </ol>
+            <p class="center"><a href="docs/install/" class="btn btn-primary">Step-by-step install guide</a></p>
+        </div>
+    </section>
+
+</main>
+
+<footer class="site-footer">
+    <div class="section-inner footer-inner">
+        <a href="docs/">Documentation</a>
+        <a href="https://github.com/Rouzax/script.metamender" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://ko-fi.com/O0W221GBUG" target="_blank" rel="noopener">Support on Ko-fi</a>
+        <span>GPL-3.0-only</span>
+    </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
