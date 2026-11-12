@@ -98,15 +98,15 @@ def episode_not_matched() -> tuple[MediaType, dict[str, Any], dict[str, Any],
                                    dict[str, Any], dict[str, Any], str]:
     """An episode whose numbering differs between Kodi and TMDB: nothing used."""
     media_type, item, item_row, _, _, language = episode()
-    item.update({"title": "Back from Vacation", "showtitle": "The Branch Office",
+    item.update({"title": "Harbour Lights", "showtitle": "The Branch Office",
                  "season": 3, "episode": 12, "firstaired": "2007-01-04",
                  "plot": "", "runtime": 1320})
     item_row.update({
         "tmdb_id": None, "tvdb_id": None, "imdb_id": None, "number_matched": 0,
-        "orig_title": "Back from Vacation", "orig_aired": "2007-01-04",
+        "orig_title": "Harbour Lights", "orig_aired": "2007-01-04",
         "match_note": json.dumps([
-            {"site": "tmdb", "site_title": "Traveling Salesmen", "site_aired": "2007-01-11",
-             "kodi_title": "Back from Vacation", "kodi_aired": "2007-01-04"},
+            {"site": "tmdb", "site_title": "Low Tide", "site_aired": "2007-01-11",
+             "kodi_title": "Harbour Lights", "kodi_aired": "2007-01-04"},
         ]),
     })
     fs_map = {"plot": _fs("unchecked", next_retry="2026-11-13", count=0)}

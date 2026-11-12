@@ -1,6 +1,6 @@
 [project]
 site_name = "MetaMender"
-site_description = "A Kodi add-on that fills the gaps in your video library, keeps scores from going stale and gives every title an age rating from your own country."
+site_description = "A Kodi add-on that fills the gaps in your video library, keeps scores from going stale and gives movies and shows an age rating from your own country."
 site_url = "https://rouzax.github.io/script.metamender/docs/"
 repo_url = "https://github.com/Rouzax/script.metamender"
 repo_name = "Rouzax/script.metamender"

@@ -108,8 +108,7 @@ def test_demo_rows_cover_every_group(demo):
 
 def test_runner_guards_the_library_before_the_first_scene():
     """The service never scans while setup is incomplete; the runner refuses
-    to run when it is complete, before any scene, and restores Kodi's
-    overlay setting whatever happens."""
+    to run when it is complete, before it installs anything."""
     source = RUNNER.read_text(encoding="utf-8")
     main = source[source.index("def main("):]
     guard = main.index("refuse_if_setup_complete(")
@@ -118,3 +117,49 @@ def test_runner_guards_the_library_before_the_first_scene():
     loop = main.index("for name, scene in chosen.items()")
     assert guard < loop
     assert "finally:" in main[loop:]
+
+
+@pytest.fixture
+def runner(monkeypatch, tmp_path):
+    """screenshots.py with its Kodi profile in tmp_path and no real Kodi."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("screenshots_runner", RUNNER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    data = tmp_path / "data"
+    (data / "addons").mkdir(parents=True)
+    monkeypatch.setattr(module, "KODI_DATA", data)
+    monkeypatch.setattr(module, "ADDON_DATA", data / "userdata" / "addon_data" / module.ADDON_ID)
+    calls = []
+
+    def rpc(url, method, params=None):
+        calls.append((method, params))
+        raise OSError("no Kodi")
+
+    monkeypatch.setattr(module, "rpc", rpc)
+    monkeypatch.setattr(module, "alive", lambda url: False)
+    monkeypatch.setattr(module, "_install_imdbratings", lambda addons: True)
+    module.calls = calls
+    return module
+
+
+def test_a_failed_install_is_cleaned_up(runner, monkeypatch):
+    """Kodi never coming back must not leave this checkout in the profile."""
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "must", lambda condition, what, timeout=60: sys.exit(what))
+    added: dict = {}
+    with pytest.raises(SystemExit):
+        runner.install("url", ":20", added)
+    link = runner.KODI_DATA / "addons" / runner.ADDON_ID
+    assert link.is_symlink() and added["addon"]
+    runner.uninstall("url", added)
+    assert not link.is_symlink()
+    assert not (runner.KODI_DATA / "addons" / runner.HELPER_ID).exists()
+
+
+def test_cleanup_leaves_an_existing_install_enabled(runner):
+    added = {"addon": False, "imdbratings": False, "addon_data": False}
+    runner.uninstall("url", added)
+    disabled = [p["addonid"] for m, p in runner.calls if m == "Addons.SetAddonEnabled"]
+    assert runner.ADDON_ID not in disabled
+    assert runner.HELPER_ID in disabled

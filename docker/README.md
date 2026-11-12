@@ -124,7 +124,8 @@ Retakes every screenshot the docs use, from the Flatpak Kodi (Omega profile)
 on an X display. A development-only helper add-on
 (`scripts/screenshot_helper/`, never shipped) opens each MetaMender window
 through the add-on's own code with invented demo data, so a shot shows the
-real window and nothing of a real library. The scenes are listed in
+real window and nothing of a real library (except the context menu scene,
+which needs a show from the test library). The scenes are listed in
 `scripts/screenshot_helper/scenes.json`; `tests/test_screenshot_scenes.py`
 fails when a window has no scene or a scene has no image.
 

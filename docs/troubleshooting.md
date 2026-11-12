@@ -13,9 +13,9 @@ Sometimes, on purpose, and never where you told it not to:
 
 - **Fields you did not tick in setup** are never touched.
 - **An item with an NFO file** keeps its values: MetaMender only fills fields
-  that are empty.
+  that are empty (and keeps refreshing what it filled itself).
 - **A folder without a language**: MetaMender only fills empty text fields
-  there.
+  there (and keeps refreshing what it filled itself).
 - **Everything else** is kept in line with TMDB, TheTVDB and IMDb until the
   field is settled: a value that differs from the site is replaced. That
   includes an edit you made by hand in Kodi, if the field is checked again

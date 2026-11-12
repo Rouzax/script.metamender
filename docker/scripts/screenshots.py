@@ -141,11 +141,12 @@ def _install_imdbratings(addons: Path) -> bool:
     return True
 
 
-def install(url: str, display: str) -> dict[str, bool]:
+def install(url: str, display: str, added: dict[str, bool]) -> None:
     """Put this checkout, the IMDb module and the helper into the profile and
-    restart Kodi. Returns what this run added, for uninstall()."""
+    restart Kodi. Records in ``added`` what this run added as it goes, so
+    uninstall() can remove it even when a later step fails."""
     addons = KODI_DATA / "addons"
-    added = {"addon_data": not ADDON_DATA.exists()}
+    added["addon_data"] = not ADDON_DATA.exists()
     link = addons / ADDON_ID
     if link.is_symlink() and link.resolve() != ROOT:
         sys.exit(f"{link} points somewhere else")
@@ -175,11 +176,12 @@ def install(url: str, display: str) -> dict[str, bool]:
     if wait_for(lambda: boolean(url, "Window.IsActive(script-metamender-attention.xml)"),
                 timeout=20):
         rpc(url, "Input.Back")
-    return added
 
 
 def uninstall(url: str, added: dict[str, bool]) -> None:
-    for addon in (HELPER_ID, ADDON_ID):
+    """Remove what this run added, also when Kodi is gone. An install of
+    MetaMender that was there before the run stays enabled."""
+    for addon in (HELPER_ID, ADDON_ID) if added.get("addon") else (HELPER_ID,):
         try:
             rpc(url, "Addons.SetAddonEnabled", {"addonid": addon, "enabled": False})
         except (OSError, RuntimeError):
@@ -321,7 +323,7 @@ def main() -> None:
     overlay_was_on = False
     try:
         if not args.no_restart:
-            added = install(args.rpc, args.display)
+            install(args.rpc, args.display, added)
         skin = rpc(args.rpc, "Settings.GetSettingValue", {"setting": "lookandfeel.skin"})
         if not isinstance(skin, dict) or skin.get("value") != "skin.estuary":
             sys.exit("switch Kodi to Estuary first: the screenshots are all taken in it")
@@ -334,13 +336,13 @@ def main() -> None:
             apply(names, scenes)
             print(f"copied {len(names)} images to {OUT.relative_to(ROOT)}")
     finally:
-        if alive(args.rpc):
-            if overlay_was_on:
-                rpc(args.rpc, "Settings.SetSettingValue",
-                    {"setting": SHOW_LOG_INFO, "value": True})
-            # With --no-restart nothing was installed by this run.
-            if added and not args.keep:
-                uninstall(args.rpc, added)
+        if overlay_was_on and alive(args.rpc):
+            rpc(args.rpc, "Settings.SetSettingValue",
+                {"setting": SHOW_LOG_INFO, "value": True})
+        # With --no-restart nothing was installed by this run. The files go
+        # whether or not Kodi still answers.
+        if added and not args.keep:
+            uninstall(args.rpc, added)
 
 
 if __name__ == "__main__":

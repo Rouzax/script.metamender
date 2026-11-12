@@ -25,7 +25,7 @@ item's normal refresh schedule: the next scheduled check stays where it was.
 
 - **A movie or an episode** is refreshed at once. A notification says
   **Updated**, **No changes**, or **Could not check now** when a site did not
-  answer (the item is then tried again at the next scan).
+  answer (the item is then checked again on its normal schedule).
 - **A TV show** refreshes the show itself and every episode in it.
 - **A season** refreshes every episode of that season.
 

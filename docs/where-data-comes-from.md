@@ -35,7 +35,8 @@ examples below fill in the details.
 - sends anything about your library to TMDB, TheTVDB, IMDb or the rating
   sites, other than the lookups themselves (an id or a title to look up);
 - adds ids it found to Kodi: they stay in its own records;
-- overwrites a value of an item that has an NFO file, or a field you locked.
+- overwrites a value of an item that has an NFO file (it only fills empty
+  fields there), or a field you locked.
 
 ## Field by field
 
@@ -61,10 +62,12 @@ language, if it has one.
 
 Every row has the same three exceptions:
 
-- **An item with an NFO file** only gets its empty fields filled.
+- **An item with an NFO file** only gets its empty fields filled. A value
+  MetaMender filled there is its own, so it keeps refreshing it.
 - **In a folder without a language**, the text fields (plot, titles, tagline,
   genre) are only filled when empty, because MetaMender cannot tell which
-  language the existing text is in.
+  language the existing text is in. Again, what MetaMender filled it keeps
+  refreshing.
 - **A locked field** is never written.
 
 "Replaces a different value" only happens while a field is not yet settled; see
