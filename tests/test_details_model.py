@@ -485,3 +485,19 @@ def test_only_a_locked_field_row_is_marked_locked():
     rows = _by_key(_rows(keep={"title": {"locked": True}}))
     assert rows["title"].locked is True
     assert rows["plot"].locked is False and rows["ids"].locked is False
+
+
+def _cert_from(source, fallback):
+    item = {"title": "Heat", "premiered": "1995-12-15", "mpaa": "AU:MA 15+",
+            "uniqueid": {"tmdb": "949"}}
+    fs_map = {"mpaa": _fs("updated", source=source, written=fingerprint("AU:MA 15+"),
+                          fallback=fallback, next_retry="2026-12-12")}
+    rows = _by_key(build_rows(MOVIE, item, None, fs_map, {}, TODAY, fields=["mpaa"]))
+    return dict(rows["mpaa"].lines)["From"]
+
+
+def test_a_converted_age_rating_says_so():
+    assert _cert_from("tmdb-gb", 1) == "TMDB (GB), converted"
+    assert _cert_from("fsk", 1) == "FSK, converted"
+    assert _cert_from("tmdb", 0) == "TMDB"
+    assert _cert_from("bbfc", 0) == "BBFC"

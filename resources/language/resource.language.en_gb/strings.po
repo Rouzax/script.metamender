@@ -1334,3 +1334,11 @@ msgstr ""
 msgctxt "#32627"
 msgid "Could not save the lock, so the field is not kept."
 msgstr ""
+
+msgctxt "#32628"
+msgid "AU - ACB"
+msgstr ""
+
+msgctxt "#32629"
+msgid "{}, converted"
+msgstr ""

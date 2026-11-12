@@ -97,6 +97,9 @@ _CHANGED_SINCE = 32576
 _UNLOCKED = 32577
 _SETTLED_NOTHING = 32600
 _REFILL = 32601
+_CONVERTED = 32629
+# The source of MetaMender's own not-found certification (scan._resolve_cert).
+_NOT_FOUND_SOURCE = "fallback"
 _OFF_HINT = 32602
 _OFF_NEXT = 32603
 _UNLOCKED_OFF = 32604
@@ -334,6 +337,10 @@ def _field_row(
 
 def _from_text(field: str, source: str | None, fs: dict[str, Any], language: str) -> str:
     name = _source_name(source) or "MetaMender"
+    if field == "mpaa" and fs.get("from_fallback") and source != _NOT_FOUND_SOURCE:
+        # Another country's rating converted to this system: it is not
+        # this country's own decision and is re-checked monthly.
+        return lang(_CONVERTED).format(name)
     if field not in LANGUAGE_FIELDS or source == _SCRAPER_SOURCE:
         return name
     if fs.get("from_fallback"):

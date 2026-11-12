@@ -160,6 +160,7 @@
                             <option label="32266">7</option>
                             <option label="32267">8</option>
                             <option label="32268">9</option>
+                            <option label="32628">10</option>
                         </options>
                     </constraints>
                     <control type="list" format="string" />

@@ -80,4 +80,41 @@ def test_country_for_setting():
     assert country_for_setting(0, "es-ES") is None
     assert country_for_setting(0, "nl") is None
     assert country_for_setting(3, "en-US") == "DE"
-    assert country_for_setting(10, "en-US") is None
+    assert country_for_setting(10, "en-US") == "AU"
+    assert country_for_setting(0, "en-AU") == "AU"
+    assert country_for_setting(11, "en-US") is None
+
+
+def test_au_preset_values():
+    p = load_preset("AU")
+    assert p is not None and p.prefix == "AU:"
+    assert p.inference == ("GB", "US", "NL", "BE", "DE", "AT", "FR", "DK", "SE")
+    assert {"G", "PG", "M", "MA 15+", "R 18+", "X 18+", "P", "C", "RC"} == p.valid
+    assert p.mappings["GB"]["15"] == "MA 15+" and p.mappings["US"]["TV-14"] == "MA 15+"
+
+
+def test_au_conversions_never_produce_native_only_ratings():
+    """P and C (children's TV), X 18+ (specialist adult) and RC (refused)
+    come only from Australia's own rating, never from a conversion."""
+    p = load_preset("AU")
+    assert p is not None
+    produced = {v for table in p.mappings.values() for v in table.values()}
+    assert not produced & {"P", "C", "X 18+", "RC"}
+    assert "R18" not in p.mappings["GB"] and "F" not in p.mappings["DK"]
+
+
+def test_canonical_spelling():
+    p = load_preset("AU")
+    assert p is not None
+    assert p.canonical("MA15+") == "MA 15+" and p.canonical(" R18+ ") == "R 18+"
+    assert p.canonical("MA 15+") == "MA 15+" and p.canonical("X18+") == "X 18+"
+    assert p.canonical("M") == "M" and p.canonical("MA") == "MA"
+    nl = load_preset("NL")
+    assert nl is not None and nl.canonical(" 12 ") == "12"
+
+
+def test_alias_outside_the_list_fails_closed(tmp_path, monkeypatch):
+    good = json.loads(Path("resources/presets/NL.json").read_text(encoding="utf-8"))
+    good["aliases"] = {"twelve": "13"}
+    _broken(tmp_path, monkeypatch, json.dumps(good))
+    assert load_preset("NL") is None

@@ -84,10 +84,10 @@ _FEATURE_TEXT = {
     "enable_taglines": (32446, 32447),
     "enable_details": (32448, 32449),
 }
-# The `country` setting's options after Automatic: the labels of its
-# options 1.. in settings.xml.
-_COUNTRY_LABEL_BASE = 32259
-_COUNTRY_OPTIONS = 9
+# The `country` setting's options after Automatic, in COUNTRY_CODES order:
+# the labels of its options 1.. in settings.xml.
+_COUNTRY_LABELS = (32260, 32261, 32262, 32263, 32264, 32265, 32266, 32267, 32268, 32628)
+_COUNTRY_OPTIONS = len(_COUNTRY_LABELS)
 
 _STEP_TEXT = {
     "key": (32410, 32411),
@@ -401,7 +401,7 @@ class SetupController:
             if code is None:
                 return lang(32453)
             return lang(32452).format(self._country_label(1 + COUNTRY_CODES.index(code)))
-        return lang(_COUNTRY_LABEL_BASE + index)
+        return lang(_COUNTRY_LABELS[index - 1])
 
 
 def window_properties(c: SetupController) -> dict[str, str]:

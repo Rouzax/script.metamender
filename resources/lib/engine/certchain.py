@@ -210,13 +210,13 @@ def resolve_certification(
     def aborting() -> bool:
         return gate is not None and gate.aborted
 
-    direct = certs.get(preset.country)
+    direct = preset.canonical(certs.get(preset.country) or "")
     if direct in preset.valid:
         return CertAnswer(REAL, direct, "tmdb")
 
     native = NATIVE_SITE.get(preset.country)
     if native:
-        rating = site(native)
+        rating = preset.canonical(site(native) or "")
         if rating in preset.valid:
             return CertAnswer(REAL, rating, native)
         if aborting():

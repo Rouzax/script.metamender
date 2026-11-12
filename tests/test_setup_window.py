@@ -252,3 +252,12 @@ def test_folders_dialog_has_no_dots():
     props = window_properties(c)
     assert props["MM.StepIndex"] == "" and props["MM.StepTotal"] == ""
     assert props["MM.Marker"] == "check"
+
+
+def test_country_step_lists_australia(monkeypatch):
+    from resources.lib.ui import setup_window
+    monkeypatch.setattr(setup_window, "lang", lambda i: "#%d" % i)
+    c, _ = _controller(key="abc")
+    labels = [row.label for row in c._rows_country()]
+    assert len(labels) == 11
+    assert labels[5] == "#32264" and labels[10] == "#32628"

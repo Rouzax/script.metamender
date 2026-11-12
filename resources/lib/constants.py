@@ -50,7 +50,7 @@ SCAN_LOCKED_RETRY_SEC = 60
 # Country Presets
 # =============================================================================
 
-COUNTRY_CODES = ("NL", "BE", "DE", "AT", "GB", "US", "FR", "DK", "SE")
+COUNTRY_CODES = ("NL", "BE", "DE", "AT", "GB", "US", "FR", "DK", "SE", "AU")
 
 # =============================================================================
 # Backfill Tracker (SQLite)

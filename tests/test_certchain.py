@@ -253,3 +253,26 @@ def test_memo_key_includes_original_title_and_imdb(sites):
                       imdb_id="tt1", tmdb_certs={})
     gate.ask("fsk", other)
     assert gate.requests == 2
+
+
+AU = load_preset("AU")
+
+
+def test_au_rating_in_its_compact_spelling_is_real(sites):
+    answer = resolve_certification(_q(certs={"AU": "MA15+", "GB": "18"}), AU, _gate())
+    assert (answer.kind, answer.rating, answer.source) == ("real", "MA 15+", "tmdb")
+
+
+def test_au_refused_classification_is_real_not_converted(sites):
+    answer = resolve_certification(_q(certs={"AU": "RC", "GB": "18"}), AU, _gate())
+    assert (answer.kind, answer.rating) == ("real", "RC")
+
+
+def test_au_converts_the_uk_rating_first(sites):
+    answer = resolve_certification(_q(certs={"GB": "15", "US": "PG-13"}), AU, _gate())
+    assert (answer.kind, answer.rating, answer.source) == ("derived", "MA 15+", "tmdb-gb")
+
+
+def test_au_skips_uk_r18_for_the_next_country(sites):
+    answer = resolve_certification(_q(certs={"GB": "R18", "US": "NC-17"}), AU, _gate())
+    assert (answer.rating, answer.source) == ("R 18+", "tmdb-us")

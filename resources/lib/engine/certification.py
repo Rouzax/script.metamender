@@ -55,6 +55,7 @@ def classify_current(
     own_prefix: str,
     own_country: str,
     placeholder: bool,
+    canonical: Callable[[str], str] = str.strip,
 ) -> str:
     """BLANK, PLACEHOLDER, OWN or FOREIGN for the certification Kodi holds.
 
@@ -62,6 +63,8 @@ def classify_current(
     not-found value (its provenance says so). OWN is a rating from the
     configured country's list with that country's prefix, the configured
     prefix, or none; anything else that is not blank is FOREIGN.
+    ``canonical`` turns another spelling of a rating into the list's own
+    (Preset.canonical).
     """
     if placeholder:
         return PLACEHOLDER
@@ -70,13 +73,13 @@ def classify_current(
     stripped = value.strip()
     custom = own_prefix.strip()
     if (custom and stripped.lower().startswith(custom.lower())
-            and stripped[len(custom):].strip() in valid):
+            and canonical(stripped[len(custom):]) in valid):
         return OWN
     prefix, bare = parse_mpaa(value)
     own_forms = {"", own_prefix, own_country.upper() + ":"}
     if own_country.upper() == "US":
         own_forms.add(_US_RATED)
-    if bare in valid and prefix in own_forms:
+    if canonical(bare) in valid and prefix in own_forms:
         return OWN
     return FOREIGN
 

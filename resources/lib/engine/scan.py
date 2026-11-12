@@ -677,11 +677,12 @@ def _resolve_cert(
     # A derived rating metamender wrote is in the configured system too, but
     # it is not the item's own: it stays on its monthly rechecks.
     ours_derived = ours and bool(fs.get("from_fallback"))
-    state = classify_current(current, preset.valid, cfg.prefix, preset.country, placeholder)
+    state = classify_current(current, preset.valid, cfg.prefix, preset.country, placeholder,
+                             canonical=preset.canonical)
     if nfo_managed and not may_write(True, current, written):
         answer, value = CertAnswer(REAL, None, "kodi"), None
     elif state == OWN and not ours_derived:
-        bare = _own_bare(current, cfg.prefix)
+        bare = preset.canonical(_own_bare(current, cfg.prefix))
         answer, value = CertAnswer(REAL, bare, "kodi"), format_mpaa(bare, cfg.prefix)
     elif state == FOREIGN and not cfg.replace_foreign:
         answer, value = CertAnswer(REAL, None, "kodi"), None

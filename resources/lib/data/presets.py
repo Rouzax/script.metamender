@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from resources.lib.constants import COUNTRY_CODES
 from resources.lib.engine.certification import sanitize_prefix
@@ -39,6 +39,16 @@ class Preset:
     prefix: str
     inference: tuple[str, ...]
     mappings: dict[str, dict[str, str]]
+    # Other spellings of a rating ("MA15+" for "MA 15+"), read as the rating
+    # they name; only the rating's own spelling is ever written.
+    aliases: dict[str, str] = field(default_factory=dict)
+
+    def canonical(self, rating: str) -> str:
+        """``rating`` in this system's own spelling: whitespace collapsed
+        (non-breaking spaces too), then an alias resolved. Anything else is
+        returned as it is, so an unknown value stays invalid."""
+        text = " ".join((rating or "").split())
+        return self.aliases.get(text, text)
 
 
 def load_preset(country: str, *, report: bool = True) -> Preset | None:
@@ -65,6 +75,7 @@ def load_preset(country: str, *, report: bool = True) -> Preset | None:
             str(src): {str(k): str(v) for k, v in table.items()}
             for src, table in raw["mappings"].items()
         }
+        aliases = {str(k): str(v) for k, v in (raw.get("aliases") or {}).items()}
     except (KeyError, TypeError, AttributeError):
         _invalid(country, "missing or malformed keys", report)
         return None
@@ -83,7 +94,11 @@ def load_preset(country: str, *, report: bool = True) -> Preset | None:
         _invalid(country, "mapping targets outside valid_ratings: " + ", ".join(outside),
                  report)
         return None
-    return Preset(country, valid, prefix, inference, mappings)
+    stray = sorted(alias for alias, target in aliases.items() if target not in valid)
+    if stray:
+        _invalid(country, "aliases outside valid_ratings: " + ", ".join(stray), report)
+        return None
+    return Preset(country, valid, prefix, inference, mappings, aliases)
 
 
 def country_for_setting(index: int, ui_language: str) -> str | None:

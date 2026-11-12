@@ -46,6 +46,15 @@ def test_classify():
     assert classify_current("KW 12", NL, "KW ", "NL", False) == "own"
 
 
+def test_classify_reads_the_compact_spelling_as_own():
+    from resources.lib.data.presets import load_preset
+    au = load_preset("AU")
+    assert au is not None
+    assert classify_current("AU:MA15+", au.valid, "AU:", "AU", False,
+                            canonical=au.canonical) == "own"
+    assert classify_current("AU:MA15+", au.valid, "AU:", "AU", False) == "foreign"
+
+
 def test_normalize_title():
     assert normalize_title("  Amélie   Poulain ") == "amelie poulain"
 
@@ -109,3 +118,22 @@ def test_best_match_year_mismatch():
 
     assert best_match(("Dune",), 2021, [(("Dune",), 1984, "12")]) is None
     assert best_match(("Dune", "Duin"), 2021, [(("Duin",), 2021, "12")]) == "12"
+
+
+def test_scan_keeps_a_compact_au_rating_in_the_official_spelling():
+    """A Kodi value 'AU:MA15+' is Australia's own rating: kept as real and
+    written back as 'AU:MA 15+', without any lookup."""
+    from types import SimpleNamespace
+
+    from resources.lib.data.presets import load_preset
+    from resources.lib.engine import scan
+    from resources.lib.engine.scanctx import _CertConfig
+    au = load_preset("AU")
+    assert au is not None
+    cfg = _CertConfig(preset=au, prefix="AU:", replace_foreign=True, not_found=None,
+                      gate=None)  # type: ignore[arg-type]
+    primary = SimpleNamespace(tmdb={"certifications": {"GB": "18"}})
+    answer, value = scan._resolve_cert(
+        cfg, {"mpaa": "AU:MA15+", "title": "Heat"}, "tmdb:949", primary,  # type: ignore[arg-type]
+        SimpleNamespace(imdb=None), {}, "movie", True, False, False)  # type: ignore[arg-type]
+    assert (answer.kind, answer.rating, value) == ("real", "MA 15+", "AU:MA 15+")
