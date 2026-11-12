@@ -59,7 +59,7 @@ class DetailsView(Protocol):
 
 
 class DetailsSession(Protocol):
-    def load(self) -> DetailsView | None: ...
+    def reload(self) -> DetailsView | None: ...
     def update_now(self) -> None: ...
     def run_action(self, row: DetailRow) -> None: ...
 
@@ -188,9 +188,10 @@ class DetailsWindow(xbmcgui.WindowXMLDialog):
     def _reload(self) -> None:
         """Read the item again after a change, keeping the selected row."""
         row = self._selected()
-        view = self.session.load()
+        view = self.session.reload()
         if view is None:
-            # The item left the library while the window was open.
+            # The item left the library or could not be read; the session
+            # has told the user which.
             self.close()
             return
         self.view = view

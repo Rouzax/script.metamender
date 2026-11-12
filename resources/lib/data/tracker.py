@@ -276,6 +276,26 @@ class TrackerDB:
             return None
         return dict(row)
 
+    def adoptable_identity(
+        self, media_type: str, identity: str, kodi_id: Any
+    ) -> str | None:
+        """The identity of the row adopt_identity would rename to
+        ``identity``, without renaming it; None when it would rename none."""
+        prefix, _, ext_id = identity.partition(":")
+        column = {"tmdb": "tmdb_id", "imdb": "imdb_id"}.get(prefix)
+        if column is None or not ext_id or kodi_id is None:
+            return None
+        if self._get_item_id(media_type, identity) is not None:
+            return None
+        rows = self._conn.execute(
+            "SELECT identity FROM items WHERE media_type = ? AND kodi_id = ? "
+            "AND {} = ?".format(column),
+            (media_type, kodi_id, ext_id),
+        ).fetchall()
+        if len(rows) != 1:
+            return None
+        return str(rows[0]["identity"])
+
     def adopt_identity(
         self, media_type: str, identity: str, kodi_id: Any
     ) -> str | None:
@@ -291,23 +311,13 @@ class TrackerDB:
         resolved to the same id keeps its own row. Returns the old identity,
         or None when nothing was renamed.
         """
-        prefix, _, ext_id = identity.partition(":")
-        column = {"tmdb": "tmdb_id", "imdb": "imdb_id"}.get(prefix)
-        if column is None or not ext_id or kodi_id is None:
+        old = self.adoptable_identity(media_type, identity, kodi_id)
+        if old is None:
             return None
-        if self._get_item_id(media_type, identity) is not None:
-            return None
-        rows = self._conn.execute(
-            "SELECT id, identity FROM items WHERE media_type = ? AND kodi_id = ? "
-            "AND {} = ?".format(column),
-            (media_type, kodi_id, ext_id),
-        ).fetchall()
-        if len(rows) != 1:
-            return None
-        old = rows[0]["identity"]
         try:
             self._conn.execute(
-                "UPDATE items SET identity = ? WHERE id = ?", (identity, rows[0]["id"]),
+                "UPDATE items SET identity = ? WHERE media_type = ? AND identity = ?",
+                (identity, media_type, old),
             )
             self._move_keep(media_type, old, identity)
             self._conn.commit()
@@ -321,7 +331,7 @@ class TrackerDB:
             "Item identity adopted", event="tracker.identity_adopted",
             media_type=media_type, identity=identity, old_identity=old,
         )
-        return old  # type: ignore[no-any-return]
+        return old
 
     def rename_show_episodes(self, old_title: str, new_title: str) -> int:
         """Re-key a show's episode rows after metamender changed its title.

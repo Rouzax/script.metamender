@@ -125,6 +125,7 @@ _LANG = {
     32585: "{} · Season {}, episode {}",
     32590: "The value changed since this window opened, so nothing was restored.",
     32591: "Kodi did not accept the restore.",
+    32592: "Could not read this item's details.",
 }
 
 MOVIE_ITEM = {
@@ -324,3 +325,51 @@ def test_session_unlock(opened):
     session.run_action(row)
     view = session.load()
     assert next(r for r in view.rows if r.key == "genre").action == ""
+
+
+def test_open_details_reads_the_row_a_scan_would_adopt(opened):
+    # MetaMender wrote back the tmdb id, so the item now computes tmdb:949
+    # while its row is still keyed on its title.
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "Heat", "Heat", kodi_id=7, tmdb_id="949")
+    tracker.keep_original("movie", "Heat", "plot", "old plot")
+    tracker.set_written_fp("movie", "Heat", "plot", fingerprint("new plot"))
+    tracker.commit()
+    tracker.close()
+
+    details.open_details("movie", "7")
+
+    session, view = opened["shown"][0]
+    assert session.identity == "Heat"
+    assert next(r for r in view.rows if r.key == "plot").action == "restore"
+    tracker = TrackerDB(opened["db_path"])
+    assert tracker.get_item("movie", "tmdb:949") is None
+    assert tracker.get_item("movie", "Heat") is not None
+    tracker.close()
+
+
+def test_open_details_read_error_logs_and_tells_the_user(opened, monkeypatch):
+    def broken(media_type, kodi_id):
+        raise RuntimeError("json-rpc down")
+
+    monkeypatch.setattr(details.kodi, "get_item_by_id", broken)
+    details.open_details("movie", "7")
+    assert opened["shown"] == []
+    assert opened["notes"] == [_LANG[32592]]
+
+
+def test_reload_error_returns_none_and_tells_the_user(opened, monkeypatch):
+    details.open_details("movie", "7")
+    session, _ = opened["shown"][0]
+    monkeypatch.setattr(details, "TrackerDB", lambda path: (_ for _ in ()).throw(
+        __import__("sqlite3").OperationalError("database is locked")))
+    assert session.reload() is None
+    assert opened["notes"] == [_LANG[32592]]
+
+
+def test_reload_of_a_removed_item_says_not_found(opened, monkeypatch):
+    details.open_details("movie", "7")
+    session, _ = opened["shown"][0]
+    monkeypatch.setattr(details.kodi, "get_item_by_id", lambda mt, i: None)
+    assert session.reload() is None
+    assert opened["notes"] == ["Item not found"]

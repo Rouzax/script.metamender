@@ -10,7 +10,7 @@ Logging:
         - details.locked (INFO): Restore skipped, a scan is running
         - details.restored / details.restore_changed / details.restore_failed
         - details.unlocked (INFO)
-        - details.error (ERROR): A window action raised
+        - details.error (ERROR): Reading the item or a window action raised
 """
 from __future__ import annotations
 
@@ -146,12 +146,18 @@ def _read_identity(
     tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: int
 ) -> str:
     """The item's tracker key, found the way scan._tracker_identity finds it
-    but without its writes: opening the window must change nothing, so an
-    identity the next scan would adopt is not adopted here."""
+    but without its writes: opening the window must change nothing, so a
+    row the next scan would adopt is read under its current identity."""
     identity = compute_identity(item, media_type)
     own = "{}|{}".format(identity, item.get("file", ""))
     if tracker.get_item(media_type.name, own) is not None:
         return own
+    # An id written back to Kodi changes the identity the item computes; the
+    # row stays under the old one until the next scan adopts it. Restore and
+    # Unlock on the old identity are carried along by that adoption.
+    adoptable = tracker.adoptable_identity(media_type.name, identity, kodi_id)
+    if adoptable is not None:
+        return adoptable
     row = tracker.get_item(media_type.name, identity)
     holder = row.get("kodi_id") if row else None
     if holder is None or holder == kodi_id:
@@ -228,6 +234,22 @@ class DetailsSession:
             _heading(self.media_type, item), header_line(item_row, fs_map, folder), rows
         )
 
+    def reload(self) -> DetailsView | None:
+        """load(), with a missing item or a failed read told to the user and
+        logged here; None then, and the window has nothing to show."""
+        try:
+            view = self.load()
+        except Exception:
+            log.exception("Reading the item's details failed", event="details.error",
+                          media_type=self.media_type.name, item_id=self.kodi_id)
+            notify(lang(32592))  # Could not read this item's details
+            return None
+        if view is None:
+            log.warning("Details could not find the item", event="details.open_notfound",
+                        media_type=self.media_type.name, item_id=self.kodi_id)
+            notify(lang(32345))  # Item not found
+        return view
+
     def update_now(self) -> None:
         """The context menu's Update now: one movie or episode, or a show's
         refresh with its own progress window. It takes the scan lock and
@@ -300,10 +322,7 @@ def open_details(dbtype: str, dbid: str) -> None:
         notify(lang(32343))  # Invalid item
         return
     session = DetailsSession(dbtype, media_type, kodi_id)
-    view = session.load()
+    view = session.reload()
     if view is None:
-        log.warning("Details could not find the item", event="details.open_notfound",
-                    media_type=media_type.name, item_id=kodi_id)
-        notify(lang(32345))  # Item not found
         return
     show_details_window(session, view)

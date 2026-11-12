@@ -975,3 +975,34 @@ def test_written_fp_leaves_original_and_lock_alone(tmp_path):
     assert keep == {"original": "old plot", "has_original": True, "locked": True,
                     "written_fp": "fp2"}
     db.close()
+
+
+def test_adoptable_identity_finds_the_row_without_renaming(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Foo (2001)", kodi_id=3, imdb_id="tt1")
+    db.keep_original("movie", "Foo (2001)", "plot", "old")
+    db.commit()
+    assert db.adoptable_identity("movie", "imdb:tt1", 3) == "Foo (2001)"
+    assert db.get_item("movie", "Foo (2001)") is not None
+    assert db.get_item("movie", "imdb:tt1") is None
+    # Same rules as adopt_identity: another Kodi item, a different id, an
+    # identity that already has a row, an identity without an id.
+    assert db.adoptable_identity("movie", "imdb:tt1", 4) is None
+    assert db.adoptable_identity("movie", "imdb:tt2", 3) is None
+    assert db.adoptable_identity("movie", "Foo (2001)", 3) is None
+    db.upsert_item("movie", "imdb:tt1", kodi_id=9, imdb_id="tt1")
+    assert db.adoptable_identity("movie", "imdb:tt1", 3) is None
+    db.close()
+
+
+def test_adopt_identity_carries_the_kept_original_and_lock(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Foo (2001)", kodi_id=3, imdb_id="tt1")
+    db.keep_original("movie", "Foo (2001)", "plot", "old")
+    db.set_locked("movie", "Foo (2001)", "genre", True)
+    db.commit()
+    assert db.adopt_identity("movie", "imdb:tt1", 3) == "Foo (2001)"
+    keep = db.get_keep("movie", "imdb:tt1")
+    assert keep["plot"]["original"] == "old" and keep["genre"]["locked"] is True
+    assert db.get_keep("movie", "Foo (2001)") == {}
+    db.close()

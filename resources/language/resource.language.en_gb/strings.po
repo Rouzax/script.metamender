@@ -1197,3 +1197,7 @@ msgstr ""
 msgctxt "#32591"
 msgid "Kodi did not accept the restore."
 msgstr ""
+
+msgctxt "#32592"
+msgid "Could not read this item's details."
+msgstr ""
