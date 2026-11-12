@@ -21,7 +21,7 @@ def _config() -> str:
 
 def _nav_pages() -> list[str]:
     # Python 3.10 has no tomllib; the nav block is a plain list of strings.
-    block = re.search(r"^nav = \[(.*?)^\]", _config(), re.S | re.M)
+    block = re.search(r"^nav = \[(.*?)^\]", _config(), re.DOTALL | re.MULTILINE)
     assert block, "zensical.toml has no nav"
     return re.findall(r'"([\w-]+\.md)"', block.group(1))
 
@@ -48,7 +48,7 @@ def test_every_page_is_in_the_nav():
 
 def test_art_and_working_files_are_excluded():
     config = _config()
-    exclude = re.search(r"\[project\.plugins\.exclude\]\s*glob = \[(.*?)\]", config, re.S)
+    exclude = re.search(r"\[project\.plugins\.exclude\]\s*glob = \[(.*?)\]", config, re.DOTALL)
     assert exclude, "no exclude block"
     assert '"art/**"' in exclude.group(1)
     assert '"superpowers/**"' in exclude.group(1)
@@ -58,11 +58,11 @@ def test_published_text_has_no_em_dash():
     for path in _published_text():
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as handle:
-                assert "—" not in handle.read(), path
+                assert "\u2014" not in handle.read(), path
 
 
 def test_published_text_leaks_nothing_private():
-    private = re.compile(r"/home/|builder|\b[0-9a-f]{32,}\b", re.I)
+    private = re.compile(r"/home/|builder|\b[0-9a-f]{32,}\b", re.IGNORECASE)
     for path in _published_text():
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as handle:

@@ -1,0 +1,158 @@
+{
+  "setup-key": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "key"
+  },
+  "setup-language": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "language"
+  },
+  "setup-folders": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "folders"
+  },
+  "setup-features": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "features"
+  },
+  "setup-country": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "country"
+  },
+  "setup-summary": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "summary"
+  },
+  "update-now-progress": {
+    "group": "update-now",
+    "window": "script-metamender-progress.xml",
+    "kind": "progress",
+    "title": "Het gouden uur"
+  },
+  "update-now-corner-bar": {
+    "group": "update-now",
+    "window": "native",
+    "active": "extendedprogressdialog",
+    "kind": "corner-bar",
+    "title": "Het gouden uur",
+    "crop": [
+      1180,
+      0,
+      740,
+      200
+    ]
+  },
+  "attention-window": {
+    "group": "attention",
+    "window": "script-metamender-attention.xml",
+    "kind": "attention",
+    "main": "key_rejected",
+    "others": [
+      [
+        "folder_offline",
+        "smb://nas/media/Kids/TV/"
+      ]
+    ]
+  },
+  "details-plot-updated": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "plot"
+  },
+  "details-title-left": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "title"
+  },
+  "details-director-waiting": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "director"
+  },
+  "details-ids": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "ids"
+  },
+  "details-episode-not-matched": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode-not-matched",
+    "focus": "ids"
+  },
+  "details-plot-protected": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "movie",
+    "focus": "plot"
+  },
+  "details-restore": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "movie",
+    "focus": "mpaa",
+    "button": true
+  },
+  "details-theme-golden-hour": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "plot",
+    "theme": 0
+  },
+  "details-theme-ultraviolet": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "plot",
+    "theme": 1
+  },
+  "details-theme-ember": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "plot",
+    "theme": 2
+  },
+  "details-theme-nightfall": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode",
+    "focus": "plot",
+    "theme": 3
+  },
+  "context-submenu": {
+    "group": "library",
+    "window": "native",
+    "active": "contextmenu",
+    "kind": "context",
+    "crop": "full"
+  }
+}

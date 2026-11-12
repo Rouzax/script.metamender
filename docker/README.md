@@ -112,6 +112,31 @@ JSON-RPC on 8100, so run one at a time. Path substitution from
    kill that shell instead.
 6. Stop Kodi, restore the databases, and remove what steps 2 and 3 added.
 
+## Docs screenshots: `scripts/screenshots.py`
+
+Retakes every screenshot the docs use, from the Flatpak Kodi (Omega profile)
+on an X display. A development-only helper add-on
+(`scripts/screenshot_helper/`, never shipped) opens each MetaMender window
+through the add-on's own code with invented demo data, so a shot shows the
+real window and nothing of a real library. The scenes are listed in
+`scripts/screenshot_helper/scenes.json`; `tests/test_screenshot_scenes.py`
+fails when a window has no scene or a scene has no image.
+
+```bash
+python3 docker/scripts/screenshots.py                    # every scene, staged in build/screenshots/
+python3 docker/scripts/screenshots.py --only setup-key   # one scene (comma-separate several)
+python3 docker/scripts/screenshots.py --apply            # also copy them to docs/screenshots/
+```
+
+Look at the staged images before `--apply`. The script installs this
+checkout (a symlink), the IMDb ratings module (from the official Kodi mirror)
+and the helper, restarts Kodi, and removes what it added at the end
+(`--keep` leaves it). MetaMender stays in its "setup not finished" state, in
+which the service never scans or writes, so the shared library is not
+touched; the script refuses to run if the profile says setup is finished.
+Needs ImageMagick (`import`, `convert`) and Estuary as the active skin. The
+context menu scene opens a random library show (`--show TITLE` picks one).
+
 ## Scraper and settings matrix: `matrix/run.py`
 
 Builds a small library with one of Kodi's TV scrapers, lets the real
