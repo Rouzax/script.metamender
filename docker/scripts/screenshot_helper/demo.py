@@ -142,4 +142,14 @@ def movie() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any],
     return MOVIE, item, item_row, fs_map, keep, ""
 
 
-PRESETS = {"episode": episode, "episode-dutch": episode_dutch, "episode-not-matched": episode_not_matched, "movie": movie}
+def episode_locked() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any],
+                              dict[str, Any], str]:
+    """The episode with its title kept as it is (Keep this value)."""
+    media_type, item, item_row, fs_map, keep, language = episode()
+    fs_map["title"] = _fs("locked", source="tmdb", next_retry="2026-11-19")
+    keep["title"] = {"original": None, "has_original": False, "locked": True,
+                     "written_fp": None}
+    return media_type, item, item_row, fs_map, keep, language
+
+
+PRESETS = {"episode": episode, "episode-locked": episode_locked, "episode-dutch": episode_dutch, "episode-not-matched": episode_not_matched, "movie": movie}

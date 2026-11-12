@@ -27,7 +27,7 @@ The first entry is **Ids**; below it the fields are grouped by what happened:
   rating site).
 - **Left as it is**: MetaMender looked and left the value alone. The hint says
   why in one word, for example *scraper* (the value your scraper set),
-  *NFO*, *settled* or *locked*.
+  *NFO*, *settled* or *locked* (with a padlock).
 - **Waiting**: there is nothing to show yet: the field is empty, has not been
   checked, or will be filled at the next scan. The hint gives the date of the
   next check, or *not checked* or *next scan*.
@@ -120,8 +120,11 @@ trailer or tagline you do not want.
 
 ### Unlocking
 
-A locked field shows **Let MetaMender update this again**. That removes the
-lock; MetaMender checks the field at the next scan and may update it again.
+A locked field has a padlock beside it in the list, and shows **Let
+MetaMender update this again**. That removes the lock; MetaMender checks the
+field at the next scan and may update it again.
+
+![A locked field, with the way to unlock it](screenshots/details/details-unlock.png)
 
 Restore is only offered while the field still holds the value MetaMender wrote,
 so it never overwrites a newer value of your own or from a re-scrape. Ratings

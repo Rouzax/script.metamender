@@ -174,5 +174,20 @@
     "preset": "episode",
     "focus": "title",
     "button": true
+  },
+  "details-locked": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode-locked",
+    "focus": "plot"
+  },
+  "details-unlock": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode-locked",
+    "focus": "title",
+    "button": true
   }
 }
