@@ -16,6 +16,7 @@ def entry(monkeypatch: pytest.MonkeyPatch):
         "run": MagicMock(),
         "update_now": MagicMock(),
         "reset_tracker": MagicMock(),
+        "open_details": MagicMock(),
         "is_setup_complete": MagicMock(return_value=True),
     }
     for name, mock in mocks.items():
@@ -40,6 +41,12 @@ def test_no_argument_opens_wizard_before_setup(entry):
 def test_setup_actions(entry, mode):
     default.main([mode])
     entry["open_setup"].assert_called_once_with(mode)
+    entry["run"].assert_not_called()
+
+
+def test_details_action_opens_the_details_window(entry):
+    default.main(["details", "movie", "7"])
+    entry["open_details"].assert_called_once_with("movie", "7")
     entry["run"].assert_not_called()
 
 

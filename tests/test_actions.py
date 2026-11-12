@@ -1,6 +1,9 @@
 """Tests for entry-point action handlers (reset_tracker, update_now)."""
 from __future__ import annotations
 
+import re
+import xml.etree.ElementTree as ET
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -359,3 +362,26 @@ def test_update_now_working_key_clears_the_problem(update_patched):
     update_patched["run_scan"].return_value = {"updated": 1, "tmdb_answered": True}
     actions.update_now("movie", "7")
     assert "key_rejected" not in _open_problems(store)
+
+
+def test_reset_confirmation_says_locks_and_originals_stay():
+    po = (Path(__file__).resolve().parent.parent
+          / "resources/language/resource.language.en_gb/strings.po").read_text()
+    text = re.search(r'msgctxt "#32361"\nmsgid "(.*)"', po).group(1)
+    assert "lock" in text.lower()
+    assert "original" in text.lower()
+
+
+def test_addon_declares_the_details_context_item():
+    root_dir = Path(__file__).resolve().parent.parent
+    root = ET.parse(str(root_dir / "addon.xml")).getroot()
+    items = root.findall("./extension[@point='kodi.context.item']/menu/item")
+    item = next(i for i in items if i.get("library") == "context_details.py")
+    assert item.findtext("label") == "32584"
+    visible = item.findtext("visible")
+    for dbtype in ("movie", "episode", "tvshow"):
+        assert "String.IsEqual(ListItem.DBType,%s)" % dbtype in visible
+    assert "season" not in visible
+    assert (root_dir / "context_details.py").is_file()
+    po = (root_dir / "resources/language/resource.language.en_gb/strings.po").read_text()
+    assert 'msgctxt "#32584"\nmsgid "MetaMender: Details"' in po

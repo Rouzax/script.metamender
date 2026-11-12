@@ -427,7 +427,7 @@ msgid "Reset tracker?"
 msgstr ""
 
 msgctxt "#32361"
-msgid "Clear all maturity tracking and refetch every field on the next scan?"
+msgid "Clear all maturity tracking and refetch every field on the next scan? Locked fields and the original values MetaMender kept stay."
 msgstr ""
 
 msgctxt "#32362"
@@ -1164,4 +1164,36 @@ msgstr ""
 
 msgctxt "#32583"
 msgid "Nightfall"
+msgstr ""
+
+msgctxt "#32584"
+msgid "MetaMender: Details"
+msgstr ""
+
+msgctxt "#32585"
+msgid "{} · Season {}, episode {}"
+msgstr ""
+
+msgctxt "#32586"
+msgid "Restore original"
+msgstr ""
+
+msgctxt "#32587"
+msgid "Let MetaMender update this again"
+msgstr ""
+
+msgctxt "#32588"
+msgid "Update now"
+msgstr ""
+
+msgctxt "#32589"
+msgid "Close"
+msgstr ""
+
+msgctxt "#32590"
+msgid "The value changed since this window opened, so nothing was restored."
+msgstr ""
+
+msgctxt "#32591"
+msgid "Kodi did not accept the restore."
 msgstr ""

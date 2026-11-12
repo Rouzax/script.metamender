@@ -17,6 +17,10 @@
                 <label>32340</label>
                 <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow) | String.IsEqual(ListItem.DBType,season)</visible>
             </item>
+            <item library="context_details.py">
+                <label>32584</label>
+                <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow)</visible>
+            </item>
         </menu>
     </extension>
     <extension point="xbmc.addon.metadata">
