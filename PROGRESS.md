@@ -107,7 +107,7 @@ feat/7d-provider-replacement.
 
 ## Phase 10: Scale, Progress, and Polish
 - [x] 10.1 Background notifications: nothing while anything plays, a toast only after a scan that changed something, and an attention window (own style) for problems that need the user: setup not finished, no or a rejected TMDB key, background scans failing for a day, a library folder offline for 3 days; each shown once, again only when it changes or comes back
-- [ ] 10.2 Docker test scripts (setup.sh, run-test.sh)
+- [x] 10.2 Docker test scripts (setup.sh, run-test.sh, teardown.sh, backup/restore, verify.py, the matrix rig); run-test.sh follows a scan's own log file
 - [ ] 10.3 CLAUDE.md and documentation
 
 ## Audits

@@ -227,7 +227,7 @@ service over the whole library and writes to it.
 ```bash
 ./scripts/setup.sh            # backup, install deps, symlink, seed settings, restart
 ./scripts/run-test.sh --status   # read-only metadata-gap report
-./scripts/run-test.sh            # trigger a manual scan, poll metamender.log, before/after
+./scripts/run-test.sh            # trigger a manual scan, follow its own log, before/after
 ./scripts/run-test.sh --log      # dump the addon log
 ./scripts/teardown.sh --restore  # remove addon and restore the DB
 ```

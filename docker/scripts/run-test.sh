@@ -2,9 +2,9 @@
 # Inspect and exercise MetaMender against the headless Kodi instance.
 #
 # Usage:
-#   run-test.sh             # Trigger a manual scan, poll the log, show before/after
+#   run-test.sh             # Trigger a manual scan, follow its log, show before/after
 #   run-test.sh --status    # Read-only: metadata-gap report (movies/shows/episodes)
-#   run-test.sh --log       # Dump the addon log (metamender.log)
+#   run-test.sh --log       # The activity log (metamender.log) and the latest scan log
 #   run-test.sh --kodi-log  # MetaMender entries from kodi.log
 #
 # --status is read-only. The default (trigger scan) asks the add-on inside the
@@ -23,8 +23,19 @@ rpc() {
     curl -sf -m 15 -X POST "$KODI_URL" -H "Content-Type: application/json" -d "$1"
 }
 
+# Lines outside a scan go to metamender.log; a scan writes its own
+# metamender_<date>_<time>.log while it runs.
 addon_log() {
     docker exec "$CONTAINER" cat "$ADDON_DATA/logs/metamender.log" 2>/dev/null || true
+}
+
+latest_scan_log_name() {
+    docker exec "$CONTAINER" sh -c "ls -t '$ADDON_DATA'/logs/metamender_*.log 2>/dev/null | head -n 1" || true
+}
+
+scan_log() {
+    local name="$1"
+    [[ -n "$name" ]] && docker exec "$CONTAINER" cat "$name" 2>/dev/null || true
 }
 
 kodi_log() {
@@ -81,10 +92,12 @@ trigger_scan() {
     echo "=== Pre-scan status ==="
     show_status
 
+    local before log_name=""
+    before=$(latest_scan_log_name)
     echo "=== Triggering manual scan (Addons.ExecuteAddon) ==="
     rpc "{\"jsonrpc\":\"2.0\",\"method\":\"Addons.ExecuteAddon\",\"params\":{\"addonid\":\"$ADDON_ID\"},\"id\":3}" || true
     echo ""
-    echo "Monitoring $ADDON_DATA/logs/metamender.log ..."
+    echo "Following the scan's own log in $ADDON_DATA/logs/ ..."
     echo ""
 
     local start last=0
@@ -93,14 +106,19 @@ trigger_scan() {
         sleep 5
         local elapsed=$(( $(date +%s) - start ))
         local content count
-        content=$(addon_log)
+        if [[ -z "$log_name" ]]; then
+            local newest
+            newest=$(latest_scan_log_name)
+            [[ -n "$newest" && "$newest" != "$before" ]] && log_name="$newest"
+        fi
+        content=$(scan_log "$log_name")
         count=$(echo "$content" | wc -l)
         if [[ $count -gt $last ]]; then
             echo "--- new log (${elapsed}s) ---"
             echo "$content" | tail -n $((count - last))
             last=$count
         fi
-        if echo "$content" | tail -20 | grep -qE "service.scan_complete|scan.complete"; then
+        if echo "$content" | tail -20 | grep -qE "manual.complete|manual.apikey|manual.error"; then
             echo ""
             echo "=== Scan complete (${elapsed}s) ==="
             break
@@ -118,7 +136,7 @@ trigger_scan() {
 
 case "${1:-}" in
     --status)   show_status ;;
-    --log)      addon_log ;;
+    --log)      addon_log; echo "--- latest scan log ---"; scan_log "$(latest_scan_log_name)" ;;
     --kodi-log) kodi_log | grep -i "metamend\|script.metamender" || echo "(no addon entries in kodi.log)" ;;
     *)          trigger_scan ;;
 esac
