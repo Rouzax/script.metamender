@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from resources.lib.service import entry as default
-from resources.lib.service import setup
+from resources.lib.service import wizard as setup
 
 
 @pytest.fixture

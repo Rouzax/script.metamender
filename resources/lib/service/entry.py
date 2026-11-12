@@ -9,7 +9,7 @@ from __future__ import annotations
 from resources.lib.service.actions import reset_tracker, update_now
 from resources.lib.service.details import open_details
 from resources.lib.service.manual import run
-from resources.lib.service.setup import open_setup
+from resources.lib.service.wizard import open_setup
 from resources.lib.ui.setup_model import FOLDERS, WIZARD
 from resources.lib.utils import get_logger, is_setup_complete
 

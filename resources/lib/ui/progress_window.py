@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
+import xbmc
 import xbmcgui
 
 from resources.lib.ui.theme import theme_colours
@@ -85,6 +87,26 @@ class CloseOnce:
             return True
 
 
+def follow(
+    state: CloseOnce,
+    done: threading.Event,
+    render: Callable[[], None],
+    close: Callable[[str], None],
+    monitor: Any,
+) -> None:
+    """Keep an open window's numbers current until the refresh ends ("done")
+    or Kodi quits ("background"). It waits on Kodi's abort rather than
+    sleeping, so a quitting Kodi is not held up by it."""
+    while state.is_open:
+        if done.is_set():
+            close("done")
+            return
+        render()
+        if monitor.waitForAbort(_REFRESH_SECONDS):
+            close("background")
+            return
+
+
 class ProgressWindow(xbmcgui.WindowXMLDialog):
     """Shows a running refresh. ``result`` is "stop", "background", or
     "done" when the refresh finished while the window was open. The
@@ -113,14 +135,8 @@ class ProgressWindow(xbmcgui.WindowXMLDialog):
             pass
 
     def _follow(self) -> None:
-        # Kodi lets a script thread update an open window; this one keeps the
-        # numbers current and closes the window when the refresh ends.
-        while self._state.is_open:
-            if self.done.is_set():
-                self._close("done")
-                return
-            self._render()
-            time.sleep(_REFRESH_SECONDS)
+        # Kodi lets a script thread update an open window.
+        follow(self._state, self.done, self._render, self._close, xbmc.Monitor())
 
     def _close(self, result: str) -> None:
         if self._state.claim():

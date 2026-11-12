@@ -46,7 +46,7 @@ from resources.lib.service.refresh import (
     request_reopen,
     show_id_of,
 )
-from resources.lib.service.setup import open_setup
+from resources.lib.service.wizard import open_setup
 from resources.lib.ui.setup_model import WIZARD
 from resources.lib.utils import (
     ApiKeyError,

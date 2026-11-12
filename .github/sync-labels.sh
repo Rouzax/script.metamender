@@ -19,6 +19,7 @@ needs-upstream|5319e7|Waiting on TMDB, TheTVDB, IMDb's data or Kodi; cannot be f
 bug|d73a4a|Something isn't working
 enhancement|a2eeef|New feature or request
 documentation|0075ca|Improvements or additions to documentation
+accessibility|f143ab|Barrier affecting people with disabilities
 age-ratings|c5def5|Age ratings, a country preset or its conversions
 question|d876e3|Further information is requested
 duplicate|cfd3d7|This issue or pull request already exists

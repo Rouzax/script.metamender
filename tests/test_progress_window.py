@@ -87,3 +87,36 @@ def test_close_is_claimed_once_by_racing_closers():
 def test_a_window_never_opened_cannot_be_closed():
     state = progress_window.CloseOnce()
     assert state.claim() is False
+
+
+def test_the_refresh_loop_ends_when_kodi_quits():
+    """The window's refresh thread waits on Kodi's abort, not a plain sleep, so a
+    Kodi that is quitting is not held up by it."""
+    import threading
+
+    class QuittingMonitor:
+        def waitForAbort(self, timeout):
+            return True
+
+    state = progress_window.CloseOnce()
+    state.opened()
+    renders, closes = [], []
+    progress_window.follow(state, threading.Event(), lambda: renders.append(1),
+                           closes.append, QuittingMonitor())
+    assert renders == [1] and closes == ["background"]
+
+
+def test_the_refresh_loop_closes_when_the_refresh_is_done():
+    import threading
+
+    class QuietMonitor:
+        def waitForAbort(self, timeout):
+            return False
+
+    state = progress_window.CloseOnce()
+    state.opened()
+    done = threading.Event()
+    done.set()
+    closes = []
+    progress_window.follow(state, done, lambda: None, closes.append, QuietMonitor())
+    assert closes == ["done"]

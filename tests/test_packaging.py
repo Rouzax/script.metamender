@@ -79,3 +79,13 @@ def test_the_release_zip_is_reproducible_with_plain_permissions(tmp_path):
         for info in archive.infolist():
             mode = stat.S_IMODE(info.external_attr >> 16)
             assert mode == (0o755 if info.is_dir() else 0o644), info.filename
+
+
+def test_no_shipped_file_is_named_like_a_development_file(tmp_path):
+    """Kodi's add-on review flags files such as setup.py (a packaging script by
+    name) as development leftovers, whatever they contain."""
+    _run("folder", str(tmp_path / "out"))
+    dev_names = {"setup.py", "setup.cfg", "conftest.py", "Makefile", "tox.ini",
+                 "requirements.txt", "pyproject.toml", ".gitignore"}
+    for path in _shipped(tmp_path / "out"):
+        assert path.rsplit("/", 1)[-1] not in dev_names, path
