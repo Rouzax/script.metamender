@@ -1138,3 +1138,70 @@ def test_failed_rename_leaves_no_partial_rekey_and_keeps_pending_writes(tmp_path
     assert db.locked_fields("episode", "Old Show S01E01") == frozenset({"plot"})
     assert db.get_field_status("tvshow", "tmdb:1", "title")["last_reason"] == "updated"
     db.close()
+
+
+class _FailingCommit(_FailingUpdates):
+    """Renames work; the first commit fails as a busy database would."""
+
+    def __init__(self, conn):
+        super().__init__(conn)
+        self.commits = 0
+
+    def execute(self, sql, *args):
+        return self._conn.execute(sql, *args)
+
+    def commit(self):
+        self.commits += 1
+        if self.commits == 1:
+            raise sqlite3.OperationalError("database is locked")
+        self._conn.commit()
+
+
+def test_failed_final_commit_is_not_a_failed_rekey(tmp_path):
+    """The renames are complete and stay pending with the caller's
+    transaction, which its next commit writes."""
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("episode", "Old Show S01E01", kodi_id=1)
+    db.commit()
+    real = db._conn
+    db._conn = _FailingCommit(real)
+    try:
+        assert db.rename_show_episodes("Old Show", "New Show") == 1
+    finally:
+        db._conn = real
+    db.commit()
+    names = {r[0] for r in db._conn.execute(
+        "SELECT identity FROM items WHERE media_type = 'episode'")}
+    assert names == {"New Show S01E01"}
+    db.close()
+
+
+class _FailingUndo(_FailingSecondRename):
+    """The second re-key fails, and so does rolling back to the savepoint."""
+
+    def execute(self, sql, *args):
+        if sql.startswith("ROLLBACK TO"):
+            raise sqlite3.OperationalError("disk I/O error")
+        return super().execute(sql, *args)
+
+
+def test_failed_undo_rolls_back_the_whole_transaction(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("episode", "Old Show S01E01", kodi_id=1)
+    db.upsert_item("episode", "Old Show S01E02", kodi_id=2)
+    db.upsert_item("tvshow", "tmdb:1", kodi_id=9)
+    db.commit()
+    db.record_field_reason("tvshow", "tmdb:1", "title", "updated")
+    real = db._conn
+    db._conn = _FailingUndo(real)
+    try:
+        assert db.rename_show_episodes("Old Show", "New Show") is None
+    finally:
+        db._conn = real
+    db.commit()
+    names = {r[0] for r in db._conn.execute(
+        "SELECT identity FROM items WHERE media_type = 'episode'")}
+    assert names == {"Old Show S01E01", "Old Show S01E02"}
+    # The caller's pending write went with it, rather than half a re-key.
+    assert db.get_field_status("tvshow", "tmdb:1", "title") is None
+    db.close()

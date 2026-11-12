@@ -11,6 +11,8 @@ Logging:
         - tracker.attempt (DEBUG): Retry attempt recorded
         - tracker.exhausted (INFO): Item marked as exhausted
         - tracker.field_update (DEBUG): Field status changed
+        - tracker.rekey_commit_deferred (WARNING): An episode re-key is
+          complete but its commit failed; the caller's next commit writes it
 """
 from __future__ import annotations
 
@@ -347,9 +349,10 @@ class TrackerDB:
         row and restart its clocks. A row whose new key is already taken keeps
         its old one. Returns the number of rows renamed, or None when the
         re-key failed, so the caller can tell the user that the episodes
-        lost their rows. A failed re-key is undone to a savepoint: none of
-        it is committed later, while the caller's own pending writes stay
-        for its next commit.
+        lost their rows. A failed re-key is undone (see _undo_rekey), so
+        none of it is committed later. A failure of only the final commit
+        is not a failed re-key: the complete renames stay pending with the
+        caller's transaction, which its next commit writes.
         """
         prefix = old_title + " "
         rows = self._conn.execute(
@@ -375,7 +378,6 @@ class TrackerDB:
                 self._move_keep("episode", row["identity"], new_identity)
                 renamed += 1
             self._conn.execute("RELEASE rekey")
-            self._conn.commit()
         except sqlite3.Error:
             log.exception(
                 "Failed to re-key episode rows", event="tracker.error",
@@ -383,6 +385,14 @@ class TrackerDB:
             )
             self._undo_rekey()
             return None
+        try:
+            self._conn.commit()
+        except sqlite3.Error:
+            log.warning(
+                "Episode re-key not committed yet, left for the next commit",
+                event="tracker.rekey_commit_deferred", old_title=old_title,
+                new_title=new_title, renamed=renamed,
+            )
         log.info(
             "Episode rows re-keyed after a show title change",
             event="tracker.episodes_renamed", old_title=old_title,
@@ -391,13 +401,23 @@ class TrackerDB:
         return renamed
 
     def _undo_rekey(self) -> None:
-        """Drop a failed re-key's renames, best effort: when even that fails
-        the connection is left to its own rollback on close."""
+        """Drop a failed re-key's renames by rolling back to its savepoint,
+        which keeps the caller's pending writes. When that fails, the whole
+        transaction is rolled back, those writes included, so a later commit
+        cannot write half a re-key. Should even that fail, it is logged and
+        the connection's state is unknown."""
         try:
             self._conn.execute("ROLLBACK TO rekey")
             self._conn.execute("RELEASE rekey")
+            return
         except sqlite3.Error:
-            log.exception("Failed to undo a partial episode re-key", event="tracker.error")
+            log.exception("Failed to undo a partial episode re-key, rolling back "
+                          "the whole transaction", event="tracker.error")
+        try:
+            self._conn.rollback()
+        except sqlite3.Error:
+            log.exception("Failed to roll back a partial episode re-key",
+                          event="tracker.error")
 
     def known_kodi_ids(self, media_type: str) -> set[int]:
         """Kodi ids of the tracked items of this type, as last scanned."""
