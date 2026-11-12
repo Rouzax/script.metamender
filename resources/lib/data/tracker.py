@@ -108,6 +108,10 @@ CREATE TABLE IF NOT EXISTS field_keep (
     original TEXT,
     has_original INTEGER DEFAULT 0,
     locked INTEGER DEFAULT 0,
+    -- Fingerprint of the value metamender last wrote, as field_status's
+    -- written_value, but surviving clear_field_status: it tells whether
+    -- Kodi still holds metamender's own value after a tracker reset.
+    written_fp TEXT,
     PRIMARY KEY (media_type, identity, field)
 );
 
@@ -771,10 +775,30 @@ class TrackerDB:
                 media_type=media_type, identity=identity, field=field,
             )
 
+    def set_written_fp(
+        self, media_type: str, identity: str, field: str, written_fp: str
+    ) -> None:
+        """Record the fingerprint of the value metamender wrote; a kept
+        original and a lock are left alone."""
+        try:
+            self._conn.execute(
+                "INSERT INTO field_keep (media_type, identity, field, written_fp) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(media_type, identity, field) DO UPDATE SET "
+                "written_fp = excluded.written_fp",
+                (media_type, identity, field, written_fp),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record written fingerprint", event="tracker.error",
+                media_type=media_type, identity=identity, field=field,
+            )
+
     def get_keep(self, media_type: str, identity: str) -> dict[str, dict[str, Any]]:
-        """field -> {"original": decoded value, "has_original", "locked"}."""
+        """field -> {"original": decoded value, "has_original", "locked",
+        "written_fp"}."""
         rows = self._conn.execute(
-            "SELECT field, original, has_original, locked FROM field_keep "
+            "SELECT field, original, has_original, locked, written_fp FROM field_keep "
             "WHERE media_type = ? AND identity = ?",
             (media_type, identity),
         ).fetchall()
@@ -785,6 +809,7 @@ class TrackerDB:
                 ),
                 "has_original": bool(r["has_original"]),
                 "locked": bool(r["locked"]),
+                "written_fp": r["written_fp"],
             }
             for r in rows
         }

@@ -852,6 +852,7 @@ def test_keep_round_trip_preserves_lists_and_empty(tmp_path):
     keep = db.get_keep("movie", "Heat (1995)")
     assert keep["genre"] == {
         "original": ["Drama", "Crime"], "has_original": True, "locked": False,
+        "written_fp": None,
     }
     assert keep["tagline"]["original"] == ""
     assert keep["tagline"]["has_original"] is True
@@ -881,10 +882,12 @@ def test_reset_tracker_keeps_originals_and_locks(tmp_path):
     db.record_field_fetch("movie", "Heat (1995)", "plot", "2030-01-01")
     db.keep_original("movie", "Heat (1995)", "plot", "old plot")
     db.set_locked("movie", "Heat (1995)", "plot", True)
+    db.set_written_fp("movie", "Heat (1995)", "plot", "fp-of-ours")
     assert db.clear_field_status() == 1
     assert db.get_field_status("movie", "Heat (1995)", "plot") is None
     keep = db.get_keep("movie", "Heat (1995)")["plot"]
-    assert keep == {"original": "old plot", "has_original": True, "locked": True}
+    assert keep == {"original": "old plot", "has_original": True, "locked": True,
+                    "written_fp": "fp-of-ours"}
     db.close()
 
 
@@ -956,4 +959,19 @@ def test_match_note_round_trip(tmp_path):
     assert db.get_item("movie", "Heat (1995)")["match_note"] == '{"by": "number"}'
     db.upsert_item("movie", "Heat (1995)", kodi_id=8)
     assert db.get_item("movie", "Heat (1995)")["match_note"] == '{"by": "number"}'
+    db.close()
+
+
+def test_written_fp_leaves_original_and_lock_alone(tmp_path):
+    db = _db_with_movie(tmp_path)
+    db.set_written_fp("movie", "Heat (1995)", "plot", "fp1")
+    keep = db.get_keep("movie", "Heat (1995)")["plot"]
+    assert keep == {"original": None, "has_original": False, "locked": False,
+                    "written_fp": "fp1"}
+    db.keep_original("movie", "Heat (1995)", "plot", "old plot")
+    db.set_locked("movie", "Heat (1995)", "plot", True)
+    db.set_written_fp("movie", "Heat (1995)", "plot", "fp2")
+    keep = db.get_keep("movie", "Heat (1995)")["plot"]
+    assert keep == {"original": "old plot", "has_original": True, "locked": True,
+                    "written_fp": "fp2"}
     db.close()

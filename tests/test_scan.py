@@ -6579,7 +6579,8 @@ class TestFieldReasonsAndKeep:
         tracker.close()
 
         assert _written(upd, "plot") is None
-        assert keep["plot"] == {"original": "Scraper plot", "has_original": True, "locked": True}
+        assert (keep["plot"]["original"], keep["plot"]["has_original"],
+                keep["plot"]["locked"]) == ("Scraper plot", True, True)
         assert reason == "locked"
 
     def test_locked_mpaa_skips_certification(self, tmp_path, kodi_stubs, monkeypatch):
@@ -6607,3 +6608,19 @@ class TestFieldReasonsAndKeep:
         assert not resolve.called and calls == [] and gate.requests == 0
         assert _written(upd, "mpaa") is None
         assert reason == "locked"
+
+    def test_own_value_after_reset_tracker_does_not_replace_the_original(
+        self, tmp_path, kodi_stubs,
+    ):
+        tracker = _make_tracker(tmp_path)
+        self._scan(tracker, _make_movie_item(plot="Scraper plot"), ("plot",),
+                   tmdb=_tmdb_movie_response(plot="Fresh plot"))
+        tracker.clear_field_status()
+        tracker.start_new_cycle()
+        upd, _f = self._scan(tracker, _make_movie_item(plot="Fresh plot"), ("plot",),
+                             tmdb=_tmdb_movie_response(plot="Newer plot"))
+        keep = self._keep(tracker)
+        tracker.close()
+
+        assert _written(upd, "plot") == "Newer plot"
+        assert keep["plot"]["original"] == "Scraper plot"

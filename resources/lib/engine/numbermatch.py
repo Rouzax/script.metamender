@@ -338,23 +338,31 @@ def match_episode_by_number(
             note = _log_rejected(name, site, verdict, kept, identity)
             if note is not None:
                 notes.append(note)
-    # The note describes the latest completed check: the sites that rejected
-    # their candidate, or nothing. A match that passes clears it below.
-    ctx.tracker.upsert_item(
-        ctx.media_type.name, identity, match_note=json.dumps(notes) if notes else "",
-    )
 
     tmdb_ep = tmdb_verdict.episode
     tvdb_ep = tvdb_verdict.episode
     cross_tvdb = cross.get("tvdb_id")
+    conflict: dict[str, Any] | None = None
+    if tmdb_ep and tvdb_ep and cross_tvdb and str(cross_tvdb) != tvdb_ep.ep_id:
+        conflict = {
+            "site": "conflict", "tmdb_id": tmdb_ep.ep_id,
+            "tmdb_tvdb_id": str(cross_tvdb), "tvdb_id": tvdb_ep.ep_id,
+        }
+        notes.append(conflict)
+    # The note describes the latest completed check, a site that passed
+    # included: the sites that rejected their candidate, a conflict between
+    # two passed sites, or nothing.
+    ctx.tracker.upsert_item(
+        ctx.media_type.name, identity, match_note=json.dumps(notes) if notes else "",
+    )
     if recheck:
         _drop_match(ctx, identity, ids, kodi_imdb)
-    if tmdb_ep and tvdb_ep and cross_tvdb and str(cross_tvdb) != tvdb_ep.ep_id:
+    if conflict is not None:
         log.info(
             "TMDB and TheTVDB number matches name different episodes, neither used",
             event="scan.number_match_conflict", identity=identity,
-            season=kept.season, episode=kept.number,
-            tmdb_id=tmdb_ep.ep_id, tmdb_tvdb_id=cross_tvdb, tvdb_id=tvdb_ep.ep_id,
+            season=kept.season, episode=kept.number, tmdb_id=conflict["tmdb_id"],
+            tmdb_tvdb_id=conflict["tmdb_tvdb_id"], tvdb_id=conflict["tvdb_id"],
         )
         return
     if not tmdb_ep and not tvdb_ep:
@@ -367,7 +375,7 @@ def match_episode_by_number(
     ids.number_matched = True
     ctx.tracker.upsert_item(
         ctx.media_type.name, identity, tmdb_id=ids.tmdb, tmdb_season=ids.tmdb_season,
-        tvdb_id=ids.tvdb, imdb_id=ids.imdb, number_matched=1, match_note="",
+        tvdb_id=ids.tvdb, imdb_id=ids.imdb, number_matched=1,
     )
     log.debug(
         "Episode matched by number",

@@ -572,15 +572,19 @@ def _keep_originals(
     fs_map: dict[str, dict[str, Any]],
 ) -> None:
     """Keep the value each written field held before this scan replaced it,
-    unless that value was metamender's own (its fingerprint is the field's
-    written_value): then the kept original, from before metamender's first
-    write, stays. A scraper's or user's value since then replaces it. A field
+    unless that value was metamender's own (its fingerprint is the one
+    metamender last wrote: field_keep's written_fp, which survives Reset
+    tracker, else field_status's written_value): then the kept original,
+    from before metamender's first write, stays. A scraper's or user's value since then replaces it. A field
     filled from empty keeps "" or [] by the written value's type, so Restore
     can clear it. Rating slots get no original: the scraper's slots stay
     beside metamender's."""
-    for f in sorted(written - _RATING_FIELDS):
+    fields = sorted(written - _RATING_FIELDS)
+    keep = tracker.get_keep(media_type, identity) if fields else {}
+    for f in fields:
         current = _kodi_form(item.get(f))
-        if fingerprint(current) == fs_map.get(f, {}).get("written_value"):
+        ours = (keep.get(f) or {}).get("written_fp") or fs_map.get(f, {}).get("written_value")
+        if fingerprint(current) == ours:
             continue
         if current is None:
             current = [] if isinstance(fields_to_write.get(f), list) else ""
@@ -1281,6 +1285,11 @@ def run_scan(
         # field's value, so the same blank does not trigger it again.
         for f in refills - written:
             provenance[f] = fingerprint(_kodi_form(item.get(f)))
+        # The same fingerprints in field_keep, which Reset tracker keeps, so
+        # _keep_originals still knows metamender's own value after a reset.
+        for f, fp in provenance.items():
+            if f not in _RATING_FIELDS:
+                tracker.set_written_fp(media_type.name, identity, f, fp)
         if slot_fps and _RATING_FIELDS & written:
             merged = dict(owned_slots)
             merged.update(slot_fps)

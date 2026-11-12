@@ -338,3 +338,23 @@ def test_rejection_writes_a_match_note_and_a_pass_clears_it(tracker, providers):
     row = tracker.get_item("episode", ID)
     assert row["number_matched"] == 1
     assert row["match_note"] == ""
+
+
+def test_rejection_beside_a_passed_site_keeps_its_note(tracker, providers):
+    import json
+
+    providers.season.return_value = SHIFTED_TMDB
+    _run(_ctx(tracker))
+    row = tracker.get_item("episode", ID)
+    assert row["number_matched"] == 1 and row["tvdb_id"] == "702"
+    assert [n["site"] for n in json.loads(row["match_note"])] == ["tmdb"]
+
+
+def test_conflict_writes_a_match_note(tracker, providers):
+    import json
+
+    providers.cross.return_value = {"tvdb_id": "111"}
+    _run(_ctx(tracker))
+    note = json.loads(tracker.get_item("episode", ID)["match_note"])
+    assert note == [{"site": "conflict", "tmdb_id": "502", "tmdb_tvdb_id": "111",
+                     "tvdb_id": "702"}]
