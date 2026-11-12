@@ -24,16 +24,16 @@ def db(tmp_path):
     tracker.close()
 
 
-def _setup(db, field, original, written, *, has_original=True):
+def _setup(db, field, original, written):
     """An item whose `field` MetaMender replaced `original` with `written`."""
-    if has_original:
-        db.keep_original("movie", IDENT, field, original)
+    db.keep_original("movie", IDENT, field, original)
     db.set_written_fp("movie", IDENT, field, fingerprint(written))
     db.commit()
 
 
 def _run(db, field, current, *, write=True):
-    with patch.object(details.kodi, "get_item_by_id", return_value={field: current}), \
+    item = {field: current, "title": "Heat"}
+    with patch.object(details.kodi, "get_item_by_id", return_value=item), \
             patch.object(details.kodi, "update_item", return_value=write) as upd:
         result = details.restore_field(db, MOVIE, 7, IDENT, field)
     return result, upd
@@ -44,7 +44,8 @@ def test_restore_writes_the_original_and_locks(db):
     result, upd = _run(db, "plot", "new plot")
     assert result == "restored"
     upd.assert_called_once()
-    assert upd.call_args.args[:2] == (7, MOVIE)
+    # The title Kodi holds now, as update_item names the item in its log.
+    assert upd.call_args.args[:3] == (7, MOVIE, "Heat")
     assert upd.call_args.kwargs["plot"] == "old plot"
     keep = db.get_keep("movie", IDENT)["plot"]
     assert keep["locked"] is True
@@ -76,8 +77,9 @@ def test_ratings_are_never_restorable(db):
         keep = db.get_keep("movie", IDENT)
         assert details.can_restore(field, 7.0, {}, keep) is False
         result, upd = _run(db, field, 7.0)
-        assert result == "changed"
+        assert result == details.NOT_RESTORABLE
         upd.assert_not_called()
+        assert db.get_keep("movie", IDENT)[field]["locked"] is False
 
 
 def test_failed_write_does_not_lock(db):
@@ -98,7 +100,8 @@ def test_restore_after_reset_uses_written_value(db):
 
 
 def test_no_original_is_not_restorable(db):
-    _setup(db, "plot", None, "new plot", has_original=False)
+    db.set_written_fp("movie", IDENT, "plot", fingerprint("new plot"))
+    db.commit()
     keep = db.get_keep("movie", IDENT)
     assert details.can_restore("plot", "new plot", {}, keep) is False
 
@@ -209,7 +212,7 @@ _LANG = {
     32344: "A scan is already running",
     32345: "Item not found",
     32585: "{} · Season {}, episode {}",
-    32590: "The value changed since this window opened, so nothing was restored.",
+    32590: _PO_STRINGS[32590],
     32591: "Kodi did not accept the restore.",
     32592: "Could not read this item's details.",
     32595: _PO_STRINGS[32595],
@@ -239,6 +242,10 @@ def opened(tmp_path, monkeypatch):
     shown = []
     notes = []
     calls = {"update_now": [], "acquire": 0, "release": 0}
+    opened_settings = {
+        "enabled_fields": frozenset({"plot", "title", "main_title", "genre", "mpaa"}),
+        "cert_country": "NL",
+    }
 
     def get_item(media_type, kodi_id):
         item = items.get(kodi_id)
@@ -251,7 +258,7 @@ def opened(tmp_path, monkeypatch):
     def release():
         calls["release"] += 1
 
-    monkeypatch.setattr(details, "lang", lambda i: _LANG.get(i, ""))
+    monkeypatch.setattr(details, "lang", lambda i: _LANG.get(i, _PO_STRINGS.get(i, "")))
     from resources.lib.ui import details_model
     monkeypatch.setattr(details_model, "lang", lambda i: _PO_STRINGS.get(i, ""))
     monkeypatch.setattr(details, "notify", notes.append)
@@ -262,8 +269,8 @@ def opened(tmp_path, monkeypatch):
         "sources": [{"path": "/series/", "language": "nl-NL"}],
     })
     monkeypatch.setattr(details, "_load_settings", lambda: {
-        "enabled_fields": frozenset({"plot", "title", "main_title", "genre", "mpaa"}),
-        "stale_threshold_days": 365,
+        "enabled_fields": opened_settings["enabled_fields"],
+        "stale_threshold_days": 365, "cert_country": opened_settings["cert_country"],
     })
     monkeypatch.setattr(details, "language_name", lambda code: {"nl-NL": "Dutch"}.get(code, code))
     monkeypatch.setattr(details, "kodi_ui_language", lambda: "en-US")
@@ -275,7 +282,8 @@ def opened(tmp_path, monkeypatch):
     from resources.lib.ui import details_window
     monkeypatch.setattr(details_window, "show_details_window",
                         lambda session, view: shown.append((session, view)))
-    return {"db_path": db_path, "shown": shown, "notes": notes, "calls": calls}
+    return {"db_path": db_path, "shown": shown, "notes": notes, "calls": calls,
+            "settings": opened_settings}
 
 
 def _keys(view):
@@ -487,3 +495,138 @@ def test_reload_of_a_removed_item_says_not_found(opened, monkeypatch):
     monkeypatch.setattr(details.kodi, "get_item_by_id", lambda mt, i: None)
     assert session.reload() is None
     assert opened["notes"] == ["Item not found"]
+
+
+def test_restore_show_title_tells_when_the_episodes_could_not_follow(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "backfill.db"))
+    tracker.upsert_item("tvshow", "tmdb:1", "Kwak")
+    tracker.keep_original("tvshow", "tmdb:1", "title", "Alfred J. Kwak")
+    tracker.set_written_fp("tvshow", "tmdb:1", "title", fingerprint("Alfred Jodocus Kwak"))
+    tracker.commit()
+    with patch.object(details.kodi, "get_item_by_id",
+                      return_value={"title": "Alfred Jodocus Kwak"}), \
+            patch.object(details.kodi, "update_item", return_value=True), \
+            patch.object(tracker, "rename_show_episodes", return_value=None), \
+            patch.object(details, "log") as log:
+        result = details.restore_field(tracker, TVSHOW, 5, "tmdb:1", "title")
+    assert result == details.EPISODES_NOT_MOVED
+    events = [c.kwargs.get("event") for c in log.warning.call_args_list]
+    assert "details.rekey_failed" in events
+    # The restore itself stands: Kodi holds the original under a lock.
+    assert tracker.get_keep("tvshow", "tmdb:1")["title"]["locked"] is True
+    tracker.close()
+
+
+def _locked_genre(opened):
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=7)
+    tracker.set_locked("movie", "tmdb:949", "genre", True)
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    session, view = opened["shown"][0]
+    return session, next(r for r in view.rows if r.key == "genre")
+
+
+def test_session_restore_episode_rekey_failure_tells_the_user(opened, monkeypatch):
+    session, row = _restorable(opened)
+    monkeypatch.setattr(details, "restore_field",
+                        lambda *a, **k: details.EPISODES_NOT_MOVED)
+    session.run_action(row)
+    assert opened["notes"] == [_PO_STRINGS[32605]]
+
+
+def test_session_restore_of_a_rating_is_a_plain_no(opened, monkeypatch):
+    session, row = _restorable(opened)
+    monkeypatch.setattr(details, "restore_field",
+                        lambda *a, **k: details.NOT_RESTORABLE)
+    session.run_action(row)
+    assert opened["notes"] == [_PO_STRINGS[32606]]
+
+
+def test_session_unlock_while_a_scan_runs_says_so_without_waiting(opened):
+    session, row = _locked_genre(opened)
+    opened["calls"]["lock_free"] = False
+    with patch.object(details, "unlock_field") as unlock:
+        session.run_action(row)
+    unlock.assert_not_called()
+    assert opened["notes"] == ["A scan is already running"]
+    assert opened["calls"]["release"] == 0
+
+
+def test_session_unlock_holds_the_scan_lock(opened):
+    session, row = _locked_genre(opened)
+    session.run_action(row)
+    assert opened["calls"]["acquire"] == 1 and opened["calls"]["release"] == 1
+    assert opened["notes"] == []
+
+
+def test_certification_listed_only_with_a_usable_country_preset(opened):
+    opened["settings"]["cert_country"] = None
+    details.open_details("movie", "7")
+    _session, view = opened["shown"][0]
+    assert "mpaa" not in _keys(view)
+    opened["settings"]["cert_country"] = "XX"
+    details.open_details("movie", "7")
+    _session, view = opened["shown"][1]
+    assert "mpaa" not in _keys(view)
+
+
+def test_adoptable_title_keyed_row_lists_the_title_the_scan_manages(opened):
+    """The scan adopts the row under tmdb:949 first, and then manages the
+    title, which a title-keyed identity would not."""
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "Heat (1995)", "Heat", kodi_id=7, tmdb_id="949")
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    session, view = opened["shown"][0]
+    assert session.identity == "Heat (1995)"
+    assert "title" in _keys(view)
+
+
+def test_locked_field_of_a_switched_off_group_is_listed_without_a_next_scan(opened):
+    opened["settings"]["enabled_fields"] = frozenset({"plot"})
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=7)
+    # Locked while the group was on: the scans then recorded the lock.
+    tracker.set_locked("movie", "tmdb:949", "genre", True)
+    tracker.record_field_reason("movie", "tmdb:949", "genre", "locked")
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    session, view = opened["shown"][0]
+    assert set(_keys(view)) == {"ids", "plot", "genre"}
+    row = next(r for r in view.rows if r.key == "genre")
+    assert row.action == "unlock"
+    session.run_action(row)
+    row = next(r for r in session.load().rows if r.key == "genre")
+    assert row.action == ""
+    assert row.hint == _PO_STRINGS[32602]
+
+
+def test_stale_identity_after_an_adoption_is_resolved_on_reload(opened):
+    """A scan adopted the row under a new identity while the window was
+    open: the press finds nothing under the old one and says so neutrally,
+    and the reload that follows finds the row, so the next press works."""
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "Heat", "Heat", kodi_id=7, tmdb_id="949")
+    tracker.keep_original("movie", "Heat", "plot", "old plot")
+    tracker.set_written_fp("movie", "Heat", "plot", fingerprint("new plot"))
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    session, view = opened["shown"][0]
+    row = next(r for r in view.rows if r.key == "plot")
+    tracker = TrackerDB(opened["db_path"])
+    assert tracker.adopt_identity("movie", "tmdb:949", 7) == "Heat"
+    tracker.close()
+    with patch.object(details.kodi, "update_item", return_value=True) as upd:
+        session.run_action(row)
+        upd.assert_not_called()
+        assert opened["notes"] == [_PO_STRINGS[32590]]
+        assert "changed" not in _PO_STRINGS[32590].split(":")[0]
+        view = session.reload()
+        assert session.identity == "tmdb:949"
+        session.run_action(next(r for r in view.rows if r.key == "plot"))
+    assert upd.call_args.kwargs["plot"] == "old plot"

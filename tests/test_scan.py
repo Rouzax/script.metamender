@@ -15,7 +15,7 @@ from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
 from resources.lib.engine.protect import fingerprint
 from resources.lib.engine.scan import (
     _extract_fields,
-    _extract_ids,
+    extract_ids,
     _item_title,
     _plan_writes,
     run_scan,
@@ -224,27 +224,27 @@ def _tmdb_episode_data(**overrides):
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: _content_age_days
+# Unit tests: content_age_days
 # ---------------------------------------------------------------------------
 
 
 def test_content_age_days_old_content():
-    from resources.lib.engine.scan import _content_age_days
+    from resources.lib.engine.scan import content_age_days
     item = {"premiered": "2000-01-01"}
-    assert _content_age_days(item, MOVIE, "2020-01-01") == (
+    assert content_age_days(item, MOVIE, "2020-01-01") == (
         date.fromisoformat("2020-01-01") - date.fromisoformat("2000-01-01")
     ).days
 
 
 def test_content_age_days_missing_date_is_none():
-    from resources.lib.engine.scan import _content_age_days
-    assert _content_age_days({"premiered": ""}, MOVIE, "2020-01-01") is None
-    assert _content_age_days({}, MOVIE, "2020-01-01") is None
+    from resources.lib.engine.scan import content_age_days
+    assert content_age_days({"premiered": ""}, MOVIE, "2020-01-01") is None
+    assert content_age_days({}, MOVIE, "2020-01-01") is None
 
 
 def test_content_age_days_bare_year_is_none():
-    from resources.lib.engine.scan import _content_age_days
-    assert _content_age_days({"premiered": "2019"}, MOVIE, "2020-01-01") is None
+    from resources.lib.engine.scan import content_age_days
+    assert content_age_days({"premiered": "2019"}, MOVIE, "2020-01-01") is None
 
 
 # ---------------------------------------------------------------------------
@@ -4624,7 +4624,7 @@ class TestExtractIds:
         item = {"uniqueid": {
             "tmdb": "123", "imdb": "tt0012345", "tvdb": "80767", "unknown": "42",
         }}
-        assert _extract_ids(item) == ("123", "tt0012345", "80767", "42")
+        assert extract_ids(item) == ("123", "tt0012345", "80767", "42")
 
     @pytest.mark.parametrize("bogus", [
         "", "None", "0", "none", "abc", "12a", " ", "-1", "00",
@@ -4637,26 +4637,26 @@ class TestExtractIds:
     ])
     def test_bogus_numeric_ids_dropped(self, bogus):
         item = {"uniqueid": {"tmdb": bogus, "tvdb": bogus, "unknown": bogus}}
-        assert _extract_ids(item) == (None, None, None, None)
+        assert extract_ids(item) == (None, None, None, None)
 
     @pytest.mark.parametrize("bogus", ["", "None", "0", "12345", "nm0000001", "tt", "ttabc", "tt١٢"])
     def test_bogus_imdb_ids_dropped(self, bogus):
-        assert _extract_ids({"uniqueid": {"imdb": bogus}})[1] is None
+        assert extract_ids({"uniqueid": {"imdb": bogus}})[1] is None
 
     def test_alternate_keys_and_surrounding_space(self):
         item = {"uniqueid": {"themoviedb": " 77 ", "thetvdb": "88"}}
-        assert _extract_ids(item) == ("77", None, "88", None)
+        assert extract_ids(item) == ("77", None, "88", None)
 
     def test_bogus_primary_key_falls_back_to_alternate(self):
         item = {"uniqueid": {"tmdb": "None", "themoviedb": "77"}}
-        assert _extract_ids(item)[0] == "77"
+        assert extract_ids(item)[0] == "77"
 
     def test_integer_ids_accepted(self):
-        assert _extract_ids({"uniqueid": {"tmdb": 77}})[0] == "77"
+        assert extract_ids({"uniqueid": {"tmdb": 77}})[0] == "77"
 
     def test_no_uniqueid(self):
-        assert _extract_ids({}) == (None, None, None, None)
-        assert _extract_ids({"uniqueid": None}) == (None, None, None, None)
+        assert extract_ids({}) == (None, None, None, None)
+        assert extract_ids({"uniqueid": None}) == (None, None, None, None)
 
     @patch("resources.lib.data.kodi.get_all_items")
     @patch("resources.lib.providers.tmdb.fetch_tvshow")
@@ -5795,13 +5795,13 @@ class TestMainTitles:
     in the folder language only, and only for items keyed on a provider id."""
 
     def test_candidates(self):
-        from resources.lib.engine.scan import _candidate_fields
+        from resources.lib.engine.scan import candidate_fields
 
-        assert "title" not in _candidate_fields(MOVIE, frozenset({"title"}))
-        assert "title" in _candidate_fields(MOVIE, frozenset({"main_title"}))
-        assert "title" in _candidate_fields(TVSHOW, frozenset({"main_title"}))
-        assert "title" in _candidate_fields(EPISODE, frozenset({"title"}))
-        assert "title" not in _candidate_fields(EPISODE, frozenset({"main_title"}))
+        assert "title" not in candidate_fields(MOVIE, frozenset({"title"}))
+        assert "title" in candidate_fields(MOVIE, frozenset({"main_title"}))
+        assert "title" in candidate_fields(TVSHOW, frozenset({"main_title"}))
+        assert "title" in candidate_fields(EPISODE, frozenset({"title"}))
+        assert "title" not in candidate_fields(EPISODE, frozenset({"main_title"}))
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")
@@ -6102,9 +6102,9 @@ class TestCertifications:
         assert _written(upd, "mpaa") == "NL:16"
 
     def test_episode_never_gets_mpaa(self):
-        from resources.lib.engine.scan import _candidate_fields
+        from resources.lib.engine.scan import candidate_fields
 
-        assert "mpaa" not in _candidate_fields(EPISODE, frozenset({"mpaa", "plot"}))
+        assert "mpaa" not in candidate_fields(EPISODE, frozenset({"mpaa", "plot"}))
 
     def test_changed_country_rebaselines_mpaa_only(self):
         from resources.lib.engine.scan import settings_fingerprint as sfp

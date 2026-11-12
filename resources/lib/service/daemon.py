@@ -127,7 +127,7 @@ _FIELD_TOGGLES = {
     "enable_plots": frozenset({"plot"}),
     "enable_episode_titles": frozenset({"title"}),
     # Show and movie titles: "main_title" stands for their "title" field, so
-    # the episode-title toggle does not switch them (see _candidate_fields).
+    # the episode-title toggle does not switch them (see candidate_fields).
     "enable_main_titles": frozenset({"main_title"}),
     "enable_certifications": frozenset({"mpaa"}),
     "enable_credits": frozenset({"director", "writer"}),

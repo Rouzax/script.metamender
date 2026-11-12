@@ -1,6 +1,7 @@
 """Tests for engine/numbermatch.py: matching id-less episodes by number."""
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -318,9 +319,7 @@ def test_recheck_drops_match_when_show_is_untracked(tracker, providers):
     assert tracker.get_item("episode", ID)["number_matched"] == 0
 
 
-def test_rejection_writes_a_match_note_and_a_pass_clears_it(tracker, providers):
-    import json
-
+def test_rejection_writes_a_match_note_and_a_pass_replaces_it(tracker, providers):
     providers.season.return_value = SHIFTED_TMDB
     providers.numbers.return_value = _tvdb_numbers([("702", 2, "Iets anders", "2022-10-30")])
     _run(_ctx(tracker))
@@ -337,24 +336,59 @@ def test_rejection_writes_a_match_note_and_a_pass_clears_it(tracker, providers):
     _run(_ctx(tracker, reset=True), stored=tracker.get_item("episode", ID))
     row = tracker.get_item("episode", ID)
     assert row["number_matched"] == 1
-    assert row["match_note"] == ""
+    # Only how the ids were found is left: no rejection.
+    assert json.loads(row["match_note"]) == [
+        {"site": "tmdb", "matched": "title"}, {"site": "tvdb", "matched": "title"},
+    ]
 
 
 def test_rejection_beside_a_passed_site_keeps_its_note(tracker, providers):
-    import json
-
     providers.season.return_value = SHIFTED_TMDB
     _run(_ctx(tracker))
     row = tracker.get_item("episode", ID)
     assert row["number_matched"] == 1 and row["tvdb_id"] == "702"
-    assert [n["site"] for n in json.loads(row["match_note"])] == ["tmdb"]
+    rejected = [n["site"] for n in json.loads(row["match_note"]) if "matched" not in n]
+    assert rejected == ["tmdb"]
 
 
 def test_conflict_writes_a_match_note(tracker, providers):
-    import json
-
     providers.cross.return_value = {"tvdb_id": "111"}
     _run(_ctx(tracker))
     note = json.loads(tracker.get_item("episode", ID)["match_note"])
     assert note == [{"site": "conflict", "tmdb_id": "502", "tmdb_tvdb_id": "111",
                      "tvdb_id": "702"}]
+
+
+def test_match_note_records_how_each_id_was_found(tracker, providers):
+    # TMDB's number 2 agrees on the date only; TheTVDB has no list, so its
+    # id comes from TMDB's cross-id list.
+    providers.season.return_value = _tmdb_season([("502", 2, "Anders", "2022-10-23")])
+    providers.numbers.return_value = None
+    _run(_ctx(tracker))
+    row = tracker.get_item("episode", ID)
+    assert row["number_matched"] == 1
+    assert json.loads(row["match_note"]) == [
+        {"site": "tmdb", "matched": "date"}, {"site": "tvdb", "matched": "tmdb_list"},
+    ]
+
+
+def test_conflict_records_no_pass(tracker, providers):
+    providers.cross.return_value = {"tvdb_id": "111"}
+    _run(_ctx(tracker))
+    note = json.loads(tracker.get_item("episode", ID)["match_note"])
+    assert [n["site"] for n in note] == ["conflict"]
+
+
+def test_rescrape_clears_an_old_match_note(tracker, providers):
+    """An episode that now has an id of its own is never matched by number
+    again, so the note of its last check goes."""
+    for stored_match in (True, False):
+        if stored_match:
+            stored = _stored_match(tracker, match_note='[{"site": "conflict"}]')
+        else:
+            tracker.clear_number_match("episode", ID)
+            tracker.upsert_item("episode", ID, match_note='[{"site": "tmdb"}]')
+            stored = tracker.get_item("episode", ID)
+        _run(_ctx(tracker), ids=_ids(tmdb="900"), stored=stored,
+             kodi_ids=("900", None, None, None))
+        assert tracker.get_item("episode", ID)["match_note"] == ""

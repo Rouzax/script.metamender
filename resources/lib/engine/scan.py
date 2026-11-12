@@ -141,16 +141,16 @@ from resources.lib.engine.resolve import (
 from resources.lib.engine.scanctx import (
     _CHAIN_FIELDS,
     _KODI_TO_TMDB,
-    _LANGUAGE_FIELDS,
-    _RATING_FIELDS,
     _TMDB_TO_KODI,
     FALLBACK_TVDB_FIRST,
+    LANGUAGE_FIELDS,
+    RATING_FIELDS,
     TEXT_FOLLOW_SCRAPER,
     _CertConfig,
-    _extract_ids,
-    _kodi_form,
     _Pacer,
     _ScanCtx,
+    extract_ids,
+    kodi_form,
 )
 from resources.lib.engine.text import (
     _resolve_ratings,
@@ -182,7 +182,7 @@ def settings_fingerprint(
     shows and episodes (movies ask TMDB only); for every other field, one
     TMDB step, the folder language.
     """
-    if field in _RATING_FIELDS:
+    if field in RATING_FIELDS:
         inputs: dict[str, Any] = {
             "rating_source": settings.get("rating_source", FOLLOW_SCRAPER),
         }
@@ -241,7 +241,7 @@ def _make_stats() -> dict[str, Any]:
     }
 
 
-def _content_age_days(
+def content_age_days(
     item: dict[str, Any], media_type: MediaType, today: str
 ) -> int | None:
     """Age of the content in days from its release date, or None if unknown.
@@ -280,7 +280,7 @@ def _extract_fields(
     """Provider values for the requested fields, in the form Kodi stores.
 
     Skips "mpaa" (Phase 8) and the named-slot rating/votes (handled by
-    build_ratings). Values are put in Kodi's stored form (_kodi_form), then
+    build_ratings). Values are put in Kodi's stored form (kodi_form), then
     empty ones are dropped, runtime is converted
     minutes -> seconds, and firstaired is kept only as a full ISO date (bare
     years are dropped). Title and plot arrive from the provider chain, which
@@ -301,7 +301,7 @@ def _extract_fields(
         if kodi_key in ("rating", "votes"):
             continue
 
-        value = _kodi_form(provider_data.get(tmdb_key))
+        value = kodi_form(provider_data.get(tmdb_key))
 
         # Skip empty provider values
         if value is None:
@@ -403,7 +403,7 @@ def _owned_slots(
     return owned
 
 
-def _blanked(item: dict[str, Any], field: str, fs: dict[str, Any]) -> bool:
+def blanked(item: dict[str, Any], field: str, fs: dict[str, Any]) -> bool:
     """Kodi holds an empty or placeholder value where metamender last wrote
     something else: a Kodi refresh or rescrape wiped the fill.
 
@@ -413,10 +413,10 @@ def _blanked(item: dict[str, Any], field: str, fs: dict[str, Any]) -> bool:
     refill found nothing) does not trigger again. Ratings are a slot map, not
     one value, and Kodi's refresh rewrites them rather than blanking them.
     """
-    if field in _RATING_FIELDS:
+    if field in RATING_FIELDS:
         return False
     written = fs.get("written_value")
-    current = _kodi_form(item.get(field))
+    current = kodi_form(item.get(field))
     return written is not None and is_blank(current) and fingerprint(current) != written
 
 
@@ -439,7 +439,7 @@ def _reopened_fallbacks(
         written = fs.get("written_value")
         if (
             fs.get("from_fallback") and written is not None
-            and fingerprint(_kodi_form(item.get(f))) == written
+            and fingerprint(kodi_form(item.get(f))) == written
         ):
             reopened.add(f)
     return reopened
@@ -472,7 +472,7 @@ def _resolve_fields(
     tmdb_data = {} if tmdb_transient or not primary.tmdb else primary.tmdb
 
     for f in fields:
-        if f in _RATING_FIELDS or f == "mpaa":
+        if f in RATING_FIELDS or f == "mpaa":
             # Ratings and certifications have their own producers.
             continue
         key = _KODI_TO_TMDB.get(f, f)
@@ -560,7 +560,7 @@ def _field_reason(
     # build_ratings returns no map both when Kodi's slots already hold the
     # answer and when there was nothing to write, so slots in Kodi are read
     # as "unchanged" and none as "nothing".
-    if f in _RATING_FIELDS and item.get("ratings"):
+    if f in RATING_FIELDS and item.get("ratings"):
         return REASON_UNCHANGED
     return REASON_NOTHING
 
@@ -582,10 +582,10 @@ def _keep_originals(
     value since then replaces it. A field filled from empty keeps "" or []
     by the written value's type, so Restore can clear it. Rating slots get
     no original: the scraper's slots stay beside metamender's."""
-    fields = sorted(written - _RATING_FIELDS)
+    fields = sorted(written - RATING_FIELDS)
     keep = tracker.get_keep(media_type, identity) if fields else {}
     for f in fields:
-        current = _kodi_form(item.get(f))
+        current = kodi_form(item.get(f))
         ours = (keep.get(f) or {}).get("written_fp") or fs_map.get(f, {}).get("written_value")
         if fingerprint(current) == ours:
             continue
@@ -670,7 +670,7 @@ def _resolve_cert(
     preset = cfg.preset
     current = str(item.get("mpaa") or "")
     written = fs.get("written_value")
-    ours = written is not None and fingerprint(_kodi_form(current)) == written
+    ours = written is not None and fingerprint(kodi_form(current)) == written
     placeholder = ours and fs.get("source") == "fallback"
     # A derived rating metamender wrote is in the configured system too, but
     # it is not the item's own: it stays on its monthly rechecks.
@@ -722,7 +722,7 @@ def _own_bare(current: str, prefix: str) -> str:
     return parse_mpaa(current)[1]
 
 
-def _candidate_fields(media_type: MediaType, enabled_fields: frozenset[str]) -> list[str]:
+def candidate_fields(media_type: MediaType, enabled_fields: frozenset[str]) -> list[str]:
     """Fields this pass manages: enabled, backfilled for the media type, and
     known to the providers. An episode's title is enabled as "title", a show's
     or movie's as "main_title", since they have separate toggles."""
@@ -737,7 +737,7 @@ def _candidate_fields(media_type: MediaType, enabled_fields: frozenset[str]) -> 
     return sorted(fields)
 
 
-def _item_fields(candidates: list[str], media_type: MediaType, identity: str) -> list[str]:
+def item_fields(candidates: list[str], media_type: MediaType, identity: str) -> list[str]:
     """The pass's fields for one item. A show or movie keyed on its title
     ("title (year)", no tmdb or imdb id) does not get its title managed: a
     new title would make it a new tracker item."""
@@ -924,7 +924,7 @@ def run_scan(
             if media_type.name == "episode" else frozenset()
         ),
     )
-    candidates = _candidate_fields(media_type, enabled_fields)
+    candidates = candidate_fields(media_type, enabled_fields)
     if ctx.cert is not None:
         candidates = sorted(set(candidates) | {"mpaa"})
     forgotten = tracker.forget_disabled_fields(media_type.name, candidates)
@@ -1005,7 +1005,7 @@ def run_scan(
         ).strip()
         fill_only = (
             frozenset() if source.get("language") or ctx.default_language_set
-            else _LANGUAGE_FIELDS
+            else LANGUAGE_FIELDS
         )
         if fill_only and "language_unconfigured" not in ctx.logged_once:
             ctx.logged_once.add("language_unconfigured")
@@ -1016,7 +1016,7 @@ def run_scan(
             )
 
         # Extract external IDs
-        kodi_ids = _extract_ids(item)
+        kodi_ids = extract_ids(item)
         # An episode without ids of its own can still be matched by its
         # number under the show (engine/numbermatch.py).
         if not any(kodi_ids) and media_type.name != "episode":
@@ -1048,15 +1048,15 @@ def run_scan(
 
         # --- Per-field maturity decisions (see maturity.decide_field) ---
         today = date.today().isoformat()
-        age = _content_age_days(item, media_type, today)
+        age = content_age_days(item, media_type, today)
         fs_map = tracker.get_field_status_map(media_type.name, identity)
         threshold = settings.get("stale_threshold_days", 365)
 
-        fields = _item_fields(candidates, media_type, identity)
+        fields = item_fields(candidates, media_type, identity)
         # A locked field is the user's: never fetched, written or sampled,
         # on Update now and after a settings change too. Its reason is
         # recorded each scan it would have been considered.
-        locked = (tracker.locked_fields(media_type.name, identity) - _RATING_FIELDS) & set(fields)
+        locked = (tracker.locked_fields(media_type.name, identity) - RATING_FIELDS) & set(fields)
         if locked:
             fields = [f for f in fields if f not in locked]
             for f in sorted(locked):
@@ -1095,7 +1095,7 @@ def run_scan(
                 )
                 if decisions[f] == FETCH_NOW and count and fs.get("from_fallback"):
                     rechecks.add(f)
-                elif decisions[f] == FINAL and _blanked(item, f, fs):
+                elif decisions[f] == FINAL and blanked(item, f, fs):
                     decisions[f] = FETCH_NOW
                     refills.add(f)
                 continue
@@ -1115,7 +1115,7 @@ def run_scan(
             )
             if base == FINAL and decisions[f] == FETCH_NOW:
                 rechecks.add(f)
-            elif decisions[f] == FINAL and _blanked(item, f, fs):
+            elif decisions[f] == FINAL and blanked(item, f, fs):
                 decisions[f] = FETCH_NOW
                 refills.add(f)
 
@@ -1242,7 +1242,7 @@ def run_scan(
         ratings_votes: int | None = None
         owned_slots = _owned_slots(fs_map, item.get("ratings") or {})
         slot_fps: dict[str, str] = {}
-        rating_due = [f for f in nonfinal if f in _RATING_FIELDS]
+        rating_due = [f for f in nonfinal if f in RATING_FIELDS]
         if rating_due:
             (transient, new_ratings, ratings_source, ratings_votes,
              slot_fps) = _resolve_ratings(
@@ -1274,7 +1274,7 @@ def run_scan(
         attempted = set(fields_to_write)
         if "ratings" in attempted:
             attempted.discard("ratings")
-            attempted.update(_RATING_FIELDS)
+            attempted.update(RATING_FIELDS)
         write_failed = attempted - written
 
         # Provenance: the fingerprint of each value as written to Kodi. Rating
@@ -1287,16 +1287,16 @@ def run_scan(
         # A refill the provider could not fill records the blank as the
         # field's value, so the same blank does not trigger it again.
         for f in refills - written:
-            provenance[f] = fingerprint(_kodi_form(item.get(f)))
+            provenance[f] = fingerprint(kodi_form(item.get(f)))
         # The same fingerprints in field_keep, which Reset tracker keeps, so
         # _keep_originals still knows metamender's own value after a reset.
         for f, fp in provenance.items():
-            if f not in _RATING_FIELDS:
+            if f not in RATING_FIELDS:
                 tracker.set_written_fp(media_type.name, identity, f, fp)
-        if slot_fps and _RATING_FIELDS & written:
+        if slot_fps and RATING_FIELDS & written:
             merged = dict(owned_slots)
             merged.update(slot_fps)
-            for f in _RATING_FIELDS & written:
+            for f in RATING_FIELDS & written:
                 provenance[f] = json.dumps(merged, sort_keys=True)
 
         # Advance a field's clock ONLY when its own providers answered; a
@@ -1319,7 +1319,7 @@ def run_scan(
             next_due = compute_next_due(
                 new_count, ctx.schedule, premiered, threshold, today,
             )
-            if f in _RATING_FIELDS:
+            if f in RATING_FIELDS:
                 # Rating/votes are sourced from the named-slot ratings map;
                 # record the chosen slot and its votes for staleness.
                 source = ratings_source

@@ -1183,7 +1183,7 @@ msgid "Close"
 msgstr ""
 
 msgctxt "#32590"
-msgid "The value changed since this window opened, so nothing was restored."
+msgid "Nothing was restored: the item changed since this window opened."
 msgstr ""
 
 msgctxt "#32591"
@@ -1208,4 +1208,109 @@ msgstr ""
 
 msgctxt "#32596"
 msgid "Could not unlock this field."
+msgstr ""
+
+msgctxt "#32597"
+msgid "{}, matched by season and episode number (the dates agreed)"
+msgstr ""
+
+msgctxt "#32598"
+msgid "{}, matched by season and episode number (the titles agreed)"
+msgstr ""
+
+msgctxt "#32599"
+msgid "Kodi has only a TVmaze id."
+msgstr ""
+
+msgctxt "#32600"
+msgid "The sites MetaMender asks had nothing for this field."
+msgstr ""
+
+msgctxt "#32601"
+msgid "Kodi lost MetaMender's value (a refresh or a re-scrape), so the next scan fills it again."
+msgstr ""
+
+msgctxt "#32602"
+msgid "switched off"
+msgstr ""
+
+msgctxt "#32603"
+msgid "not while this field is switched off in the settings"
+msgstr ""
+
+msgctxt "#32604"
+msgid "You unlocked this field; MetaMender checks it again once the field is switched on in the settings."
+msgstr ""
+
+msgctxt "#32605"
+msgid "The show title was restored, but its episodes' records could not follow it."
+msgstr ""
+
+msgctxt "#32606"
+msgid "This field has no original to restore."
+msgstr ""
+
+msgctxt "#32607"
+msgid "Appearance"
+msgstr ""
+
+# Short month names and date formats of the details window
+msgctxt "#32610"
+msgid "Jan"
+msgstr ""
+
+msgctxt "#32611"
+msgid "Feb"
+msgstr ""
+
+msgctxt "#32612"
+msgid "Mar"
+msgstr ""
+
+msgctxt "#32613"
+msgid "Apr"
+msgstr ""
+
+msgctxt "#32614"
+msgid "May"
+msgstr ""
+
+msgctxt "#32615"
+msgid "Jun"
+msgstr ""
+
+msgctxt "#32616"
+msgid "Jul"
+msgstr ""
+
+msgctxt "#32617"
+msgid "Aug"
+msgstr ""
+
+msgctxt "#32618"
+msgid "Sep"
+msgstr ""
+
+msgctxt "#32619"
+msgid "Oct"
+msgstr ""
+
+msgctxt "#32620"
+msgid "Nov"
+msgstr ""
+
+msgctxt "#32621"
+msgid "Dec"
+msgstr ""
+
+msgctxt "#32622"
+msgid "{day} {month} {year}"
+msgstr ""
+
+msgctxt "#32623"
+msgid "{day} {month}"
+msgstr ""
+
+msgctxt "#32624"
+msgid "{} · {}"
 msgstr ""

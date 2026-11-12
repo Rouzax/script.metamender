@@ -7,9 +7,11 @@ Logging:
         - details.open_invalid (WARNING): Details asked for an unsupported
           type or a bad id
         - details.open_notfound (WARNING): The item is not in the library
-        - details.locked (INFO): Restore skipped, a scan is running
+        - details.locked (INFO): Restore or Unlock skipped, a scan is running
         - details.restored / details.restore_changed / details.restore_failed
           (cause=lock: the lock could not be saved; cause=kodi: Kodi refused)
+        - details.rekey_failed (WARNING): A show title was restored but its
+          episode rows could not be re-keyed to it
         - details.unlocked (INFO): only once the unlock is committed
         - details.error (ERROR): Reading the item or a window action raised
 """
@@ -23,15 +25,15 @@ from typing import TYPE_CHECKING, Any
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW, MediaType
+from resources.lib.data.presets import load_preset
 from resources.lib.data.sources import (
     kodi_ui_language,
     load_source_config,
     match_source,
 )
 from resources.lib.data.tracker import REASON_LOCKED, TrackerDB
-from resources.lib.engine.protect import fingerprint
-from resources.lib.engine.scan import _candidate_fields, _item_fields
-from resources.lib.engine.scanctx import _kodi_form
+from resources.lib.engine.scan import candidate_fields, item_fields
+from resources.lib.engine.scanctx import holds_written_value
 from resources.lib.service import actions
 from resources.lib.service.actions import _init_logging
 from resources.lib.service.daemon import (
@@ -58,8 +60,10 @@ RESTORABLE_EXCLUDED = frozenset({"rating", "votes", "ratings"})
 
 RESTORED = "restored"
 CHANGED = "changed"
+NOT_RESTORABLE = "not_restorable"
 LOCK_FAILED = "lock_failed"
 FAILED = "failed"
+EPISODES_NOT_MOVED = "episodes_not_moved"
 
 
 def can_restore(
@@ -67,18 +71,15 @@ def can_restore(
 ) -> bool:
     """An original is kept and Kodi still holds MetaMender's own value.
 
-    ``keep`` is the item's get_keep() map. The value is MetaMender's own when
-    its fingerprint equals the one recorded at write time; the field_status
-    ``written_value`` is the fallback because Reset tracker deletes
-    field_status but keeps field_keep.
+    ``keep`` is the item's get_keep() map; scanctx.holds_written_value
+    decides whether the value is MetaMender's own.
     """
     if field in RESTORABLE_EXCLUDED:
         return False
     entry = keep.get(field) or {}
     if not entry.get("has_original"):
         return False
-    written = entry.get("written_fp") or fs.get("written_value")
-    return written is not None and fingerprint(_kodi_form(current)) == written
+    return holds_written_value(field, current, fs, entry)
 
 
 def restore_field(
@@ -90,11 +91,15 @@ def restore_field(
     scraper changed the value, and overwriting that would lose it. The lock
     is committed before Kodi is written, so a value Kodi now holds is never
     unprotected; a lock that cannot be saved writes nothing. Returns
-    "restored", "changed" (nothing written), "lock_failed" (nothing written)
-    or "failed" (Kodi refused the write; the lock is put back as it was).
-    Provenance is left alone: the field now holds the original, not a value
-    MetaMender wrote.
+    RESTORED, NOT_RESTORABLE (a rating field, nothing written), CHANGED
+    (nothing written), LOCK_FAILED (nothing written), FAILED (Kodi refused
+    the write; the lock is put back as it was) or EPISODES_NOT_MOVED (a show
+    title was restored, but its episode rows keep the old key and start
+    over at the next scan). Provenance is left alone: the field now holds
+    the original, not a value MetaMender wrote.
     """
+    if field in RESTORABLE_EXCLUDED:
+        return NOT_RESTORABLE
     keep = tracker.get_keep(media_type.name, identity)
     fs = tracker.get_field_status_map(media_type.name, identity).get(field, {})
     item = kodi.get_item_by_id(media_type, kodi_id) or {}
@@ -129,7 +134,16 @@ def restore_field(
         # Episodes are keyed on their show's title, as after a scan's title
         # write; without the re-key they lose their rows and locks. It
         # commits the reason with it.
-        tracker.rename_show_episodes(current_title, str(original))
+        if tracker.rename_show_episodes(current_title, str(original)) is None:
+            # Nothing of the failed re-key may be committed later: a row
+            # renamed without its keep rows would lose its locks.
+            tracker.rollback()
+            log.warning(
+                "Original restored, but the episode rows kept the old show title",
+                event="details.rekey_failed", identity=identity,
+                media_type=media_type.name, field=field,
+            )
+            return EPISODES_NOT_MOVED
     else:
         try:
             tracker.commit()
@@ -200,38 +214,57 @@ class DetailsView:
 
 def _read_identity(
     tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: int
-) -> str:
-    """The item's tracker key, found the way scan._tracker_identity finds it
-    but without its writes: opening the window must change nothing, so a
-    row the next scan would adopt is read under its current identity."""
+) -> tuple[str, str]:
+    """(the key the item's rows are under now, the key the scan uses), found
+    the way scan._tracker_identity finds it but without its writes: opening
+    the window must change nothing, so a row the next scan would adopt is
+    read under its current identity. The two differ only for such a row."""
     identity = compute_identity(item, media_type)
     own = "{}|{}".format(identity, item.get("file", ""))
     if tracker.get_item(media_type.name, own) is not None:
-        return own
+        return own, own
     # An id written back to Kodi changes the identity the item computes; the
     # row stays under the old one until the next scan adopts it. Restore and
     # Unlock on the old identity are carried along by that adoption.
     adoptable = tracker.adoptable_identity(media_type.name, identity, kodi_id)
     if adoptable is not None:
-        return adoptable
+        return adoptable, identity
     row = tracker.get_item(media_type.name, identity)
     holder = row.get("kodi_id") if row else None
     if holder is None or holder == kodi_id:
-        return identity
+        return identity, identity
     other = kodi.get_item_by_id(media_type, holder)
     if other and compute_identity(other, media_type) == identity:
-        return own
-    return identity
+        return own, own
+    return identity, identity
 
 
 def managed_fields(
-    media_type: MediaType, enabled_fields: frozenset[str], identity: str
+    media_type: MediaType, enabled_fields: frozenset[str], cert_country: str | None,
+    identity: str,
 ) -> list[str]:
-    """The fields a scan manages for this item under the current settings."""
-    fields = _candidate_fields(media_type, enabled_fields)
-    if "mpaa" in enabled_fields and media_type.name in _CERT_TYPES:
+    """The fields a scan manages for this item under the current settings.
+    ``identity`` is the key the scan uses (after adopting a row). As
+    scan._cert_config decides, certifications need a country with a usable
+    preset."""
+    fields = candidate_fields(media_type, enabled_fields)
+    if ("mpaa" in enabled_fields and media_type.name in _CERT_TYPES
+            and cert_country and load_preset(cert_country) is not None):
         fields = sorted(set(fields) | {"mpaa"})
-    return _item_fields(fields, media_type, identity)
+    return item_fields(fields, media_type, identity)
+
+
+def _shown_fields(
+    media_type: MediaType, managed: list[str], fs_map: dict[str, dict[str, Any]],
+    keep: dict[str, dict[str, Any]],
+) -> list[str]:
+    """The managed fields, and a field the user locked or just unlocked
+    though the scan no longer manages it, so its lock stays in reach."""
+    known = media_type.backfill_fields | ({"mpaa"} if media_type.name in _CERT_TYPES
+                                          else set())
+    held = {f for f, e in keep.items() if e.get("locked")}
+    held |= {f for f, fs in fs_map.items() if fs.get("last_reason") == REASON_LOCKED}
+    return sorted(set(managed) | ((held & known) - RESTORABLE_EXCLUDED))
 
 
 def _heading(media_type: MediaType, item: dict[str, Any]) -> str:
@@ -273,17 +306,23 @@ class DetailsSession:
         text_language = folder or language_name(kodi_ui_language())
         tracker = TrackerDB(_get_db_path())
         try:
-            identity = _read_identity(tracker, self.media_type, item, self.kodi_id)
+            identity, scan_identity = _read_identity(
+                tracker, self.media_type, item, self.kodi_id)
             item_row = tracker.get_item(self.media_type.name, identity)
             fs_map = tracker.get_field_status_map(self.media_type.name, identity)
             keep = tracker.get_keep(self.media_type.name, identity)
         finally:
             tracker.close()
         self.identity = identity
+        managed = managed_fields(
+            self.media_type, settings["enabled_fields"], settings.get("cert_country"),
+            scan_identity,
+        )
         rows = build_rows(
             self.media_type, item, item_row, fs_map, keep, date.today().isoformat(),
             language=text_language,
-            fields=managed_fields(self.media_type, settings["enabled_fields"], identity),
+            fields=_shown_fields(self.media_type, managed, fs_map, keep),
+            managed=managed,
             threshold_days=settings["stale_threshold_days"],
         )
         return DetailsView(
@@ -313,10 +352,19 @@ class DetailsSession:
         actions.update_now(self.dbtype, str(self.kodi_id))
 
     def run_action(self, row: DetailRow) -> None:
-        """The row's button: restore the original (under the scan lock, as it
-        writes Kodi) or unlock the field."""
+        """The row's button: restore the original or unlock the field, each
+        under the scan lock. A running scan writes the tracker for long
+        stretches, so the press says so at once rather than waiting on the
+        database."""
         from resources.lib.ui.details_model import ACTION_RESTORE, ACTION_UNLOCK
 
+        if row.action not in (ACTION_RESTORE, ACTION_UNLOCK):
+            return
+        if not acquire_scan_lock():
+            log.info("A scan is already running, skipping the action",
+                     event="details.locked", action=row.action, field=row.key)
+            notify(lang(32344))  # A scan is already running
+            return
         if row.action == ACTION_UNLOCK:
             tracker = None
             unlocked = False
@@ -326,16 +374,11 @@ class DetailsSession:
             except Exception:
                 log.exception("Unlock failed", event="details.error", field=row.key)
             finally:
+                release_scan_lock()
                 if tracker is not None:
                     tracker.close()
             if not unlocked:
                 notify(lang(32596))  # Could not unlock this field
-            return
-        if row.action != ACTION_RESTORE:
-            return
-        if not acquire_scan_lock():
-            log.info("A scan is already running, skipping restore", event="details.locked")
-            notify(lang(32344))  # A scan is already running
             return
         tracker = None
         result = FAILED
@@ -351,7 +394,13 @@ class DetailsSession:
             if tracker is not None:
                 tracker.close()
         if result == CHANGED:
-            notify(lang(32590))  # The value changed since this window opened
+            # Also what a stale identity gives (a scan adopted the row while
+            # the window was open); the reload that follows finds it again.
+            notify(lang(32590))  # Nothing was restored: the item changed
+        elif result == NOT_RESTORABLE:
+            notify(lang(32606))  # This field has no original to restore
+        elif result == EPISODES_NOT_MOVED:
+            notify(lang(32605))  # The episodes' records could not follow
         elif result == LOCK_FAILED:
             notify(lang(32595))  # Could not lock the field, nothing restored
         elif result == FAILED:

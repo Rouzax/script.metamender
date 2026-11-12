@@ -33,12 +33,13 @@ from resources.lib.engine.maturity import (
     decide_field,
 )
 from resources.lib.engine.protect import fingerprint
-from resources.lib.engine.scan import _content_age_days
+from resources.lib.engine.scan import blanked, content_age_days
 from resources.lib.engine.scanctx import (
-    _LANGUAGE_FIELDS,
-    _RATING_FIELDS,
-    _extract_ids,
-    _kodi_form,
+    LANGUAGE_FIELDS,
+    RATING_FIELDS,
+    extract_ids,
+    holds_written_value,
+    kodi_form,
 )
 from resources.lib.service.details import can_restore
 from resources.lib.utils import is_empty, lang
@@ -74,8 +75,12 @@ _SOURCE_NAMES = {
 # "kodi" is a certification Kodi already held, which is the scraper's.
 _SCRAPER_SOURCE = "kodi"
 
-_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
-           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+# Short month names, January first; then "12 Nov 2026", "12 Nov" and the
+# separator between the header's two parts.
+_MONTH_STRINGS = 32610
+_LONG_DATE = 32622
+_SHORT_DATE = 32623
+_SEPARATED = 32624
 
 _WHY = {
     REASON_UNCHANGED: 32540,
@@ -88,6 +93,14 @@ _WHY = {
 _NEVER_CHECKED = 32546
 _CHANGED_SINCE = 32576
 _UNLOCKED = 32577
+_SETTLED_NOTHING = 32600
+_REFILL = 32601
+_OFF_HINT = 32602
+_OFF_NEXT = 32603
+_UNLOCKED_OFF = 32604
+_TVMAZE_ONLY = 32599
+# How a number match found an id (numbermatch's match note), "matched" key.
+_MATCHED_HOW = {"date": 32597, "title": 32598, "tmdb_list": 32555}
 
 
 @dataclass
@@ -112,12 +125,16 @@ def long_date(iso: str | None) -> str:
     d = _parse(iso)
     if d is None:
         return str(iso or "")
-    return "{} {} {}".format(d.day, _MONTHS[d.month - 1], d.year)
+    return lang(_LONG_DATE).format(day=d.day, month=_month(d), year=d.year)
 
 
 def _short_date(iso: str | None) -> str:
     d = _parse(iso)
-    return "{} {}".format(d.day, _MONTHS[d.month - 1]) if d else str(iso or "")
+    return lang(_SHORT_DATE).format(day=d.day, month=_month(d)) if d else str(iso or "")
+
+
+def _month(d: date) -> str:
+    return lang(_MONTH_STRINGS + d.month - 1)
 
 
 def _parse(iso: str | None) -> date | None:
@@ -160,17 +177,6 @@ def _value_text(field: str, item: dict[str, Any]) -> str:
     return str(value)
 
 
-def _is_mine(field: str, item: dict[str, Any], fs: dict[str, Any],
-             entry: dict[str, Any]) -> bool:
-    """Kodi still holds the value MetaMender wrote. A rating row's written
-    value is the JSON of the slots it owns, beside the scraper's own slots,
-    so any recorded write counts."""
-    if field in _RATING_FIELDS:
-        return bool(fs.get("written_value"))
-    written = entry.get("written_fp") or fs.get("written_value")
-    return written is not None and fingerprint(_kodi_form(item.get(field))) == written
-
-
 def _decision(field: str, fs: dict[str, Any], age: int | None, today: str,
               threshold: int) -> str:
     """The scan's maturity decision for the field, as engine/scan.py makes it."""
@@ -203,21 +209,33 @@ def _field_row(
     today: str,
     language: str,
     threshold: int,
+    managed: bool,
 ) -> DetailRow:
+    """``managed``: the scan checks this field under the current settings;
+    a field shown only for its lock is not, and gets no next-scan promise."""
     label = lang(_FIELD_LABELS.get(field, 0)) or field
     entry = keep.get(field) or {}
-    rating = field in _RATING_FIELDS
+    rating = field in RATING_FIELDS
     locked = bool(entry.get("locked")) and not rating
     reason = fs.get("last_reason")
     count = int(fs.get("fetch_count") or 0)
     source = fs.get("source")
-    age = _content_age_days(item, media_type, today)
-    mine = _is_mine(field, item, fs, entry)
+    age = content_age_days(item, media_type, today)
+    current = item.get(field)
+    mine = holds_written_value(field, current, fs, entry)
+    written = entry.get("written_fp") or fs.get("written_value")
+    blank = not rating and is_empty(kodi_form(current))
+    # A refill that found nothing recorded the blank Kodi holds as written:
+    # the field is empty, not changed since a write.
+    written_blank = blank and written == fingerprint(kodi_form(current))
     # MetaMender wrote this field once, but Kodi now holds something else.
-    changed = not rating and not mine and bool(
-        entry.get("written_fp") or fs.get("written_value")
-    )
-    settled = _settled(field, fs, age, today, threshold)
+    changed = not rating and not mine and bool(written) and not written_blank
+    decision = _decision(field, fs, age, today, threshold)
+    # Kodi lost a settled field's MetaMender value: the scan fills it again
+    # (scan.blanked), so it is not settled.
+    refill = (managed and not locked and count > 0 and decision == FINAL
+              and blanked(item, field, fs))
+    settled = not refill and _settled(field, fs, age, today, threshold)
     checked = count > 0 or reason in (REASON_NOTHING, REASON_UNCHECKED)
     # An unlock leaves the "locked" reason until the next scan records one,
     # and makes the field due at that scan (details.unlock_field). Kodi then
@@ -229,18 +247,23 @@ def _field_row(
     elif not checked:
         group, hint, why = GROUP_WAITING, lang(32551), _NEVER_CHECKED
     elif unlocked:
-        group, hint, why = GROUP_WAITING, lang(32552), _UNLOCKED
+        group, hint = GROUP_WAITING, lang(32552)
+        why = _UNLOCKED if managed else _UNLOCKED_OFF
+    elif refill:
+        group, hint, why = GROUP_WAITING, lang(32552), _REFILL
     elif changed:
         group, hint, why = GROUP_LEFT, lang(32575), _CHANGED_SINCE
-    elif reason == REASON_UPDATED or (
+    elif not blank and (reason == REASON_UPDATED or (
         source and source != _SCRAPER_SOURCE and mine
-    ):
+    )):
         group, hint, why = GROUP_UPDATED, _source_name(source), 0
     elif reason == REASON_UNCHECKED:
         group, hint, why = GROUP_WAITING, "", _WHY[REASON_UNCHECKED]
     elif settled or reason in (REASON_UNCHANGED, REASON_NFO, REASON_FILL_ONLY):
         group = GROUP_LEFT
         why = _WHY.get(reason or "", 0)
+        if settled and reason == REASON_NOTHING:
+            why = _SETTLED_NOTHING
         if reason == REASON_NFO:
             hint = lang(32549)
         elif settled:
@@ -257,15 +280,16 @@ def _field_row(
     # since MetaMender's write has no known origin; its Why line says so.
     if mine:
         lines.append((lang(32527), _from_text(field, source, fs, language)))
-    elif checked and not changed and not is_empty(item.get(field)):
+    elif checked and not changed and not is_empty(current):
         lines.append((lang(32527), lang(32534)))
     if group == GROUP_UPDATED and not rating:
         lines.append((lang(32528), _replaced_text(entry)))
     if fs.get("fetched_at"):
         lines.append((lang(32529), long_date(fs["fetched_at"])))
     if checked and not locked:
-        decision = _decision(field, fs, age, today, threshold)
-        if unlocked:
+        if not managed:
+            next_text = lang(_OFF_NEXT)
+        elif unlocked or refill:
             next_text = lang(32539)
         elif settled:
             next_text = lang(32538)
@@ -279,6 +303,8 @@ def _field_row(
                 _short_date(fs.get("next_retry")) if decision == SKIP_NOT_DUE
                 else lang(32552)
             )
+    if not managed and not locked:
+        hint = lang(_OFF_HINT)
     if why:
         lines.append((lang(32531), lang(why)))
 
@@ -286,14 +312,14 @@ def _field_row(
     if not rating:
         if locked:
             action = ACTION_UNLOCK
-        elif can_restore(field, item.get(field), fs, keep):
+        elif can_restore(field, current, fs, keep):
             action = ACTION_RESTORE
     return DetailRow(field, label, group, hint, label, lines, action)
 
 
 def _from_text(field: str, source: str | None, fs: dict[str, Any], language: str) -> str:
     name = _source_name(source) or "MetaMender"
-    if field not in _LANGUAGE_FIELDS or source == _SCRAPER_SOURCE:
+    if field not in LANGUAGE_FIELDS or source == _SCRAPER_SOURCE:
         return name
     if fs.get("from_fallback"):
         return lang(32533).format(name)
@@ -316,11 +342,22 @@ def _match_notes(item_row: dict[str, Any]) -> list[dict[str, Any]]:
     return [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
 
 
+def _tvmaze_only(item: dict[str, Any]) -> bool:
+    """Kodi's uniqueid holds a TVmaze id and nothing else, which no site
+    MetaMender asks can look up."""
+    held = {k for k, v in (item.get("uniqueid") or {}).items() if v}
+    return held == {"tvmaze"}
+
+
 def _ids_row(media_type: MediaType, item: dict[str, Any],
              item_row: dict[str, Any] | None) -> DetailRow:
-    kodi_tmdb, kodi_imdb, kodi_tvdb, kodi_unknown = _extract_ids(item)
+    kodi_tmdb, kodi_imdb, kodi_tvdb, kodi_unknown = extract_ids(item)
     row = item_row or {}
     number_matched = bool(row.get("number_matched"))
+    notes = _match_notes(row)
+    # How the number match found each id, by the name shown.
+    how = {_SOURCE_NAMES[n["site"]]: str(n["matched"]) for n in notes
+           if n.get("matched") and n.get("site") in ("tmdb", "tvdb")}
     lines: list[tuple[str, str]] = []
     from_kodi = found = False
     for name, kodi_id, stored, matchable in (
@@ -337,13 +374,15 @@ def _ids_row(media_type: MediaType, item: dict[str, Any],
             from_kodi = True
         elif stored:
             if matchable and number_matched:
-                text = lang(32554)
+                text = lang(_MATCHED_HOW.get(how.get(name, ""), 32554))
             elif not matchable:
                 text = lang(32555)
             else:
                 text = lang(32556)
             lines.append((name, text.format(stored)))
             found = True
+    if _tvmaze_only(item):
+        lines.append(("", lang(_TVMAZE_ONLY)))
     if found:
         lines.append(("", lang(32557)))
 
@@ -351,8 +390,10 @@ def _ids_row(media_type: MediaType, item: dict[str, Any],
     # the scan then never matches it by number again.
     rejected = False
     if media_type.name == "episode" and not (kodi_tmdb or kodi_tvdb):
-        for note in _match_notes(row):
+        for note in notes:
             site = note.get("site")
+            if note.get("matched"):
+                continue
             if site == "conflict":
                 lines.append((lang(32566), lang(32567)))
                 rejected = True
@@ -392,6 +433,7 @@ def build_rows(
     *,
     language: str = "",
     fields: Iterable[str] | None = None,
+    managed: Iterable[str] | None = None,
     threshold_days: int = DEFAULT_THRESHOLD_DAYS,
 ) -> list[DetailRow]:
     """The Ids entry, then the fields grouped updated, left as it is and
@@ -399,11 +441,15 @@ def build_rows(
 
     ``language`` is the folder language's display name ("Dutch"), for the
     "From" line of a field written in a language. ``fields`` are the fields
-    the scan manages for this item (default: every field of the media type).
+    to show (default: every field of the media type); ``managed`` those the
+    scan checks under the current settings (default: ``fields``).
     ``threshold_days`` is the stale_threshold_days setting, which decides
     when a field is settled. Rating and votes are one "Rating" row.
     """
     names = sorted(set(fields if fields is not None else media_type.backfill_fields))
+    managed_set = set(managed) if managed is not None else set(names)
+    if "votes" in managed_set:
+        managed_set.add("rating")
     if "votes" in names:
         names.remove("votes")
         if "rating" not in names:
@@ -411,7 +457,7 @@ def build_rows(
             names.sort()
     rows = [
         _field_row(media_type, f, item, fs_map.get(f) or {}, keep, today, language,
-                   threshold_days)
+                   threshold_days, f in managed_set)
         for f in names
     ]
     ordered = [_ids_row(media_type, item, item_row)]
@@ -434,4 +480,4 @@ def header_line(
         default="",
     )
     looked = lang(32570).format(long_date(seen)) if seen else lang(32571)
-    return "{} · {}".format(folder, looked)
+    return lang(_SEPARATED).format(folder, looked)

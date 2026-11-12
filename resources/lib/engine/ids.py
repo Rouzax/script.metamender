@@ -17,8 +17,8 @@ from resources.lib.engine.chain import TRANSIENT
 from resources.lib.engine.idverify import show_mismatch
 from resources.lib.engine.scanctx import (
     _call_provider,
-    _extract_ids,
     _ScanCtx,
+    extract_ids,
 )
 from resources.lib.providers import tmdb, tvdb
 from resources.lib.providers.languages import tvdb_language
@@ -289,7 +289,7 @@ def _confirmed_by_episodes(
     except KodiQueryError:
         # kodi.get_all_items logged it; the next scan asks again.
         return TRANSIENT
-    candidates = {_extract_ids(ep)[3] for ep in episodes}
+    candidates = {extract_ids(ep)[3] for ep in episodes}
     candidates.discard(None)
     if not candidates:
         return False

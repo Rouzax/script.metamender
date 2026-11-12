@@ -21,12 +21,14 @@ from resources.lib.engine.certchain import (
     SiteGate,
 )
 from resources.lib.engine.chain import TRANSIENT
+from resources.lib.engine.protect import fingerprint
 from resources.lib.providers import tmdb
 from resources.lib.utils import (
     ApiKeyError,
     TransientProviderError,
     TvdbAuthError,
     get_logger,
+    is_empty,
 )
 
 log = get_logger('scan')
@@ -54,13 +56,13 @@ _KODI_TO_TMDB = {v: k for k, v in _TMDB_TO_KODI.items()}
 # Text fields TVDB also supplies. Only these get the full provider chain with
 # fallback-language steps; every other field has a single TMDB step.
 _CHAIN_FIELDS = frozenset({"title", "plot"})
-_RATING_FIELDS = frozenset({"rating", "votes"})
+RATING_FIELDS = frozenset({"rating", "votes"})
 
 # Fields whose value is written in a language. In a folder with no configured
 # language they only fill an empty value (see _plan_writes): the language is a
 # guess, and replacing a library's text with another language's is what the
 # guess must never do.
-_LANGUAGE_FIELDS = frozenset({"title", "plot", "tagline", "genre"})
+LANGUAGE_FIELDS = frozenset({"title", "plot", "tagline", "genre"})
 # Key holding each chained field in a TVDB series record.
 _TVDB_SERIES_KEYS = {"title": "name", "plot": "overview"}
 
@@ -100,7 +102,7 @@ def _clean_id(raw: Any, imdb: bool = False) -> str | None:
     return value if _NUMERIC_ID.fullmatch(value) and value.strip("0") else None
 
 
-def _extract_ids(
+def extract_ids(
     item: dict[str, Any],
 ) -> tuple[str | None, str | None, str | None, str | None]:
     """Extract (tmdb_id, imdb_id, tvdb_id, unknown_id) from a Kodi item's
@@ -121,7 +123,7 @@ def _extract_ids(
 _KODI_ITEM_SEPARATOR = " / "
 
 
-def _kodi_form(value: Any) -> Any:
+def kodi_form(value: Any) -> Any:
     """A provider value as Kodi will store and return it.
 
     Kodi's CVideoInfoTag setters trim text and drop empty list entries, and a
@@ -144,6 +146,28 @@ def _kodi_form(value: Any) -> Any:
                     parts.append(piece)
         return parts
     return value
+
+
+def holds_written_value(
+    field: str, current: Any, fs: dict[str, Any], keep_entry: dict[str, Any],
+) -> bool:
+    """Kodi still holds the value metamender last wrote to the field.
+
+    ``keep_entry`` is the field's get_keep() entry: its written_fp survives
+    Reset tracker, so field_status's written_value is only the fallback. A
+    rating row's written value is the JSON of the slots metamender owns,
+    beside the scraper's own slots, so any recorded write counts. An empty
+    value never does: a refill that found nothing records the blank as
+    written so the same blank does not trigger it again, but the blank is
+    not a value metamender put there.
+    """
+    if field in RATING_FIELDS:
+        return bool(fs.get("written_value"))
+    form = kodi_form(current)
+    if is_empty(form):
+        return False
+    written = keep_entry.get("written_fp") or fs.get("written_value")
+    return written is not None and fingerprint(form) == written
 
 
 class _Pacer:

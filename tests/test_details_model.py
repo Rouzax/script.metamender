@@ -204,6 +204,7 @@ def test_ids_lines_for_a_number_match():
         ("TMDB", "4104123, matched by season and episode number"),
         ("TheTVDB", "9297341, matched by season and episode number"),
         ("IMDb", "tt23020114, from TMDB's id list"),
+        ("", "Kodi has only a TVmaze id."),
         ("", "Ids MetaMender found stay in its own records."),
     ]
 
@@ -333,3 +334,93 @@ def test_value_changed_since_metamenders_update_is_left_as_it_is():
     assert lines["Why"] == "Changed since MetaMender's update (your edit or a re-scrape)."
     assert "From" not in lines and "Replaced" not in lines
     assert plot.action == ""
+
+
+def test_ids_say_how_a_number_match_found_them():
+    note = [{"site": "tmdb", "matched": "date"}, {"site": "tvdb", "matched": "tmdb_list"}]
+    ids = _rows(item_row={"match_note": json.dumps(note)})[0]
+    assert ("TMDB", "4104123, matched by season and episode number (the dates agreed)") \
+        in ids.lines
+    assert ("TheTVDB", "9297341, from TMDB's id list") in ids.lines
+    # A pass is not a rejection.
+    assert not any(label in ("Why", "Yours") for label, _ in ids.lines)
+    titles = _rows(item_row={"match_note": json.dumps(
+        [{"site": "tvdb", "matched": "title"}])})[0]
+    assert ("TheTVDB", "9297341, matched by season and episode number (the titles agreed)") \
+        in titles.lines
+
+
+def test_tvmaze_note_only_when_kodi_has_nothing_else():
+    ids = _rows(item={"uniqueid": {"tvmaze": "1", "tvdb": "9297341"}})[0]
+    assert ("", "Kodi has only a TVmaze id.") not in ids.lines
+    ids = _rows(item={"uniqueid": {"tvmaze": "1", "imdb": ""}})[0]
+    assert ("", "Kodi has only a TVmaze id.") in ids.lines
+
+
+def test_settled_nothing_does_not_say_yet():
+    director = _by_key(_rows(
+        item={"firstaired": "2020-01-01"},
+        fs_map={"director": _fs("nothing", next_retry="2026-12-01")},
+    ))["director"]
+    assert director.hint == "settled"
+    assert dict(director.lines)["Why"] == (
+        "The sites MetaMender asks had nothing for this field.")
+
+
+def test_blank_written_by_an_unfilled_refill_is_not_metamenders():
+    """A refill that found nothing records the blank as written, so it does
+    not trigger again; the blank is still no value of MetaMender's."""
+    blank = fingerprint("")
+    rows = _by_key(_rows(
+        item={"plot": ""},
+        fs_map={"plot": _fs("nothing", source="tmdb", next_retry="2026-11-19",
+                            written=blank)},
+        keep={"plot": {"original": "Old", "has_original": True, "locked": False,
+                       "written_fp": blank}},
+    ))
+    plot = rows["plot"]
+    assert plot.group != "updated"
+    assert plot.action == ""
+    assert "From" not in dict(plot.lines)
+
+
+def test_blanked_final_field_is_filled_again_at_the_next_scan():
+    """Kodi lost a settled field's MetaMender value: the scan refills it."""
+    plot = _by_key(_rows(
+        item={"plot": "", "firstaired": "2020-01-01"},
+        fs_map={"plot": _fs("updated", source="tmdb", written=fingerprint(PLOT))},
+    ))["plot"]
+    assert plot.group == "waiting" and plot.hint == "next scan"
+    lines = dict(plot.lines)
+    assert lines["Next check"] == "at the next scan"
+    assert lines["Why"] == ("Kodi lost MetaMender's value (a refresh or a re-scrape), "
+                            "so the next scan fills it again.")
+    assert plot.action == ""
+
+
+def test_unmanaged_field_promises_no_next_scan():
+    """A field shown only for its lock (its group is switched off) is not
+    checked at the next scan."""
+    unlocked = {"original": "Amsterdam Centraal", "has_original": True,
+                "locked": False, "written_fp": None}
+    item, item_row, fs_map, keep = _episode()
+    fs_map["title"] = _fs("locked", count=2, next_retry="2026-11-19")
+    keep["title"] = unlocked
+    rows = _by_key(build_rows(EPISODE, item, item_row, fs_map, keep, TODAY,
+                              fields=["plot", "title"], managed=["plot"]))
+    title = rows["title"]
+    assert title.hint == "switched off"
+    lines = dict(title.lines)
+    assert lines["Next check"] == "not while this field is switched off in the settings"
+    assert lines["Why"] == ("You unlocked this field; MetaMender checks it again once "
+                            "the field is switched on in the settings.")
+    assert dict(rows["plot"].lines)["Next check"] == "19 Nov 2026"
+
+
+def test_dates_and_separator_come_from_the_strings():
+    assert details_model.long_date("2026-11-12") == "12 Nov 2026"
+    assert details_model.long_date("2007-01-04") == "4 Jan 2007"
+    assert details_model.long_date("soon") == "soon"
+    assert details_model._short_date("2026-12-05") == "5 Dec"
+    for code in range(32610, 32625):
+        assert _STRINGS.get(code), code

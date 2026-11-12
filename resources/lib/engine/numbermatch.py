@@ -178,27 +178,32 @@ def _verdict(site: Any, kept: _Kept) -> Any:
 _NOTE_KEYS = ("site", "site_title", "site_aired", "kodi_title", "kodi_aired")
 
 
-def _log_rejected(
+def _note_entry(
     site_name: str, site: Any, verdict: MatchVerdict, kept: _Kept, identity: str,
-) -> dict[str, Any] | None:
-    """One line per site that did not pass: INFO for a rejected candidate, so
-    the user can see why the episode stayed as it was; DEBUG when the site
-    has no episode with that number (a whole year-numbered season would
-    otherwise flood the log).
-
-    Returns a rejected candidate's entry for the item's match note (both
-    titles and dates), None when the site had no such episode."""
+) -> dict[str, Any]:
+    """The log fields for a site that did not pass: both titles and dates,
+    the candidate's empty when the site has no episode with that number."""
     candidate = next(
         (ep for ep in site or []
          if ep.season == kept.season and ep.number == kept.number), None,
     )
-    fields: dict[str, Any] = {
+    return {
         "identity": identity, "site": site_name, "season": kept.season,
         "episode": kept.number, "kodi_title": kept.title, "kodi_aired": kept.aired,
         "site_title": " / ".join(t for t in candidate.titles if t) if candidate else "",
         "site_aired": candidate.aired if candidate else "", "reason": verdict.reason,
     }
-    if verdict.reason == "rejected":
+
+
+def _log_rejected(fields: dict[str, Any]) -> dict[str, Any] | None:
+    """One line per site that did not pass: INFO for a rejected candidate, so
+    the user can see why the episode stayed as it was; DEBUG when the site
+    has no episode with that number (a whole year-numbered season would
+    otherwise flood the log).
+
+    Returns a rejected candidate's entry for the item's match note, None
+    when the site had no such episode."""
+    if fields["reason"] == "rejected":
         log.info("Episode number match rejected", event="scan.number_match_rejected", **fields)
         return {k: fields[k] for k in _NOTE_KEYS}
     log.debug("Episode number not found", event="scan.number_match_rejected", **fields)
@@ -249,7 +254,7 @@ def match_episode_by_number(
     ``ids.number_matched`` keeps saying where the loaded ids came from, so
     nothing they lead to reaches Kodi.
 
-    ``kodi_ids`` are the episode's own typed ids (_extract_ids): an episode
+    ``kodi_ids`` are the episode's own typed ids (extract_ids): an episode
     that has a TMDB or TheTVDB id of its own (a rescrape) drops any stored
     number match, and an IMDb id of its own is never replaced.
     """
@@ -258,6 +263,9 @@ def match_episode_by_number(
     kodi_tmdb, kodi_imdb, kodi_tvdb, _unknown = kodi_ids
     recheck = bool(stored.get("number_matched"))
     if kodi_tmdb or kodi_tvdb:
+        if stored.get("match_note"):
+            # Never matched by number again: the last check's note is stale.
+            ctx.tracker.upsert_item(ctx.media_type.name, identity, match_note="")
         if recheck:
             ctx.tracker.clear_number_match(ctx.media_type.name, identity)
             ctx.tracker.upsert_item(
@@ -335,7 +343,7 @@ def match_episode_by_number(
     for name, site, verdict in (("tmdb", tmdb_list, tmdb_verdict),
                                 ("tvdb", tvdb_list, tvdb_verdict)):
         if verdict.episode is None:
-            note = _log_rejected(name, site, verdict, kept, identity)
+            note = _log_rejected(_note_entry(name, site, verdict, kept, identity))
             if note is not None:
                 notes.append(note)
 
@@ -349,9 +357,19 @@ def match_episode_by_number(
             "tmdb_tvdb_id": str(cross_tvdb), "tvdb_id": tvdb_ep.ep_id,
         }
         notes.append(conflict)
-    # The note describes the latest completed check, a site that passed
-    # included: the sites that rejected their candidate, a conflict between
-    # two passed sites, or nothing.
+    elif tmdb_ep or tvdb_ep:
+        # How each recorded id was found: "title" or "date" when its own
+        # site's candidate passed, "tmdb_list" for a TheTVDB id taken from
+        # TMDB's cross-id list.
+        if tmdb_ep:
+            notes.append({"site": "tmdb", "matched": tmdb_verdict.reason})
+        if tvdb_ep:
+            notes.append({"site": "tvdb", "matched": tvdb_verdict.reason})
+        elif cross_tvdb:
+            notes.append({"site": "tvdb", "matched": "tmdb_list"})
+    # The note describes the latest completed check: the sites that rejected
+    # their candidate, a conflict between two passed sites, how the used ids
+    # were found, or nothing.
     ctx.tracker.upsert_item(
         ctx.media_type.name, identity, match_note=json.dumps(notes) if notes else "",
     )
