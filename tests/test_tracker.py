@@ -833,3 +833,127 @@ def test_tracked_show_ids(tmp_path):
     db.upsert_item("tvshow", "tmdb:2")
     db.upsert_item("episode", "Show S01E01", kodi_id=11)
     assert db.get_tracked_show_ids() == frozenset({10})
+
+
+# ---------------------------------------------------------------------------
+# Reasons, kept originals, locks and match notes (item details window)
+# ---------------------------------------------------------------------------
+
+def _db_with_movie(tmp_path, identity="Heat (1995)"):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", identity, kodi_id=7)
+    return db
+
+
+def test_keep_round_trip_preserves_lists_and_empty(tmp_path):
+    db = _db_with_movie(tmp_path)
+    db.keep_original("movie", "Heat (1995)", "genre", ["Drama", "Crime"])
+    db.keep_original("movie", "Heat (1995)", "tagline", "")
+    keep = db.get_keep("movie", "Heat (1995)")
+    assert keep["genre"] == {
+        "original": ["Drama", "Crime"], "has_original": True, "locked": False,
+    }
+    assert keep["tagline"]["original"] == ""
+    assert keep["tagline"]["has_original"] is True
+    assert db.get_keep("movie", "Other (2000)") == {}
+    db.close()
+
+
+def test_lock_and_unlock(tmp_path):
+    db = _db_with_movie(tmp_path)
+    db.set_locked("movie", "Heat (1995)", "plot", True)
+    assert db.locked_fields("movie", "Heat (1995)") == frozenset({"plot"})
+    keep = db.get_keep("movie", "Heat (1995)")["plot"]
+    assert keep["locked"] is True and keep["has_original"] is False
+    # Keeping an original leaves the lock alone.
+    db.keep_original("movie", "Heat (1995)", "plot", "old plot")
+    assert db.locked_fields("movie", "Heat (1995)") == frozenset({"plot"})
+    # Locking leaves a kept original alone.
+    db.set_locked("movie", "Heat (1995)", "plot", False)
+    assert db.locked_fields("movie", "Heat (1995)") == frozenset()
+    keep = db.get_keep("movie", "Heat (1995)")["plot"]
+    assert keep["original"] == "old plot" and keep["has_original"] is True
+    db.close()
+
+
+def test_reset_tracker_keeps_originals_and_locks(tmp_path):
+    db = _db_with_movie(tmp_path)
+    db.record_field_fetch("movie", "Heat (1995)", "plot", "2030-01-01")
+    db.keep_original("movie", "Heat (1995)", "plot", "old plot")
+    db.set_locked("movie", "Heat (1995)", "plot", True)
+    assert db.clear_field_status() == 1
+    assert db.get_field_status("movie", "Heat (1995)", "plot") is None
+    keep = db.get_keep("movie", "Heat (1995)")["plot"]
+    assert keep == {"original": "old plot", "has_original": True, "locked": True}
+    db.close()
+
+
+def test_adopt_and_rename_carry_keep_rows(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Heat (1995)", kodi_id=7, imdb_id="tt0113277")
+    db.keep_original("movie", "Heat (1995)", "plot", "old plot")
+    assert db.adopt_identity("movie", "imdb:tt0113277", 7) == "Heat (1995)"
+    keep = db.get_keep("movie", "imdb:tt0113277")
+    assert keep["plot"]["original"] == "old plot"
+    assert db.get_keep("movie", "Heat (1995)") == {}
+
+    db.upsert_item("episode", "Old Show S01E01", kodi_id=1)
+    db.set_locked("episode", "Old Show S01E01", "plot", True)
+    assert db.rename_show_episodes("Old Show", "New Show") == 1
+    assert db.locked_fields("episode", "New Show S01E01") == frozenset({"plot"})
+    assert db.get_keep("episode", "Old Show S01E01") == {}
+    db.close()
+
+
+def test_prune_drops_keep_rows_of_pruned_items(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Old", kodi_id=1)
+    db.upsert_item("movie", "Fresh", kodi_id=2)
+    db.update_last_seen("movie", "Old", "2020-01-01")
+    db.update_last_seen("movie", "Fresh", "2030-01-01")
+    db.set_locked("movie", "Old", "plot", True)
+    db.set_locked("movie", "Fresh", "plot", True)
+    assert db.prune_orphans("movie", "2025-01-01") == 1
+    rows = db._conn.execute("SELECT COUNT(*) FROM field_keep").fetchone()[0]
+    assert rows == 1
+    assert db.locked_fields("movie", "Fresh") == frozenset({"plot"})
+    db.close()
+
+
+def test_reason_recorded_with_a_fetch_and_alone(tmp_path):
+    db = _db_with_movie(tmp_path)
+    ident = "Heat (1995)"
+    db.record_field_fetch("movie", ident, "plot", "2030-01-01", reason="updated")
+    row = db.get_field_status("movie", ident, "plot")
+    assert row["last_reason"] == "updated" and row["fetch_count"] == 1
+
+    # A fetch without a reason keeps the stored one.
+    db.record_field_fetch("movie", ident, "plot", "2030-01-01")
+    assert db.get_field_status("movie", ident, "plot")["last_reason"] == "updated"
+
+    db.record_manual_check("movie", ident, "plot", "fp", reason="unchanged")
+    assert db.get_field_status("movie", ident, "plot")["last_reason"] == "unchanged"
+
+    db.reset_field_clock("movie", ident, "plot", "2030-01-01", reason="nfo")
+    assert db.get_field_status("movie", ident, "plot")["last_reason"] == "nfo"
+
+    # A reason alone creates a row without advancing any clock.
+    db.record_field_reason("movie", ident, "tagline", "locked")
+    row = db.get_field_status("movie", ident, "tagline")
+    assert row["last_reason"] == "locked"
+    assert row["fetch_count"] == 0 and row["fetched_at"] is None
+    db.record_field_reason("movie", ident, "tagline", "unchecked")
+    row = db.get_field_status("movie", ident, "tagline")
+    assert row["last_reason"] == "unchecked" and row["fetch_count"] == 0
+    # An unknown item is a no-op.
+    db.record_field_reason("movie", "Nope", "plot", "locked")
+    db.close()
+
+
+def test_match_note_round_trip(tmp_path):
+    db = _db_with_movie(tmp_path)
+    db.upsert_item("movie", "Heat (1995)", match_note='{"by": "number"}')
+    assert db.get_item("movie", "Heat (1995)")["match_note"] == '{"by": "number"}'
+    db.upsert_item("movie", "Heat (1995)", kodi_id=8)
+    assert db.get_item("movie", "Heat (1995)")["match_note"] == '{"by": "number"}'
+    db.close()

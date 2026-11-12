@@ -61,7 +61,7 @@ SOURCES_CONFIG_FILENAME = "sources.json"
 
 # Tracker SQLite schema version. Bump when the schema changes so future
 # migrations have a marker to branch on. Stored in scan_state on init.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Days before an answer that left something unfilled is asked again: a value
 # that only the fallback language supplied, or an id that the cross-reference

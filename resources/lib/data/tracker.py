@@ -14,6 +14,7 @@ Logging:
 """
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Iterable
@@ -33,6 +34,16 @@ _CYCLE_COMPLETE_KEY = "cycle_complete"
 # The part of an episode identity after its show title (see compute_identity
 # and the scan's duplicate key "<identity>|<file>").
 _EPISODE_SUFFIX = re.compile(r"S\d{2,}E\d{2,}(\|.*)?$")
+
+# Why a field last ended up as it did, stored in field_status.last_reason and
+# shown in the item details window.
+REASON_UPDATED = "updated"      # a provider value replaced Kodi's
+REASON_UNCHANGED = "unchanged"  # checked, Kodi already held the provider value
+REASON_NFO = "nfo"              # Kodi's value came from an NFO and was kept
+REASON_FILL_ONLY = "fill_only"  # Kodi had a value and the field only fills gaps
+REASON_NOTHING = "nothing"      # the provider had nothing to offer
+REASON_UNCHECKED = "unchecked"  # not answered yet (transient failure, never reached)
+REASON_LOCKED = "locked"        # the user locked the field
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS items (
@@ -64,6 +75,8 @@ CREATE TABLE IF NOT EXISTS items (
     orig_title TEXT,
     orig_aired TEXT,
     number_matched INTEGER DEFAULT 0,
+    -- JSON describing how an episode was matched by number (engine/numbermatch.py).
+    match_note TEXT,
     UNIQUE(media_type, identity)
 );
 
@@ -80,7 +93,22 @@ CREATE TABLE IF NOT EXISTS field_status (
     from_fallback INTEGER DEFAULT 0,
     fallback_checks INTEGER DEFAULT 0,
     settings_fp TEXT,
+    -- One of the REASON_* values; never read by the maturity clock.
+    last_reason TEXT,
     UNIQUE(item_id, field)
+);
+
+-- Keyed on the item's identity rather than its items row: the user's locks
+-- and the values MetaMender replaced outlive the Reset tracker action, which
+-- empties field_status. original is json.dumps of the Kodi value.
+CREATE TABLE IF NOT EXISTS field_keep (
+    media_type TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    field TEXT NOT NULL,
+    original TEXT,
+    has_original INTEGER DEFAULT 0,
+    locked INTEGER DEFAULT 0,
+    PRIMARY KEY (media_type, identity, field)
 );
 
 CREATE TABLE IF NOT EXISTS scan_state (
@@ -99,7 +127,7 @@ CREATE INDEX IF NOT EXISTS idx_field_status ON field_status(item_id, field);
 _UPSERT_KWARGS = frozenset((
     "kodi_id", "tmdb_id", "imdb_id", "tvdb_id",
     "source_path", "premiered", "date_added", "ids_checked",
-    "tmdb_season", "orig_title", "orig_aired", "number_matched",
+    "tmdb_season", "orig_title", "orig_aired", "number_matched", "match_note",
 ))
 
 _ID_KWARGS = frozenset(("tmdb_id", "imdb_id", "tvdb_id"))
@@ -277,6 +305,7 @@ class TrackerDB:
             self._conn.execute(
                 "UPDATE items SET identity = ? WHERE id = ?", (identity, rows[0]["id"]),
             )
+            self._move_keep(media_type, old, identity)
             self._conn.commit()
         except sqlite3.Error:
             log.exception(
@@ -316,6 +345,7 @@ class TrackerDB:
                 self._conn.execute(
                     "UPDATE items SET identity = ? WHERE id = ?", (new_identity, row["id"]),
                 )
+                self._move_keep("episode", row["identity"], new_identity)
                 renamed += 1
             self._conn.commit()
         except sqlite3.Error:
@@ -385,20 +415,23 @@ class TrackerDB:
         """Delete items of this type whose last_seen is older than `cutoff`.
 
         Items with a NULL last_seen are kept (never confirmed present yet).
-        Associated field_status rows are deleted too. `cutoff` is an ISO date
+        Associated field_status and field_keep rows are deleted too. `cutoff` is an ISO date
         string (callers pass today minus the retention window). Returns the
         number of items removed.
         """
         try:
-            ids = [
-                r["id"] for r in self._conn.execute(
-                    "SELECT id FROM items WHERE media_type = ? "
-                    "AND last_seen IS NOT NULL AND last_seen < ?",
-                    (media_type, cutoff),
-                )
-            ]
+            doomed = self._conn.execute(
+                "SELECT id, identity FROM items WHERE media_type = ? "
+                "AND last_seen IS NOT NULL AND last_seen < ?",
+                (media_type, cutoff),
+            ).fetchall()
+            ids = [r["id"] for r in doomed]
             if not ids:
                 return 0
+            self._conn.executemany(
+                "DELETE FROM field_keep WHERE media_type = ? AND identity = ?",
+                [(media_type, r["identity"]) for r in doomed],
+            )
             placeholders = ", ".join(["?"] * len(ids))
             self._conn.execute(
                 "DELETE FROM field_status WHERE item_id IN ({})".format(placeholders), ids
@@ -422,6 +455,14 @@ class TrackerDB:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _move_keep(self, media_type: str, old: str, new: str) -> None:
+        """Re-key an item's field_keep rows with its items row (no commit)."""
+        self._conn.execute(
+            "UPDATE OR REPLACE field_keep SET identity = ? "
+            "WHERE media_type = ? AND identity = ?",
+            (new, media_type, old),
+        )
 
     def _get_item_id(self, media_type: str, identity: str) -> int | None:
         """Look up the row id for an item by (media_type, identity)."""
@@ -485,6 +526,7 @@ class TrackerDB:
         from_fallback: bool | None = None,
         settings_fp: str | None = None,
         fallback_recheck: bool = False,
+        reason: str | None = None,
     ) -> None:
         """Record a successful sample: bump fetch_count, stamp fetched_at, set the
         next due date and (optionally) provenance.
@@ -509,9 +551,11 @@ class TrackerDB:
             self._conn.execute(
                 "INSERT INTO field_status "
                 "(item_id, field, fetch_count, fetched_at, next_retry, source, "
-                "vote_count, written_value, from_fallback, fallback_checks, settings_fp) "
+                "vote_count, written_value, from_fallback, fallback_checks, settings_fp, "
+                "last_reason) "
                 "VALUES (:item_id, :field, 1, :today, :next_retry, :source, "
-                ":vote_count, :written_value, COALESCE(:fallback, 0), 0, :settings_fp) "
+                ":vote_count, :written_value, COALESCE(:fallback, 0), 0, :settings_fp, "
+                ":reason) "
                 "ON CONFLICT(item_id, field) DO UPDATE SET "
                 "fetch_count = field_status.fetch_count + 1, "
                 "fetched_at = excluded.fetched_at, "
@@ -526,13 +570,14 @@ class TrackerDB:
                 "WHEN field_status.from_fallback = 1 THEN field_status.fallback_checks "
                 "ELSE 0 END, "
                 "from_fallback = COALESCE(:fallback, field_status.from_fallback), "
-                "settings_fp = excluded.settings_fp",
+                "settings_fp = excluded.settings_fp, "
+                "last_reason = COALESCE(excluded.last_reason, field_status.last_reason)",
                 {
                     "item_id": item_id, "field": field, "today": today,
                     "next_retry": next_retry, "source": source,
                     "vote_count": vote_count, "written_value": written_value,
                     "fallback": fallback, "settings_fp": settings_fp,
-                    "recheck": int(fallback_recheck),
+                    "recheck": int(fallback_recheck), "reason": reason,
                 },
             )
         except sqlite3.Error:
@@ -554,6 +599,7 @@ class TrackerDB:
         source: str | None = None,
         vote_count: int | None = None,
         from_fallback: bool | None = None,
+        reason: str | None = None,
     ) -> None:
         """Record what an Update now check left in Kodi without touching the
         field's schedule: fetch_count, next_retry and fetched_at stay as they
@@ -576,12 +622,14 @@ class TrackerDB:
                 "WHEN :fallback = 1 AND from_fallback = 0 THEN 0 "
                 "ELSE fallback_checks END, "
                 "from_fallback = COALESCE(:fallback, from_fallback), "
-                "settings_fp = :settings_fp "
+                "settings_fp = :settings_fp, "
+                "last_reason = COALESCE(:reason, last_reason) "
                 "WHERE item_id = :item_id AND field = :field",
                 {
                     "item_id": item_id, "field": field, "source": source,
                     "vote_count": vote_count, "written_value": written_value,
                     "fallback": fallback, "settings_fp": settings_fp,
+                    "reason": reason,
                 },
             )
         except sqlite3.Error:
@@ -604,6 +652,7 @@ class TrackerDB:
         source: str | None = None,
         vote_count: int | None = None,
         from_fallback: bool | None = None,
+        reason: str | None = None,
     ) -> None:
         """Re-baseline a field to its first sample ('Update now', or a change
         in the settings the field depends on).
@@ -626,9 +675,11 @@ class TrackerDB:
             self._conn.execute(
                 "INSERT INTO field_status "
                 "(item_id, field, fetch_count, fetched_at, next_retry, settings_fp, "
-                "written_value, source, vote_count, from_fallback, fallback_checks) "
+                "written_value, source, vote_count, from_fallback, fallback_checks, "
+                "last_reason) "
                 "VALUES (:item_id, :field, 1, :today, :next_retry, :settings_fp, "
-                ":written_value, :source, :vote_count, COALESCE(:fallback, 0), 0) "
+                ":written_value, :source, :vote_count, COALESCE(:fallback, 0), 0, "
+                ":reason) "
                 "ON CONFLICT(item_id, field) DO UPDATE SET "
                 "fetch_count = 1, fetched_at = excluded.fetched_at, "
                 "next_retry = excluded.next_retry, settings_fp = excluded.settings_fp, "
@@ -636,12 +687,14 @@ class TrackerDB:
                 "source = COALESCE(excluded.source, field_status.source), "
                 "vote_count = COALESCE(excluded.vote_count, field_status.vote_count), "
                 "from_fallback = COALESCE(:fallback, field_status.from_fallback), "
-                "fallback_checks = 0",
+                "fallback_checks = 0, "
+                "last_reason = COALESCE(excluded.last_reason, field_status.last_reason)",
                 {
                     "item_id": item_id, "field": field, "today": today,
                     "next_retry": next_retry, "settings_fp": settings_fp,
                     "written_value": written_value, "source": source,
                     "vote_count": vote_count, "fallback": fallback,
+                    "reason": reason,
                 },
             )
         except sqlite3.Error:
@@ -653,8 +706,103 @@ class TrackerDB:
                 field=field,
             )
 
+    def record_field_reason(
+        self, media_type: str, identity: str, field: str, reason: str
+    ) -> None:
+        """Record only why a field is as it is, for a field that was not
+        sampled (a transient failure, a locked field). The row is created
+        with fetch_count 0 when missing; no clock, date or provenance changes,
+        so the maturity model sees no fetch that did not happen."""
+        item_id = self._get_item_id(media_type, identity)
+        if item_id is None:
+            return
+        try:
+            self._conn.execute(
+                "INSERT INTO field_status (item_id, field, fetch_count, last_reason) "
+                "VALUES (?, ?, 0, ?) "
+                "ON CONFLICT(item_id, field) DO UPDATE SET last_reason = excluded.last_reason",
+                (item_id, field, reason),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record field reason", event="tracker.error",
+                media_type=media_type, identity=identity, field=field,
+            )
+
+    # ------------------------------------------------------------------
+    # Kept originals and locks (survive clear_field_status)
+    # ------------------------------------------------------------------
+
+    def keep_original(
+        self, media_type: str, identity: str, field: str, value: Any
+    ) -> None:
+        """Remember the Kodi value MetaMender is about to replace. The value
+        is stored as JSON so a list stays a list and "" stays "". A lock on
+        the field is kept."""
+        try:
+            self._conn.execute(
+                "INSERT INTO field_keep (media_type, identity, field, original, "
+                "has_original) VALUES (?, ?, ?, ?, 1) "
+                "ON CONFLICT(media_type, identity, field) DO UPDATE SET "
+                "original = excluded.original, has_original = 1",
+                (media_type, identity, field, json.dumps(value)),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to keep original", event="tracker.error",
+                media_type=media_type, identity=identity, field=field,
+            )
+
+    def set_locked(
+        self, media_type: str, identity: str, field: str, locked: bool
+    ) -> None:
+        """Lock or unlock a field; a kept original is left alone."""
+        try:
+            self._conn.execute(
+                "INSERT INTO field_keep (media_type, identity, field, locked) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(media_type, identity, field) DO UPDATE SET "
+                "locked = excluded.locked",
+                (media_type, identity, field, int(locked)),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to set lock", event="tracker.error",
+                media_type=media_type, identity=identity, field=field,
+            )
+
+    def get_keep(self, media_type: str, identity: str) -> dict[str, dict[str, Any]]:
+        """field -> {"original": decoded value, "has_original", "locked"}."""
+        rows = self._conn.execute(
+            "SELECT field, original, has_original, locked FROM field_keep "
+            "WHERE media_type = ? AND identity = ?",
+            (media_type, identity),
+        ).fetchall()
+        return {
+            r["field"]: {
+                "original": (
+                    json.loads(r["original"]) if r["has_original"] else None
+                ),
+                "has_original": bool(r["has_original"]),
+                "locked": bool(r["locked"]),
+            }
+            for r in rows
+        }
+
+    def locked_fields(self, media_type: str, identity: str) -> frozenset[str]:
+        """The fields the user locked on this item."""
+        return frozenset(
+            r["field"] for r in self._conn.execute(
+                "SELECT field FROM field_keep "
+                "WHERE media_type = ? AND identity = ? AND locked = 1",
+                (media_type, identity),
+            )
+        )
+
     def clear_field_status(self) -> int:
-        """Delete all field_status rows (the Reset-tracker action). Returns count."""
+        """Delete all field_status rows (the Reset-tracker action). Returns count.
+
+        field_keep is left alone: locks and kept originals are the user's."""
         try:
             cur = self._conn.execute("DELETE FROM field_status")
             self._conn.commit()
