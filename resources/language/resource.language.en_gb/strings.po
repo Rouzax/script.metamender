@@ -809,3 +809,59 @@ msgstr ""
 msgctxt "#32487"
 msgid "Stopping: the episode in progress finishes first"
 msgstr ""
+
+msgctxt "#32490"
+msgid "MetaMender needs you"
+msgstr ""
+
+msgctxt "#32491"
+msgid "Setup has not been finished yet, so nothing is being updated."
+msgstr ""
+
+msgctxt "#32492"
+msgid "Setup is not finished"
+msgstr ""
+
+msgctxt "#32493"
+msgid "There is no TMDB key, so nothing is being updated."
+msgstr ""
+
+msgctxt "#32494"
+msgid "No TMDB key"
+msgstr ""
+
+msgctxt "#32495"
+msgid "Your TMDB key was rejected, so nothing is being updated until it is fixed."
+msgstr ""
+
+msgctxt "#32496"
+msgid "The TMDB key was rejected"
+msgstr ""
+
+msgctxt "#32497"
+msgid "The last background scans did not finish, so your library is not being kept up to date. The add-on log has the details."
+msgstr ""
+
+msgctxt "#32498"
+msgid "Background scans keep failing"
+msgstr ""
+
+msgctxt "#32499"
+msgid "This folder has been unreachable for 3 days or more, so its items are not being kept up to date: {}"
+msgstr ""
+
+msgctxt "#32500"
+msgid "A folder is unreachable: {}"
+msgstr ""
+
+msgctxt "#32501"
+msgid "Also: {}"
+msgstr ""
+
+msgctxt "#32502"
+msgid "Open setup"
+msgstr ""
+
+msgctxt "#32503"
+msgid "Later"
+msgstr ""
