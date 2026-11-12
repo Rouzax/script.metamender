@@ -106,7 +106,7 @@ feat/7d-provider-replacement.
 - [x] 9.7 Episodes without a usable id of their own (TVmaze-scraped) matched by season and episode number at TMDB and TheTVDB separately, accepted only when the title (folder or original language) or a date no other episode of that season shares agrees; matched ids stay in the tracker; Update now re-asks lookups that answered empty and re-checks number matches
 
 ## Phase 10: Scale, Progress, and Polish
-- [ ] 10.1 Progress notifications (per-scan, summary, resume)
+- [x] 10.1 Background notifications: nothing while anything plays, a toast only after a scan that changed something, and an attention window (own style) for problems that need the user: setup not finished, no or a rejected TMDB key, background scans failing for a day, a library folder offline for 3 days; each shown once, again only when it changes or comes back
 - [ ] 10.2 Docker test scripts (setup.sh, run-test.sh)
 - [ ] 10.3 CLAUDE.md and documentation
 

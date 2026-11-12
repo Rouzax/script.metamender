@@ -5,6 +5,7 @@
      set by attention_window.py. -->
 <window>
     <zorder>1</zorder>
+    <defaultcontrol always="true">31</defaultcontrol>
     <controls>
         <control type="image">
             <left>0</left><top>0</top><width>1920</width><height>1080</height>
@@ -22,13 +23,30 @@
                 <effect type="zoom" start="100" end="96" center="auto" tween="sine" easing="out" time="200"/>
                 <effect type="fade" start="100" end="0" tween="cubic" easing="out" time="200"/>
             </animation>
-            <control type="image">
-                <left>0</left><top>0</top><width>1000</width><height>520</height>
-                <texture border="20" colordiffuse="FF1A1D23">metamender/panel.png</texture>
+            <!-- Without "Also" lines the panel is shorter and the buttons sit
+                 right under the problem text. -->
+            <animation effect="slide" end="0,45" time="0" condition="String.IsEmpty(Window.Property(MM.Also))">Conditional</animation>
+            <control type="group">
+                <visible>!String.IsEmpty(Window.Property(MM.Also))</visible>
+                <control type="image">
+                    <left>0</left><top>0</top><width>1000</width><height>520</height>
+                    <texture border="20" colordiffuse="FF1A1D23">metamender/panel.png</texture>
+                </control>
+                <control type="image">
+                    <left>0</left><top>0</top><width>1000</width><height>520</height>
+                    <texture border="20" colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/frame.png</texture>
+                </control>
             </control>
-            <control type="image">
-                <left>0</left><top>0</top><width>1000</width><height>520</height>
-                <texture border="20" colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/frame.png</texture>
+            <control type="group">
+                <visible>String.IsEmpty(Window.Property(MM.Also))</visible>
+                <control type="image">
+                    <left>0</left><top>0</top><width>1000</width><height>430</height>
+                    <texture border="20" colordiffuse="FF1A1D23">metamender/panel.png</texture>
+                </control>
+                <control type="image">
+                    <left>0</left><top>0</top><width>1000</width><height>430</height>
+                    <texture border="20" colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/frame.png</texture>
+                </control>
             </control>
 
             <!-- Heading: the heartbeat badge and the title, centred together. -->
@@ -76,6 +94,7 @@
                  centred together. -->
             <control type="grouplist">
                 <left>50</left><top>404</top><width>900</width><height>72</height>
+                <animation effect="slide" end="0,-90" time="0" condition="String.IsEmpty(Window.Property(MM.Also))">Conditional</animation>
                 <orientation>horizontal</orientation>
                 <align>center</align>
                 <itemgap>28</itemgap>
