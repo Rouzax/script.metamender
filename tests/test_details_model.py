@@ -133,10 +133,21 @@ def test_fallback_and_empty_original_and_unknown_original():
     assert runtime[""] == "45 min"
 
 
+def test_nfo_field_says_it_is_only_filled_when_empty():
+    """may_write fills an empty NFO field and updates MetaMender's own
+    earlier value, so the text must not say "never"."""
+    rows = _by_key(_rows(fs_map={"title": _fs("nfo", next_retry="2026-11-19")}))
+    assert dict(rows["title"].lines)["Why"] == (
+        "Your NFO file sets this field, so MetaMender only fills it when it is empty.")
+
+
 def test_left_and_waiting_fields_say_why():
     rows = _by_key(_rows())
     title = dict(rows["title"].lines)
-    assert "only fills" in title["Why"]
+    # The kept value may be the user's own edit, so it is not called the
+    # scraper's.
+    assert title["Why"] == ("This folder has no language set, so MetaMender only "
+                            "fills empty fields and keeps this value.")
     assert dict(rows["firstaired"].lines)["Next check"] == "settled, not checked again"
     director = dict(rows["director"].lines)
     assert director[""] == "Empty"

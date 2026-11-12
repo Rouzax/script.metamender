@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from resources.lib.data.media_types import MOVIE
+from resources.lib.data.media_types import MOVIE, TVSHOW
 from resources.lib.data.tracker import REASON_LOCKED, TrackerDB
 from resources.lib.engine.protect import fingerprint
 from resources.lib.service import details
@@ -102,11 +103,96 @@ def test_no_original_is_not_restorable(db):
     assert details.can_restore("plot", "new plot", {}, keep) is False
 
 
+def test_restore_commits_the_lock_before_writing_kodi(db, tmp_path):
+    """A scan that starts after the Kodi write must already see the lock."""
+    _setup(db, "plot", "old plot", "new plot")
+    seen = []
+
+    def kodi_write(*args, **kwargs):
+        other = TrackerDB(str(tmp_path / "backfill.db"))
+        seen.append(other.get_keep("movie", IDENT)["plot"]["locked"])
+        other.close()
+        return True
+
+    with patch.object(details.kodi, "get_item_by_id", return_value={"plot": "new plot"}), \
+            patch.object(details.kodi, "update_item", side_effect=kodi_write):
+        assert details.restore_field(db, MOVIE, 7, IDENT, "plot") == "restored"
+    assert seen == [True]
+
+
+def test_restore_lock_not_saved_writes_nothing(db):
+    _setup(db, "plot", "old plot", "new plot")
+    with patch.object(db, "set_locked", return_value=False):
+        result, upd = _run(db, "plot", "new plot")
+    assert result == details.LOCK_FAILED
+    upd.assert_not_called()
+
+
+def test_restore_lock_commit_failure_writes_nothing(db):
+    _setup(db, "plot", "old plot", "new plot")
+    with patch.object(db, "commit", side_effect=sqlite3.OperationalError("database is locked")):
+        result, upd = _run(db, "plot", "new plot")
+    assert result == details.LOCK_FAILED
+    upd.assert_not_called()
+
+
+def test_failed_write_keeps_an_earlier_lock(db):
+    _setup(db, "plot", "old plot", "new plot")
+    db.set_locked("movie", IDENT, "plot", True)
+    db.commit()
+    result, _ = _run(db, "plot", "new plot", write=False)
+    assert result == "failed"
+    assert db.get_keep("movie", IDENT)["plot"]["locked"] is True
+
+
+def test_restore_show_title_moves_its_episode_rows(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "backfill.db"))
+    tracker.upsert_item("tvshow", "tmdb:1", "Kwak")
+    tracker.keep_original("tvshow", "tmdb:1", "title", "Alfred J. Kwak")
+    tracker.set_written_fp("tvshow", "tmdb:1", "title", fingerprint("Alfred Jodocus Kwak"))
+    tracker.upsert_item("episode", "Alfred Jodocus Kwak S01E01", kodi_id=3)
+    tracker.set_locked("episode", "Alfred Jodocus Kwak S01E01", "plot", True)
+    tracker.commit()
+    with patch.object(details.kodi, "get_item_by_id",
+                      return_value={"title": "Alfred Jodocus Kwak"}), \
+            patch.object(details.kodi, "update_item", return_value=True):
+        assert details.restore_field(tracker, TVSHOW, 5, "tmdb:1", "title") == "restored"
+    assert tracker.get_item("episode", "Alfred Jodocus Kwak S01E01") is None
+    assert tracker.get_item("episode", "Alfred J. Kwak S01E01") is not None
+    assert tracker.get_keep("episode", "Alfred J. Kwak S01E01")["plot"]["locked"] is True
+    tracker.close()
+
+
+def test_restore_refused_show_title_keeps_the_episode_rows(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "backfill.db"))
+    tracker.upsert_item("tvshow", "tmdb:1", "Kwak")
+    tracker.keep_original("tvshow", "tmdb:1", "title", "Alfred J. Kwak")
+    tracker.set_written_fp("tvshow", "tmdb:1", "title", fingerprint("Alfred Jodocus Kwak"))
+    tracker.upsert_item("episode", "Alfred Jodocus Kwak S01E01", kodi_id=3)
+    tracker.commit()
+    with patch.object(details.kodi, "get_item_by_id",
+                      return_value={"title": "Alfred Jodocus Kwak"}), \
+            patch.object(details.kodi, "update_item", return_value=False):
+        assert details.restore_field(tracker, TVSHOW, 5, "tmdb:1", "title") == "failed"
+    assert tracker.get_item("episode", "Alfred Jodocus Kwak S01E01") is not None
+    tracker.close()
+
+
 def test_unlock(db):
     db.set_locked("movie", IDENT, "plot", True)
     db.commit()
-    details.unlock_field(db, MOVIE, IDENT, "plot")
+    assert details.unlock_field(db, MOVIE, IDENT, "plot") is True
     assert db.get_keep("movie", IDENT)["plot"]["locked"] is False
+
+
+def test_unlock_failure_is_reported_not_logged_as_done(db):
+    db.set_locked("movie", IDENT, "plot", True)
+    db.commit()
+    with patch.object(db, "set_locked", return_value=False), \
+            patch.object(details, "log") as log:
+        assert details.unlock_field(db, MOVIE, IDENT, "plot") is False
+    assert "details.unlocked" not in [c.kwargs.get("event") for c in log.info.call_args_list]
+    assert db.get_keep("movie", IDENT)["plot"]["locked"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +212,8 @@ _LANG = {
     32590: "The value changed since this window opened, so nothing was restored.",
     32591: "Kodi did not accept the restore.",
     32592: "Could not read this item's details.",
+    32595: _PO_STRINGS[32595],
+    32596: _PO_STRINGS[32596],
 }
 
 MOVIE_ITEM = {
@@ -292,12 +380,10 @@ def test_session_restore_takes_the_scan_lock(opened):
 
 def test_session_restore_changed_value_tells_the_user(opened):
     session, row = _restorable(opened)
-    MOVIE_ITEM["plot"] = "edited"
-    try:
-        with patch.object(details.kodi, "update_item") as upd:
-            session.run_action(row)
-    finally:
-        MOVIE_ITEM["plot"] = "new plot"
+    edited = dict(MOVIE_ITEM, plot="edited")
+    with patch.object(details.kodi, "get_item_by_id", return_value=edited), \
+            patch.object(details.kodi, "update_item") as upd:
+        session.run_action(row)
     upd.assert_not_called()
     assert opened["notes"] == [_LANG[32590]]
 
@@ -325,6 +411,34 @@ def test_session_unlock(opened):
     session.run_action(row)
     view = session.load()
     assert next(r for r in view.rows if r.key == "genre").action == ""
+
+
+@pytest.mark.parametrize("failure", ["refused", "raised"])
+def test_session_unlock_failure_tells_the_user(opened, failure):
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=7)
+    tracker.set_locked("movie", "tmdb:949", "genre", True)
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    session, view = opened["shown"][0]
+    row = next(r for r in view.rows if r.key == "genre")
+    patched = ({"return_value": False} if failure == "refused"
+               else {"side_effect": sqlite3.OperationalError("database is locked")})
+    with patch.object(TrackerDB, "set_locked", **patched):
+        session.run_action(row)
+    assert opened["notes"] == [_PO_STRINGS[32596]]
+    view = session.load()
+    assert next(r for r in view.rows if r.key == "genre").action == "unlock"
+
+
+def test_session_restore_lock_failure_tells_the_user(opened):
+    session, row = _restorable(opened)
+    with patch.object(TrackerDB, "set_locked", return_value=False), \
+            patch.object(details.kodi, "update_item") as upd:
+        session.run_action(row)
+    upd.assert_not_called()
+    assert opened["notes"] == [_PO_STRINGS[32595]]
 
 
 def test_open_details_reads_the_row_a_scan_would_adopt(opened):

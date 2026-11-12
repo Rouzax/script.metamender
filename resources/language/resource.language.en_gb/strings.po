@@ -991,11 +991,11 @@ msgid "Kodi already has this value, so nothing needed to change."
 msgstr ""
 
 msgctxt "#32541"
-msgid "Your NFO file sets this field, so MetaMender never writes it."
+msgid "Your NFO file sets this field, so MetaMender only fills it when it is empty."
 msgstr ""
 
 msgctxt "#32542"
-msgid "Your scraper's value stays: MetaMender only fills this field when it is empty."
+msgid "This folder has no language set, so MetaMender only fills empty fields and keeps this value."
 msgstr ""
 
 msgctxt "#32543"
@@ -1200,4 +1200,12 @@ msgstr ""
 
 msgctxt "#32594"
 msgid "Details"
+msgstr ""
+
+msgctxt "#32595"
+msgid "Could not save the lock, so nothing was restored."
+msgstr ""
+
+msgctxt "#32596"
+msgid "Could not unlock this field."
 msgstr ""

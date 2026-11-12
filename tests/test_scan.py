@@ -12,6 +12,7 @@ from resources.lib.constants import FALLBACK_RECHECK_DAYS, FALLBACK_RECHECKS
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
+from resources.lib.engine.protect import fingerprint
 from resources.lib.engine.scan import (
     _extract_fields,
     _extract_ids,
@@ -6585,6 +6586,36 @@ class TestFieldReasonsAndKeep:
         assert fetch.called
         assert _written(upd, "plot") == "Fresh plot"
         assert row["settings_fp"] == _fp("plot") and row["last_reason"] == "updated"
+
+    def test_restored_show_title_keeps_its_episode_locks(self, tmp_path, kodi_stubs):
+        """Restoring a show's title renames every episode key; a locked
+        episode field must stay locked under the restored title."""
+        from resources.lib.service.details import restore_field
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("tvshow", "tmdb:99999", kodi_id=10, tmdb_id="99999")
+        tracker.keep_original("tvshow", "tmdb:99999", "title", "Original Show")
+        tracker.set_written_fp("tvshow", "tmdb:99999", "title", fingerprint("Test Show"))
+        tracker.upsert_item("episode", "Test Show S01E01", kodi_id=100)
+        tracker.set_locked("episode", "Test Show S01E01", "plot", True)
+        tracker.commit()
+        with patch("resources.lib.data.kodi.get_item_by_id",
+                   return_value=_make_tvshow_item(title="Test Show")), \
+                patch("resources.lib.data.kodi.update_item", return_value=True):
+            assert restore_field(tracker, TVSHOW, 10, "tmdb:99999", "title") == "restored"
+
+        episode = _make_episode_item(showtitle="Original Show")
+        with patch("resources.lib.providers.tmdb.fetch_season",
+                   return_value=[_tmdb_episode_data()]), \
+                patch("resources.lib.data.kodi.update_item", return_value=True) as upd:
+            run_scan(EPISODE, tracker, _make_source_config(), frozenset({"plot"}),
+                     "k", _make_settings(), items=[episode], show_id_map={10: "55555"},
+                     reset=True)
+        reason = tracker.get_field_status("episode", "Original Show S01E01", "plot")
+        tracker.close()
+
+        assert _written(upd, "plot") is None
+        assert reason["last_reason"] == "locked"
 
     def test_locked_field_beside_a_due_field_is_left_alone(self, tmp_path, kodi_stubs):
         tracker = _make_tracker(tmp_path)

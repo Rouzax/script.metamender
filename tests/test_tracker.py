@@ -1006,3 +1006,48 @@ def test_adopt_identity_carries_the_kept_original_and_lock(tmp_path):
     assert keep["plot"]["original"] == "old" and keep["genre"]["locked"] is True
     assert db.get_keep("movie", "Foo (2001)") == {}
     db.close()
+
+
+def test_open_does_not_wait_for_another_connections_write(tmp_path):
+    """A scan holds the write lock from upsert_item until its commit, across
+    provider calls; opening a second tracker (the details window) must not
+    need it once the schema is current."""
+    import threading
+
+    path = str(tmp_path / "backfill.db")
+    scan = TrackerDB(path)
+    scan.upsert_item("movie", "Heat (1995)", "Heat")  # uncommitted write
+    result: dict[str, object] = {}
+
+    def open_second():
+        try:
+            other = TrackerDB(path)
+            result["item"] = other.get_item("movie", "Heat (1995)")
+            other.close()
+        except Exception as exc:  # pragma: no cover - the failure path
+            result["error"] = exc
+
+    worker = threading.Thread(target=open_second, daemon=True)
+    worker.start()
+    worker.join(timeout=2)
+    try:
+        assert not worker.is_alive(), "TrackerDB() waited for the write lock"
+        assert "error" not in result
+        assert result["item"] is None  # the uncommitted row is not visible
+    finally:
+        scan.commit()
+        worker.join()
+        scan.close()
+
+
+def test_set_locked_and_forget_fingerprint_report_a_failed_write(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Heat (1995)", "Heat")
+    db.commit()
+    assert db.set_locked("movie", "Heat (1995)", "plot", True) is True
+    assert db.forget_field_fingerprint("movie", "Heat (1995)", "plot") is True
+    db.commit()
+    db._conn.execute("PRAGMA query_only = ON")
+    assert db.set_locked("movie", "Heat (1995)", "plot", False) is False
+    assert db.forget_field_fingerprint("movie", "Heat (1995)", "plot") is False
+    db.close()

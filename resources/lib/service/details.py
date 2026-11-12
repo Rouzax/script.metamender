@@ -9,11 +9,13 @@ Logging:
         - details.open_notfound (WARNING): The item is not in the library
         - details.locked (INFO): Restore skipped, a scan is running
         - details.restored / details.restore_changed / details.restore_failed
-        - details.unlocked (INFO)
+          (cause=lock: the lock could not be saved; cause=kodi: Kodi refused)
+        - details.unlocked (INFO): only once the unlock is committed
         - details.error (ERROR): Reading the item or a window action raised
 """
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any
@@ -56,6 +58,7 @@ RESTORABLE_EXCLUDED = frozenset({"rating", "votes", "ratings"})
 
 RESTORED = "restored"
 CHANGED = "changed"
+LOCK_FAILED = "lock_failed"
 FAILED = "failed"
 
 
@@ -81,13 +84,16 @@ def can_restore(
 def restore_field(
     tracker: TrackerDB, media_type: MediaType, kodi_id: int, identity: str, field: str
 ) -> str:
-    """Write the kept original back to Kodi and lock the field.
+    """Lock the field, then write the kept original back to Kodi.
 
     Kodi is re-read first: the window may have been open while the user or a
-    scraper changed the value, and overwriting that would lose it. Returns
-    "restored", "changed" (nothing written) or "failed" (Kodi refused the
-    write; nothing locked). Provenance is left alone: the field now holds the
-    original, not a value MetaMender wrote.
+    scraper changed the value, and overwriting that would lose it. The lock
+    is committed before Kodi is written, so a value Kodi now holds is never
+    unprotected; a lock that cannot be saved writes nothing. Returns
+    "restored", "changed" (nothing written), "lock_failed" (nothing written)
+    or "failed" (Kodi refused the write; the lock is put back as it was).
+    Provenance is left alone: the field now holds the original, not a value
+    MetaMender wrote.
     """
     keep = tracker.get_keep(media_type.name, identity)
     fs = tracker.get_field_status_map(media_type.name, identity).get(field, {})
@@ -99,19 +105,39 @@ def restore_field(
             media_type=media_type.name, field=field,
         )
         return CHANGED
+    was_locked = bool(keep[field].get("locked"))
+    if not _save_lock(tracker, media_type, identity, field, True):
+        log.warning(
+            "The lock could not be saved, nothing restored",
+            event="details.restore_failed", identity=identity,
+            media_type=media_type.name, field=field, cause="lock",
+        )
+        return LOCK_FAILED
     original = keep[field]["original"]
-    if not kodi.update_item(
-        kodi_id, media_type, str(item.get("title") or ""), **{field: original}
-    ):
+    current_title = str(item.get("title") or "")
+    if not kodi.update_item(kodi_id, media_type, current_title, **{field: original}):
         log.warning(
             "Kodi refused the restore",
             event="details.restore_failed", identity=identity,
-            media_type=media_type.name, field=field,
+            media_type=media_type.name, field=field, cause="kodi",
         )
+        if not was_locked:
+            _save_lock(tracker, media_type, identity, field, False)
         return FAILED
-    tracker.set_locked(media_type.name, identity, field, True)
     tracker.record_field_reason(media_type.name, identity, field, REASON_LOCKED)
-    tracker.commit()
+    if media_type.name == "tvshow" and field == "title" and current_title and original:
+        # Episodes are keyed on their show's title, as after a scan's title
+        # write; without the re-key they lose their rows and locks. It
+        # commits the reason with it.
+        tracker.rename_show_episodes(current_title, str(original))
+    else:
+        try:
+            tracker.commit()
+        except sqlite3.Error:
+            # The lock is saved and Kodi holds the original; only the
+            # displayed reason is lost.
+            log.exception("Failed to record the locked reason", event="details.error",
+                          identity=identity, media_type=media_type.name, field=field)
     log.info(
         "Original restored and field locked",
         event="details.restored", identity=identity,
@@ -120,20 +146,47 @@ def restore_field(
     return RESTORED
 
 
+def _save_lock(
+    tracker: TrackerDB, media_type: MediaType, identity: str, field: str, locked: bool
+) -> bool:
+    """Set the lock flag and commit it; False, with nothing kept, when either
+    failed."""
+    try:
+        if tracker.set_locked(media_type.name, identity, field, locked):
+            tracker.commit()
+            return True
+    except sqlite3.Error:
+        log.exception("Failed to save the lock", event="details.error",
+                      identity=identity, media_type=media_type.name, field=field)
+    tracker.rollback()
+    return False
+
+
 def unlock_field(
     tracker: TrackerDB, media_type: MediaType, identity: str, field: str
-) -> None:
+) -> bool:
     """Let MetaMender update the field again from the next scan on; the kept
     original stays. The field may be settled, and a lock flag alone would
-    leave it settled forever, so it is made due at the next scan."""
-    tracker.set_locked(media_type.name, identity, field, False)
-    tracker.forget_field_fingerprint(media_type.name, identity, field)
-    tracker.commit()
+    leave it settled forever, so it is made due at the next scan. False when
+    the tracker could not save it; the field then stays locked."""
+    try:
+        saved = (tracker.set_locked(media_type.name, identity, field, False)
+                 and tracker.forget_field_fingerprint(media_type.name, identity, field))
+        if saved:
+            tracker.commit()
+    except sqlite3.Error:
+        log.exception("Failed to save the unlock", event="details.error",
+                      identity=identity, media_type=media_type.name, field=field)
+        saved = False
+    if not saved:
+        tracker.rollback()
+        return False
     log.info(
         "Field unlocked",
         event="details.unlocked", identity=identity,
         media_type=media_type.name, field=field,
     )
+    return True
 
 
 @dataclass
@@ -266,14 +319,17 @@ class DetailsSession:
 
         if row.action == ACTION_UNLOCK:
             tracker = None
+            unlocked = False
             try:
                 tracker = TrackerDB(_get_db_path())
-                unlock_field(tracker, self.media_type, self.identity, row.key)
+                unlocked = unlock_field(tracker, self.media_type, self.identity, row.key)
             except Exception:
                 log.exception("Unlock failed", event="details.error", field=row.key)
             finally:
                 if tracker is not None:
                     tracker.close()
+            if not unlocked:
+                notify(lang(32596))  # Could not unlock this field
             return
         if row.action != ACTION_RESTORE:
             return
@@ -296,6 +352,8 @@ class DetailsSession:
                 tracker.close()
         if result == CHANGED:
             notify(lang(32590))  # The value changed since this window opened
+        elif result == LOCK_FAILED:
+            notify(lang(32595))  # Could not lock the field, nothing restored
         elif result == FAILED:
             notify(lang(32591))  # Kodi did not accept the restore
 

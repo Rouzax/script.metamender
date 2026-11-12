@@ -193,6 +193,11 @@ class TrackerDB:
             )
             self._conn.executescript(_SCHEMA_SQL)
 
+        # A current stamp is not rewritten: the write would wait for the lock
+        # a running scan holds across its provider calls, and opening the
+        # details window must not write at all.
+        if stored == SCHEMA_VERSION:
+            return
         self._conn.execute(
             "INSERT OR REPLACE INTO scan_state (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -334,7 +339,8 @@ class TrackerDB:
         return old
 
     def rename_show_episodes(self, old_title: str, new_title: str) -> int:
-        """Re-key a show's episode rows after metamender changed its title.
+        """Re-key a show's episode rows after the show's title changed (a
+        scan wrote a new one, or the details window restored the original).
 
         An episode is keyed "<show title> SxxEyy" (with "|<file>" for a
         duplicate), so a new show title would otherwise orphan every episode
@@ -769,8 +775,10 @@ class TrackerDB:
 
     def set_locked(
         self, media_type: str, identity: str, field: str, locked: bool
-    ) -> None:
-        """Lock or unlock a field; a kept original is left alone."""
+    ) -> bool:
+        """Lock or unlock a field (no commit); a kept original is left alone.
+        False when the write failed: a lock the caller believes is set but
+        is not lets the next scan overwrite the field."""
         try:
             self._conn.execute(
                 "INSERT INTO field_keep (media_type, identity, field, locked) "
@@ -784,6 +792,8 @@ class TrackerDB:
                 "Failed to set lock", event="tracker.error",
                 media_type=media_type, identity=identity, field=field,
             )
+            return False
+        return True
 
     def set_written_fp(
         self, media_type: str, identity: str, field: str, written_fp: str
@@ -846,10 +856,11 @@ class TrackerDB:
             log.exception("Failed to clear field status", event="tracker.error")
             return 0
 
-    def forget_field_fingerprint(self, media_type: str, identity: str, field: str) -> None:
+    def forget_field_fingerprint(self, media_type: str, identity: str, field: str) -> bool:
         """Clear one field's settings fingerprint (no commit), so the next
         scan checks it again whatever its clock says, keeping its provenance,
-        as forget_disabled_fields does for a re-enabled field."""
+        as forget_disabled_fields does for a re-enabled field. False when the
+        write failed."""
         try:
             self._conn.execute(
                 "UPDATE field_status SET settings_fp = NULL WHERE field = ? AND item_id IN "
@@ -859,6 +870,8 @@ class TrackerDB:
         except sqlite3.Error:
             log.exception("Failed to forget field fingerprint", event="tracker.error",
                           media_type=media_type, identity=identity, field=field)
+            return False
+        return True
 
     def forget_disabled_fields(self, media_type: str, enabled: Iterable[str]) -> int:
         """Clear the settings fingerprint of every field of ``media_type`` not
@@ -885,6 +898,10 @@ class TrackerDB:
     def commit(self) -> None:
         """Commit the current transaction (callers batch one item's writes)."""
         self._conn.commit()
+
+    def rollback(self) -> None:
+        """Drop the current transaction's uncommitted writes."""
+        self._conn.rollback()
 
     def get_show_id_map(self) -> dict[int, str]:
         """Map a TV show's Kodi id to its show-level TMDB ID.
