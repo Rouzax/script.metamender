@@ -1,6 +1,20 @@
 MetaMender Changelog
 ====================
 
+v1.0.1 (unreleased)
+-------------------
+Bug Fixes:
+  - Fixed: the Update now progress window's refresh thread slept in a
+    loop and did not notice Kodi quitting; progress_window.follow now
+    waits on xbmc.Monitor().waitForAbort and closes the window when Kodi
+    asks add-ons to stop.
+
+Internal:
+  - Changes from the official repository's add-on review:
+    resources/lib/service/setup.py is now wizard.py (a file named
+    setup.py reads as a leftover packaging script), and the TheTVDB
+    project key is stored encoded and decoded at import.
+
 v1.0.0 (2026-11-12)
 -------------------
 New Features:
