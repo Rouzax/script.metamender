@@ -1,0 +1,271 @@
+"""Tests for ui/details_model.py: what the details window says about an item."""
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+
+from resources.lib.data.media_types import EPISODE, MOVIE
+from resources.lib.engine.protect import fingerprint
+from resources.lib.ui import details_model
+from resources.lib.ui.details_model import build_rows, header_line
+
+_ROOT = Path(__file__).resolve().parent.parent
+_PO = (_ROOT / "resources/language/resource.language.en_gb/strings.po").read_text()
+_STRINGS = {
+    int(k): v.replace('\\"', '"')
+    for k, v in re.findall(r'msgctxt "#(\d+)"\nmsgid "(.*)"', _PO)
+}
+
+TODAY = "2026-11-12"
+PLOT = "Agenten Mardik en Shannon worden opgeroepen voor een melding op Amsterdam Centraal."
+
+
+@pytest.fixture(autouse=True)
+def strings(monkeypatch):
+    monkeypatch.setattr(details_model, "lang", lambda i: _STRINGS.get(i, ""))
+
+
+def _fs(reason, *, source=None, count=1, next_retry=None, fetched="2026-11-12",
+        written=None, fallback=0):
+    return {
+        "source": source, "fetch_count": count, "next_retry": next_retry,
+        "fetched_at": fetched, "from_fallback": fallback, "written_value": written,
+        "settings_fp": "fp", "last_reason": reason,
+    }
+
+
+def _episode():
+    """The mockup's example: a new TVmaze episode matched by number."""
+    item = {
+        "title": "Amsterdam Centraal", "showtitle": "Het gouden uur",
+        "season": 1, "episode": 1, "firstaired": "2026-11-01",
+        "plot": PLOT, "rating": 7.4, "votes": 1234, "runtime": 2700,
+        "director": [], "writer": ["Ilse Warringa"],
+        "uniqueid": {"tvmaze": "2741234"},
+    }
+    item_row = {
+        "tmdb_id": "4104123", "tvdb_id": "9297341", "imdb_id": "tt23020114",
+        "tmdb_season": 1, "number_matched": 1, "orig_title": "Amsterdam Centraal",
+        "orig_aired": "2026-11-01", "match_note": "", "ids_checked": TODAY,
+        "last_seen": TODAY,
+    }
+    fs_map = {
+        "plot": _fs("updated", source="tmdb", next_retry="2026-11-19",
+                    written=fingerprint(PLOT)),
+        "rating": _fs("updated", source="imdb", next_retry="2026-11-19",
+                      written=json.dumps({"imdb": "x"})),
+        "votes": _fs("updated", source="imdb", next_retry="2026-11-19",
+                     written=json.dumps({"imdb": "x"})),
+        "runtime": _fs("updated", source="tmdb", next_retry="2026-11-19",
+                       written=fingerprint(2700)),
+        "title": _fs("fill_only", next_retry="2026-11-19"),
+        "firstaired": _fs("unchanged", source="tmdb", count=3),
+        "director": _fs("nothing", next_retry="2026-11-15"),
+    }
+    keep = {
+        "plot": {"original": "An English plot", "has_original": True,
+                 "locked": False, "written_fp": fingerprint(PLOT)},
+    }
+    return item, item_row, fs_map, keep
+
+
+def _rows(**kw):
+    item, item_row, fs_map, keep = _episode()
+    item.update(kw.pop("item", {}))
+    item_row.update(kw.pop("item_row", {}))
+    fs_map.update(kw.pop("fs_map", {}))
+    keep.update(kw.pop("keep", {}))
+    return build_rows(EPISODE, item, item_row, fs_map, keep, TODAY, language="Dutch", **kw)
+
+
+def _by_key(rows):
+    return {r.key: r for r in rows}
+
+
+def test_rows_grouped_like_the_mockup():
+    rows = _rows()
+    assert rows[0].key == "ids" and rows[0].group == ""
+    assert [(r.key, r.group) for r in rows[1:]] == [
+        ("plot", "updated"), ("rating", "updated"), ("runtime", "updated"),
+        ("firstaired", "left"), ("title", "left"),
+        ("director", "waiting"), ("writer", "waiting"),
+    ]
+    hints = {r.key: r.hint for r in rows}
+    assert hints["ids"] == "matched by number"
+    assert hints["plot"] == "TMDB"
+    assert hints["rating"] == "IMDb"
+    assert hints["title"] == "scraper"
+    assert hints["firstaired"] == "settled"
+    assert hints["director"] == "15 Nov"
+    assert hints["writer"] == "not checked"
+    labels = {r.key: r.label for r in rows}
+    assert labels["firstaired"] == "Aired" and labels["ids"] == "Ids"
+
+
+def test_plot_story_lines():
+    plot = _by_key(_rows())["plot"]
+    assert plot.title == "Plot"
+    assert plot.lines == [
+        ("", PLOT),
+        ("From", "TMDB, in Dutch"),
+        ("Replaced", "your scraper's value"),
+        ("Last checked", "12 Nov 2026"),
+        ("Next check", "19 Nov 2026"),
+    ]
+
+
+def test_fallback_and_empty_original_and_unknown_original():
+    rows = _by_key(_rows(
+        fs_map={"plot": _fs("updated", source="tvdb", next_retry="2026-11-19",
+                            written=fingerprint(PLOT), fallback=1)},
+        keep={"plot": {"original": "", "has_original": True, "locked": False,
+                       "written_fp": fingerprint(PLOT)}},
+    ))
+    lines = dict(rows["plot"].lines)
+    assert lines["From"] == "TheTVDB, in the fallback language"
+    assert lines["Replaced"] == "empty"
+    runtime = dict(rows["runtime"].lines)
+    assert runtime["Replaced"] == "updated before MetaMender kept the old value"
+    assert runtime["From"] == "TMDB"
+    assert runtime[""] == "45 min"
+
+
+def test_left_and_waiting_fields_say_why():
+    rows = _by_key(_rows())
+    title = dict(rows["title"].lines)
+    assert "only fills" in title["Why"]
+    assert dict(rows["firstaired"].lines)["Next check"] == "settled, not checked again"
+    director = dict(rows["director"].lines)
+    assert director[""] == "Empty"
+    assert "nothing" in director["Why"]
+    assert director["Next check"] == "15 Nov 2026"
+
+
+def test_settled_follows_the_maturity_model():
+    """Content past the stability age is final whatever next_retry holds."""
+    rows = _by_key(_rows(
+        item={"firstaired": "2020-01-01"},
+        fs_map={"title": _fs("unchanged", source="tmdb", next_retry="2026-12-01")},
+    ))
+    assert rows["title"].group == "left"
+    assert rows["title"].hint == "settled"
+    assert dict(rows["title"].lines)["Next check"] == "settled, not checked again"
+    # a young field due now waits for the next scan
+    young = _by_key(_rows(fs_map={"director": _fs("nothing", next_retry="2026-11-01")}))
+    assert young["director"].hint == "next scan"
+
+
+def test_locked_field_offers_unlock_and_restorable_offers_restore():
+    rows = _by_key(_rows(
+        fs_map={"title": _fs("locked", count=0, fetched=None)},
+        keep={"title": {"original": "Amsterdam Centraal", "has_original": True,
+                        "locked": True, "written_fp": fingerprint("Het gouden uur")}},
+    ))
+    assert rows["title"].group == "left"
+    assert rows["title"].action == "unlock"
+    assert rows["title"].hint == "locked"
+    assert "locked" in dict(rows["title"].lines)["Why"]
+    assert rows["plot"].action == "restore"
+    assert rows["runtime"].action == ""  # no original kept
+    assert rows["ids"].action == ""
+
+
+def test_restore_not_offered_when_the_value_is_no_longer_metamenders():
+    rows = _by_key(_rows(item={"plot": "Edited by hand"}))
+    assert rows["plot"].action == ""
+    assert rows["plot"].group == "updated"  # the last scan did update it
+    assert dict(rows["plot"].lines)["From"] == "your scraper"
+
+
+def test_ratings_never_offer_restore():
+    rows = _rows(
+        keep={"rating": {"original": 6.0, "has_original": True, "locked": True,
+                         "written_fp": None}},
+    )
+    rating = _by_key(rows)["rating"]
+    assert rating.action == ""
+    assert rating.group == "updated"
+    assert "votes" not in _by_key(rows)
+    assert dict(rating.lines)[""] == "7.4 (1234 votes)"
+    assert dict(rating.lines)["From"] == "IMDb"
+
+
+def test_ids_lines_for_a_number_match():
+    ids = _rows()[0]
+    assert ids.title == "Ids"
+    assert ids.lines == [
+        ("TMDB", "4104123, matched by season and episode number"),
+        ("TheTVDB", "9297341, matched by season and episode number"),
+        ("IMDb", "tt23020114, from TMDB's id list"),
+        ("", "Ids MetaMender found stay in its own records; Kodi's ids are not changed."),
+    ]
+
+
+def test_ids_from_kodi_and_found_otherwise():
+    item = {"title": "Heat", "premiered": "1995-12-15", "uniqueid": {"tmdb": "949"}}
+    row = {"tmdb_id": "949", "imdb_id": "tt0113277", "tvdb_id": None, "number_matched": 0,
+           "match_note": "", "last_seen": TODAY}
+    ids = build_rows(MOVIE, item, row, {}, {}, TODAY)[0]
+    assert ids.hint == "from Kodi"
+    assert ids.lines[:2] == [("TMDB", "949, from Kodi"), ("IMDb", "tt0113277, from TMDB's id list")]
+
+
+def test_rejected_match_lines():
+    note = [
+        {"site": "tmdb", "site_title": "Traveling Salesmen", "site_aired": "2007-01-11",
+         "kodi_title": "Back from Vacation", "kodi_aired": "2007-01-04"},
+        {"site": "conflict", "tmdb_id": "1", "tmdb_tvdb_id": "2", "tvdb_id": "3"},
+    ]
+    ids = _rows(item_row={"tmdb_id": None, "tvdb_id": None, "imdb_id": None,
+                          "number_matched": 0, "match_note": json.dumps(note)})[0]
+    assert ids.hint == "not matched"
+    assert ("TMDB", '"Traveling Salesmen", aired 11 Jan 2007') in ids.lines
+    assert ("Yours", '"Back from Vacation", aired 4 Jan 2007') in ids.lines
+    why = [text for label, text in ids.lines if label == "Why"]
+    assert why and "nothing was written" in why[0]
+    assert any("different episodes" in text for _, text in ids.lines)
+
+
+def test_rejected_match_hidden_once_the_episode_has_its_own_id():
+    note = [{"site": "tvdb", "site_title": "A", "site_aired": "2007-01-11",
+             "kodi_title": "B", "kodi_aired": "2007-01-04"}]
+    ids = _rows(item={"uniqueid": {"tvdb": "555"}},
+                item_row={"tmdb_id": None, "tvdb_id": "555", "imdb_id": None,
+                          "number_matched": 0, "match_note": json.dumps(note)})[0]
+    assert ("TheTVDB", "555, from Kodi") in ids.lines
+    assert not any(label in ("Why", "Yours") for label, _ in ids.lines)
+
+
+def test_never_checked_item():
+    item = {"title": "New film", "premiered": "2026-11-01", "plot": "",
+            "uniqueid": {"imdb": "tt9999999"}}
+    rows = build_rows(MOVIE, item, None, {}, {}, TODAY)
+    assert rows[0].key == "ids"
+    assert rows[0].lines == [("IMDb", "tt9999999, from Kodi")]
+    fields = rows[1:]
+    assert fields and all(r.group == "waiting" for r in fields)
+    assert all(r.hint == "not checked" for r in fields)
+    assert all(
+        dict(r.lines)["Why"] == "Not checked by MetaMender yet." for r in fields
+    )
+    assert all(r.action == "" for r in rows)
+    assert "votes" not in {r.key for r in rows}
+    assert header_line(None, {}, "Dutch") == "Dutch folder · not checked by MetaMender yet"
+
+
+def test_fields_limited_to_those_the_scan_manages():
+    item, item_row, fs_map, keep = _episode()
+    rows = build_rows(EPISODE, item, item_row, fs_map, keep, TODAY,
+                      fields=["plot", "rating", "votes"])
+    assert [r.key for r in rows] == ["ids", "plot", "rating"]
+
+
+def test_header_line():
+    _, item_row, fs_map, _ = _episode()
+    assert header_line(item_row, fs_map, "Dutch") == "Dutch folder · last looked at 12 Nov 2026"
+    assert header_line({"last_seen": None}, fs_map, "") == (
+        "No folder language · last looked at 12 Nov 2026"
+    )

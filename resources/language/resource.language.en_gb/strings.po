@@ -869,3 +869,263 @@ msgstr ""
 msgctxt "#32504"
 msgid "1 item updated"
 msgstr ""
+
+msgctxt "#32510"
+msgid "Ids"
+msgstr ""
+
+msgctxt "#32511"
+msgid "Plot"
+msgstr ""
+
+msgctxt "#32512"
+msgid "Title"
+msgstr ""
+
+msgctxt "#32513"
+msgid "Rating"
+msgstr ""
+
+msgctxt "#32514"
+msgid "Runtime"
+msgstr ""
+
+msgctxt "#32515"
+msgid "Director"
+msgstr ""
+
+msgctxt "#32516"
+msgid "Writer"
+msgstr ""
+
+msgctxt "#32517"
+msgid "Genre"
+msgstr ""
+
+msgctxt "#32518"
+msgid "Studio"
+msgstr ""
+
+msgctxt "#32519"
+msgid "Country"
+msgstr ""
+
+msgctxt "#32520"
+msgid "Tagline"
+msgstr ""
+
+msgctxt "#32521"
+msgid "Trailer"
+msgstr ""
+
+msgctxt "#32522"
+msgid "Aired"
+msgstr ""
+
+msgctxt "#32523"
+msgid "Certification"
+msgstr ""
+
+msgctxt "#32524"
+msgid "Updated by MetaMender"
+msgstr ""
+
+msgctxt "#32525"
+msgid "Left as it is"
+msgstr ""
+
+msgctxt "#32526"
+msgid "Waiting"
+msgstr ""
+
+msgctxt "#32527"
+msgid "From"
+msgstr ""
+
+msgctxt "#32528"
+msgid "Replaced"
+msgstr ""
+
+msgctxt "#32529"
+msgid "Last checked"
+msgstr ""
+
+msgctxt "#32530"
+msgid "Next check"
+msgstr ""
+
+msgctxt "#32531"
+msgid "Why"
+msgstr ""
+
+msgctxt "#32532"
+msgid "{}, in {}"
+msgstr ""
+
+msgctxt "#32533"
+msgid "{}, in the fallback language"
+msgstr ""
+
+msgctxt "#32534"
+msgid "your scraper"
+msgstr ""
+
+msgctxt "#32535"
+msgid "your scraper's value"
+msgstr ""
+
+msgctxt "#32536"
+msgid "empty"
+msgstr ""
+
+msgctxt "#32537"
+msgid "updated before MetaMender kept the old value"
+msgstr ""
+
+msgctxt "#32538"
+msgid "settled, not checked again"
+msgstr ""
+
+msgctxt "#32539"
+msgid "at the next scan"
+msgstr ""
+
+msgctxt "#32540"
+msgid "Kodi already has this value, so nothing needed to change."
+msgstr ""
+
+msgctxt "#32541"
+msgid "Your NFO file sets this field, so MetaMender never writes it."
+msgstr ""
+
+msgctxt "#32542"
+msgid "Your scraper's value stays: MetaMender only fills this field when it is empty."
+msgstr ""
+
+msgctxt "#32543"
+msgid "The sites MetaMender asks have nothing for this field yet."
+msgstr ""
+
+msgctxt "#32544"
+msgid "The sites could not be reached at the last check, so MetaMender tries again."
+msgstr ""
+
+msgctxt "#32545"
+msgid "You locked this field, so MetaMender leaves it alone."
+msgstr ""
+
+msgctxt "#32546"
+msgid "Not checked by MetaMender yet."
+msgstr ""
+
+msgctxt "#32547"
+msgid "settled"
+msgstr ""
+
+msgctxt "#32548"
+msgid "locked"
+msgstr ""
+
+msgctxt "#32549"
+msgid "NFO"
+msgstr ""
+
+msgctxt "#32550"
+msgid "scraper"
+msgstr ""
+
+msgctxt "#32551"
+msgid "not checked"
+msgstr ""
+
+msgctxt "#32552"
+msgid "next scan"
+msgstr ""
+
+msgctxt "#32553"
+msgid "{}, from Kodi"
+msgstr ""
+
+msgctxt "#32554"
+msgid "{}, matched by season and episode number"
+msgstr ""
+
+msgctxt "#32555"
+msgid "{}, from TMDB's id list"
+msgstr ""
+
+msgctxt "#32556"
+msgid "{}, found by MetaMender"
+msgstr ""
+
+msgctxt "#32557"
+msgid "Ids MetaMender found stay in its own records; Kodi's ids are not changed."
+msgstr ""
+
+msgctxt "#32558"
+msgid "No ids yet."
+msgstr ""
+
+msgctxt "#32559"
+msgid "matched by number"
+msgstr ""
+
+msgctxt "#32560"
+msgid "from Kodi"
+msgstr ""
+
+msgctxt "#32561"
+msgid "not matched"
+msgstr ""
+
+msgctxt "#32562"
+msgid "found by MetaMender"
+msgstr ""
+
+msgctxt "#32563"
+msgid "\"{}\", aired {}"
+msgstr ""
+
+msgctxt "#32564"
+msgid "Yours"
+msgstr ""
+
+msgctxt "#32565"
+msgid "The episode did not pass the title and date check, so nothing was written."
+msgstr ""
+
+msgctxt "#32566"
+msgid "Conflict"
+msgstr ""
+
+msgctxt "#32567"
+msgid "TMDB and TheTVDB name different episodes, so neither was used."
+msgstr ""
+
+msgctxt "#32568"
+msgid "{} folder"
+msgstr ""
+
+msgctxt "#32569"
+msgid "No folder language"
+msgstr ""
+
+msgctxt "#32570"
+msgid "last looked at {}"
+msgstr ""
+
+msgctxt "#32571"
+msgid "not checked by MetaMender yet"
+msgstr ""
+
+msgctxt "#32572"
+msgid "{} min"
+msgstr ""
+
+msgctxt "#32573"
+msgid "{} ({} votes)"
+msgstr ""
+
+msgctxt "#32574"
+msgid "Empty"
+msgstr ""
