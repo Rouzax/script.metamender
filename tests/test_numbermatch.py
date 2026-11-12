@@ -247,9 +247,9 @@ def test_number_matched_imdb_not_written_to_kodi(tracker):
 
 
 def _stored_match(tracker, **kw):
-    values = dict(tmdb_id="502", tvdb_id="702", tmdb_season=1,
-                  orig_title="Amsterdam Centraal", orig_aired="2022-10-23",
-                  number_matched=1)
+    values = {"tmdb_id": "502", "tvdb_id": "702", "tmdb_season": 1,
+              "orig_title": "Amsterdam Centraal", "orig_aired": "2022-10-23",
+              "number_matched": 1}
     values.update(kw)
     tracker.upsert_item("episode", ID, **values)
     return tracker.get_item("episode", ID)
@@ -316,3 +316,25 @@ def test_recheck_drops_match_when_show_is_untracked(tracker, providers):
                     tracked=False), ids=_ids(tmdb="502", tvdb="702"), stored=stored)
     assert not ids.any() and not ids.number_matched
     assert tracker.get_item("episode", ID)["number_matched"] == 0
+
+
+def test_rejection_writes_a_match_note_and_a_pass_clears_it(tracker, providers):
+    import json
+
+    providers.season.return_value = SHIFTED_TMDB
+    providers.numbers.return_value = _tvdb_numbers([("702", 2, "Iets anders", "2022-10-30")])
+    _run(_ctx(tracker))
+    note = json.loads(tracker.get_item("episode", ID)["match_note"])
+    assert note == [
+        {"site": "tmdb", "site_title": "Iets anders", "site_aired": "2022-10-30",
+         "kodi_title": "Amsterdam Centraal", "kodi_aired": "2022-10-23"},
+        {"site": "tvdb", "site_title": "Iets anders", "site_aired": "2022-10-30",
+         "kodi_title": "Amsterdam Centraal", "kodi_aired": "2022-10-23"},
+    ]
+
+    providers.season.return_value = AGREE_TMDB
+    providers.numbers.return_value = AGREE_TVDB
+    _run(_ctx(tracker, reset=True), stored=tracker.get_item("episode", ID))
+    row = tracker.get_item("episode", ID)
+    assert row["number_matched"] == 1
+    assert row["match_note"] == ""

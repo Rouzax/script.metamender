@@ -79,7 +79,16 @@ from resources.lib.data.media_types import MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import load_preset
 from resources.lib.data.sources import kodi_ui_language, match_source
-from resources.lib.data.tracker import TrackerDB
+from resources.lib.data.tracker import (
+    REASON_FILL_ONLY,
+    REASON_LOCKED,
+    REASON_NFO,
+    REASON_NOTHING,
+    REASON_UNCHANGED,
+    REASON_UNCHECKED,
+    REASON_UPDATED,
+    TrackerDB,
+)
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import (
     DERIVED,
@@ -520,6 +529,62 @@ def _write_fields(
             written.update({"rating", "votes"})
             written.discard("ratings")
     return written
+
+
+def _field_reason(
+    f: str,
+    written: set[str],
+    held: set[str],
+    extracted: dict[str, Any],
+    nfo_managed: bool,
+    item: dict[str, Any],
+    cert_kept: bool,
+) -> str:
+    """Why an answered field is as it is after this scan, as the scan acted.
+
+    A value _plan_writes dropped was protected by the NFO or by the folder's
+    fill-only rule. A certification the chain left in Kodi (an NFO's, or a
+    foreign one while replacing is off) reaches no plan: it is the NFO's on
+    an NFO item, otherwise Kodi's value kept as it is. Ratings are a slot
+    map that never reaches the plan either: nothing written means Kodi's
+    slots stand, or there were none to write.
+    """
+    if f in written:
+        return REASON_UPDATED
+    if f in held:
+        return REASON_UNCHANGED
+    if f in extracted:
+        return REASON_NFO if nfo_managed else REASON_FILL_ONLY
+    if f == "mpaa" and cert_kept:
+        return REASON_NFO if nfo_managed else REASON_UNCHANGED
+    if f in _RATING_FIELDS and item.get("ratings"):
+        return REASON_UNCHANGED
+    return REASON_NOTHING
+
+
+def _keep_originals(
+    tracker: TrackerDB,
+    media_type: str,
+    identity: str,
+    item: dict[str, Any],
+    written: set[str],
+    fields_to_write: dict[str, Any],
+    fs_map: dict[str, dict[str, Any]],
+) -> None:
+    """Keep the value each written field held before this scan replaced it,
+    unless that value was metamender's own (its fingerprint is the field's
+    written_value): then the kept original, from before metamender's first
+    write, stays. A scraper's or user's value since then replaces it. A field
+    filled from empty keeps "" or [] by the written value's type, so Restore
+    can clear it. Rating slots get no original: the scraper's slots stay
+    beside metamender's."""
+    for f in sorted(written - _RATING_FIELDS):
+        current = _kodi_form(item.get(f))
+        if fingerprint(current) == fs_map.get(f, {}).get("written_value"):
+            continue
+        if current is None:
+            current = [] if isinstance(fields_to_write.get(f), list) else ""
+        tracker.keep_original(media_type, identity, f, current)
 
 
 def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
@@ -981,6 +1046,14 @@ def run_scan(
         threshold = settings.get("stale_threshold_days", 365)
 
         fields = _item_fields(candidates, media_type, identity)
+        # A locked field is the user's: never fetched, written or sampled,
+        # on Update now and after a settings change too. Its reason is
+        # recorded each scan it would have been considered.
+        locked = (tracker.locked_fields(media_type.name, identity) - _RATING_FIELDS) & set(fields)
+        if locked:
+            fields = [f for f in fields if f not in locked]
+            for f in sorted(locked):
+                tracker.record_field_reason(media_type.name, identity, f, REASON_LOCKED)
         # A field sampled under other settings (or before fingerprints were
         # stored) is re-checked as if never sampled, and re-baselined once it
         # answers. A transient keeps the old fingerprint, so it stays due.
@@ -1125,6 +1198,7 @@ def run_scan(
             reopened,
         )
         cert_value: str | None = None
+        cert_kept = False
         if "mpaa" in nonfinal and ctx.cert is not None:
             cert_answer, cert_value = _resolve_cert(
                 ctx.cert, item, identity, primary, ids, fs_map.get("mpaa", {}),
@@ -1139,6 +1213,7 @@ def run_scan(
                 from_fallback=cert_answer.kind in (DERIVED, NONE),
             )
             providers["mpaa"] = cert_answer.source
+            cert_kept = cert_answer.kind == REAL and cert_answer.source == "kodi"
         answered = [f for f in nonfinal if f in outcomes and not outcomes[f].transient]
         extracted = _extract_fields(values, answered)
         if cert_value is not None and "mpaa" in answered:
@@ -1176,6 +1251,9 @@ def run_scan(
 
         written = _write_fields(
             ctx, kodi_id, title, identity, fields_to_write, stats,
+        )
+        _keep_originals(
+            tracker, media_type.name, identity, item, written, fields_to_write, fs_map,
         )
         if media_type.name == "tvshow" and "title" in written and item.get("title"):
             # Episodes are keyed on their show's title; keep their rows.
@@ -1220,6 +1298,7 @@ def run_scan(
             outcome = outcomes[f]
             if outcome.transient:
                 stats["transient"] += 1
+                tracker.record_field_reason(media_type.name, identity, f, REASON_UNCHECKED)
                 continue
             if f in write_failed:
                 continue
@@ -1262,11 +1341,15 @@ def run_scan(
                 # A certification is rechecked monthly at any age.
                 mature = f == "mpaa" or (age is not None and age >= threshold)
                 next_due = fallback_recheck_due(None if mature else next_due, today)
+            reason = _field_reason(
+                f, written, held, extracted, nfo_managed, item, cert_kept,
+            )
             if reset and int(fs.get("fetch_count") or 0) > 0:
                 tracker.record_manual_check(
                     media_type.name, identity, f, settings_fp=fps[f],
                     written_value=provenance.get(f), source=source,
                     vote_count=vote_count, from_fallback=from_fallback,
+                    reason=reason,
                 )
             elif f in rebaseline:
                 tracker.reset_field_clock(
@@ -1274,6 +1357,7 @@ def run_scan(
                     next_retry=next_due, settings_fp=fps[f],
                     written_value=provenance.get(f), source=source,
                     vote_count=vote_count, from_fallback=from_fallback,
+                    reason=reason,
                 )
             else:
                 tracker.record_field_fetch(
@@ -1281,7 +1365,7 @@ def run_scan(
                     next_retry=next_due, settings_fp=fps[f],
                     written_value=provenance.get(f), source=source,
                     vote_count=vote_count, from_fallback=from_fallback,
-                    fallback_recheck=f in rechecks,
+                    fallback_recheck=f in rechecks, reason=reason,
                 )
         _finish_lookups(ctx, identity, ids, today)
         tracker.commit()

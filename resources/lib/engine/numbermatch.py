@@ -16,6 +16,7 @@ Logs under the 'scan' logger; the events are listed in engine/scan.py.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -174,13 +175,19 @@ def _verdict(site: Any, kept: _Kept) -> Any:
     return check_number_match(kept.title, kept.aired, kept.season, kept.number, site or [])
 
 
+_NOTE_KEYS = ("site", "site_title", "site_aired", "kodi_title", "kodi_aired")
+
+
 def _log_rejected(
     site_name: str, site: Any, verdict: MatchVerdict, kept: _Kept, identity: str,
-) -> None:
+) -> dict[str, Any] | None:
     """One line per site that did not pass: INFO for a rejected candidate, so
     the user can see why the episode stayed as it was; DEBUG when the site
     has no episode with that number (a whole year-numbered season would
-    otherwise flood the log)."""
+    otherwise flood the log).
+
+    Returns a rejected candidate's entry for the item's match note (both
+    titles and dates), None when the site had no such episode."""
     candidate = next(
         (ep for ep in site or []
          if ep.season == kept.season and ep.number == kept.number), None,
@@ -193,8 +200,9 @@ def _log_rejected(
     }
     if verdict.reason == "rejected":
         log.info("Episode number match rejected", event="scan.number_match_rejected", **fields)
-    else:
-        log.debug("Episode number not found", event="scan.number_match_rejected", **fields)
+        return {k: fields[k] for k in _NOTE_KEYS}
+    log.debug("Episode number not found", event="scan.number_match_rejected", **fields)
+    return None
 
 
 def _cross_ids(ctx: _ScanCtx, show_tmdb_id: str, kept: _Kept, identity: str) -> Any:
@@ -323,10 +331,18 @@ def match_episode_by_number(
         return
 
     ids.looked_up = True
+    notes: list[dict[str, Any]] = []
     for name, site, verdict in (("tmdb", tmdb_list, tmdb_verdict),
                                 ("tvdb", tvdb_list, tvdb_verdict)):
         if verdict.episode is None:
-            _log_rejected(name, site, verdict, kept, identity)
+            note = _log_rejected(name, site, verdict, kept, identity)
+            if note is not None:
+                notes.append(note)
+    # The note describes the latest completed check: the sites that rejected
+    # their candidate, or nothing. A match that passes clears it below.
+    ctx.tracker.upsert_item(
+        ctx.media_type.name, identity, match_note=json.dumps(notes) if notes else "",
+    )
 
     tmdb_ep = tmdb_verdict.episode
     tvdb_ep = tvdb_verdict.episode
@@ -351,7 +367,7 @@ def match_episode_by_number(
     ids.number_matched = True
     ctx.tracker.upsert_item(
         ctx.media_type.name, identity, tmdb_id=ids.tmdb, tmdb_season=ids.tmdb_season,
-        tvdb_id=ids.tvdb, imdb_id=ids.imdb, number_matched=1,
+        tvdb_id=ids.tvdb, imdb_id=ids.imdb, number_matched=1, match_note="",
     )
     log.debug(
         "Episode matched by number",

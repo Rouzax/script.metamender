@@ -1432,8 +1432,9 @@ class TestRunScanPerFieldRefresh:
         )
 
         field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
-        # No clean answer -> no field_status row was recorded for this scan.
-        assert field is None
+        # No clean answer -> only the reason is recorded, never a sample.
+        assert field["fetch_count"] == 0 and field["fetched_at"] is None
+        assert field["last_reason"] == "unchecked"
         tracker.close()
 
 
@@ -1990,7 +1991,10 @@ class TestEpisodeTransientDoesNotAdvanceClock:
         )
         tracker.close()
 
-        assert fs_map == {}
+        assert fs_map and all(
+            (r["fetch_count"], r["fetched_at"], r["last_reason"]) == (0, None, "unchecked")
+            for r in fs_map.values()
+        )
 
 
 class TestTransientFieldsAreCounted:
@@ -2118,6 +2122,8 @@ class TestUpdateNowKeepsCadence:
         self._run(tracker)
         after = dict(tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot"))
         tracker.close()
+        assert after.pop("last_reason") == "unchecked"
+        before.pop("last_reason")
         assert after == before
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
@@ -4552,6 +4558,8 @@ class TestSettingsFingerprint:
         after = _fs(tracker, MOVIE, _old_movie())["rating"]
         tracker.close()
 
+        assert held.pop("last_reason") == "unchecked"
+        before.pop("last_reason")
         assert held == before
         assert after["settings_fp"] != before["settings_fp"]
 
@@ -6079,7 +6087,8 @@ class TestCertifications:
         upd, _s, _g = self._scan(tracker, item, {})
         row = self._row(tracker, item)
         tracker.close()
-        assert _written(upd, "mpaa") is None and row is None
+        assert _written(upd, "mpaa") is None
+        assert (row["fetch_count"], row["last_reason"]) == (0, "unchecked")
 
     def test_tvshow_gets_mpaa(self, tmp_path, kodi_stubs, monkeypatch):
         self._fake_sites(monkeypatch)
@@ -6383,3 +6392,218 @@ class TestEnrichImdbIdLeavesTheItemAlone:
         assert item["uniqueid"] == {"tmdb": "12345"}
         assert update.call_args.kwargs["uniqueid"] == {"tmdb": "12345", "imdb": "tt0000001"}
         assert compute_identity(item, MOVIE) == before
+
+
+class TestFieldReasonsAndKeep:
+    """Every sampled field records why it is as it is; a value MetaMender
+    replaces is kept as the original unless it was MetaMender's own; a
+    locked field is left out of the scan entirely."""
+
+    @staticmethod
+    def _scan(tracker, item, fields, tmdb=None, reset=False, nfo=False,
+              source_config=None, update=True, settings=None):
+        with patch("resources.lib.providers.tmdb.fetch_movie",
+                   return_value=tmdb if tmdb is not None else _tmdb_movie_response()) as fetch, \
+                patch("resources.lib.data.kodi.update_item", return_value=update) as upd, \
+                patch("resources.lib.engine.scan.nfo_state", return_value=NFO if nfo else NO_NFO):
+            run_scan(
+                MOVIE, tracker, source_config or _make_source_config(), frozenset(fields),
+                "k", settings or _make_settings(), items=[item], reset=reset,
+            )
+        return upd, fetch
+
+    @staticmethod
+    def _reason(tracker, field):
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, field)
+        return row["last_reason"] if row else None
+
+    @staticmethod
+    def _keep(tracker):
+        return tracker.get_keep("movie", _MOVIE_IDENTITY)
+
+    def test_written_field_records_updated_and_keeps_the_original(self, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        item = _make_movie_item(plot="Scraper plot")
+        upd, _f = self._scan(
+            tracker, item, ("plot", "genre", "tagline", "director", "rating"),
+            tmdb=_tmdb_movie_response(plot="Fresh plot", genres=["Drama"]),
+        )
+        keep = self._keep(tracker)
+        reasons = {f: self._reason(tracker, f)
+                   for f in ("plot", "genre", "tagline", "director", "rating")}
+        tracker.close()
+
+        assert _written(upd, "plot") == "Fresh plot"
+        assert set(reasons.values()) == {"updated"}
+        assert keep["plot"]["original"] == "Scraper plot"
+        assert keep["genre"]["original"] == ["Action"]
+        # MetaMender filled these from empty: the original is "empty".
+        assert keep["tagline"]["original"] == "" and keep["tagline"]["has_original"]
+        assert keep["director"]["original"] == []
+        # The rating slots get no original.
+        assert not {"rating", "votes", "ratings"} & set(keep)
+
+    def test_metamenders_own_value_is_not_kept_as_original(self, tmp_path, kodi_stubs):
+        from resources.lib.engine.protect import fingerprint
+
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "plot", fingerprint("Fresh plot"))
+        tracker.keep_original("movie", _MOVIE_IDENTITY, "plot", "Scraper plot")
+        upd, _f = self._scan(tracker, _young_movie(plot="Fresh plot"), ("plot",),
+                             tmdb=_tmdb_movie_response(plot="Newer plot"))
+        keep = self._keep(tracker)
+        tracker.close()
+
+        assert _written(upd, "plot") == "Newer plot"
+        assert keep["plot"]["original"] == "Scraper plot"
+
+    def test_rescrape_value_refreshes_the_original(self, tmp_path, kodi_stubs):
+        from resources.lib.engine.protect import fingerprint
+
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "plot", fingerprint("Fresh plot"))
+        tracker.keep_original("movie", _MOVIE_IDENTITY, "plot", "Scraper plot")
+        upd, _f = self._scan(tracker, _young_movie(plot="Rescraped plot"), ("plot",),
+                             tmdb=_tmdb_movie_response(plot="Newer plot"))
+        keep = self._keep(tracker)
+        tracker.close()
+
+        assert _written(upd, "plot") == "Newer plot"
+        assert keep["plot"]["original"] == "Rescraped plot"
+
+    def test_failed_write_keeps_no_original(self, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        self._scan(tracker, _make_movie_item(plot="Scraper plot"), ("plot",),
+                   tmdb=_tmdb_movie_response(plot="Fresh plot"), update=False)
+        keep = self._keep(tracker)
+        tracker.close()
+
+        assert keep == {}
+
+    def test_nfo_protected_field_records_nfo(self, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        upd, _f = self._scan(tracker, _make_movie_item(plot="NFO plot"), ("plot",),
+                             tmdb=_tmdb_movie_response(plot="Fresh plot"), nfo=True)
+        reason = self._reason(tracker, "plot")
+        keep = self._keep(tracker)
+        tracker.close()
+
+        assert _written(upd, "plot") is None
+        assert reason == "nfo" and keep == {}
+
+    @patch("resources.lib.engine.scan.kodi_ui_language", return_value="nl-NL")
+    def test_fill_only_field_records_fill_only(self, _ui, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        upd, _f = self._scan(tracker, _make_movie_item(plot="Een plot"), ("plot",),
+                             tmdb=_tmdb_movie_response(plot="A plot"),
+                             source_config={"sources": []})
+        reason = self._reason(tracker, "plot")
+        tracker.close()
+
+        assert _written(upd, "plot") is None and reason == "fill_only"
+
+    def test_unchanged_and_nothing_reasons(self, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        upd, _f = self._scan(tracker, _make_movie_item(plot="Great movie"),
+                             ("plot", "tagline"), tmdb=_tmdb_movie_response(tagline=""))
+        reasons = (self._reason(tracker, "plot"), self._reason(tracker, "tagline"))
+        tracker.close()
+
+        assert upd.call_count == 0
+        assert reasons == ("unchanged", "nothing")
+
+    def test_transient_field_records_unchecked_and_keeps_its_clock(self, tmp_path, kodi_stubs):
+        from resources.lib.utils import TransientProviderError
+
+        tracker = _make_tracker(tmp_path)
+        _seed_field(tracker, "plot", None)
+        before = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        with patch("resources.lib.providers.tmdb.fetch_movie",
+                   side_effect=TransientProviderError("http 503")), \
+                patch("resources.lib.data.kodi.update_item", return_value=True):
+            run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+                     _make_settings(), items=[_young_movie(plot="Old")])
+        after = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert after["last_reason"] == "unchecked"
+        for col in ("fetch_count", "fetched_at", "next_retry", "settings_fp", "written_value"):
+            assert after[col] == before[col], col
+
+    @pytest.mark.parametrize("path", ["update_now", "settings_changed"])
+    def test_locked_field_is_never_fetched_or_written(self, path, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry="2099-01-01",
+            settings_fp="older settings",
+        )
+        tracker.set_locked("movie", _MOVIE_IDENTITY, "plot", True)
+        tracker.commit()
+        before = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        upd, fetch = self._scan(tracker, _young_movie(plot="Mine"), ("plot",),
+                                tmdb=_tmdb_movie_response(plot="Fresh plot"),
+                                reset=path == "update_now")
+        after = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert not fetch.called and upd.call_count == 0
+        assert after["last_reason"] == "locked"
+        for col in ("fetch_count", "fetched_at", "next_retry", "settings_fp"):
+            assert after[col] == before[col], col
+
+    def test_locked_field_beside_a_due_field_is_left_alone(self, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.set_locked("movie", _MOVIE_IDENTITY, "plot", True)
+        tracker.commit()
+        upd, _f = self._scan(tracker, _make_movie_item(plot="Mine"), ("plot", "tagline"),
+                             tmdb=_tmdb_movie_response(plot="Fresh plot"), reset=True)
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert _written(upd, "plot") is None and _written(upd, "tagline") == "Wow"
+        assert row["last_reason"] == "locked" and row["fetch_count"] == 0
+
+    def test_locked_after_reset_tracker_stays_locked(self, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.keep_original("movie", _MOVIE_IDENTITY, "plot", "Scraper plot")
+        tracker.set_locked("movie", _MOVIE_IDENTITY, "plot", True)
+        tracker.commit()
+        tracker.clear_field_status()
+        upd, _f = self._scan(tracker, _make_movie_item(plot="Scraper plot"), ("plot", "tagline"),
+                             tmdb=_tmdb_movie_response(plot="Fresh plot"))
+        keep = self._keep(tracker)
+        reason = self._reason(tracker, "plot")
+        tracker.close()
+
+        assert _written(upd, "plot") is None
+        assert keep["plot"] == {"original": "Scraper plot", "has_original": True, "locked": True}
+        assert reason == "locked"
+
+    def test_locked_mpaa_skips_certification(self, tmp_path, kodi_stubs, monkeypatch):
+        from resources.lib.engine.breaker import CircuitBreaker
+        from resources.lib.engine.certchain import SiteGate
+
+        calls = TestCertifications._fake_sites(monkeypatch, {"fsk": "12"})
+        settings = TestCertifications._settings()
+        gate = SiteGate(settings["cert_sites"], CircuitBreaker(), None, min_interval=0.0)
+        item = _make_movie_item()
+        item["mpaa"] = "Rated R"
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.set_locked("movie", _MOVIE_IDENTITY, "mpaa", True)
+        tracker.commit()
+        with patch("resources.lib.providers.tmdb.fetch_movie",
+                   return_value=_tmdb_movie_response(certifications={"NL": "16"})), \
+                patch("resources.lib.data.kodi.update_item", return_value=True) as upd, \
+                patch("resources.lib.engine.scan._resolve_cert") as resolve:
+            run_scan(MOVIE, tracker, _make_source_config(), frozenset({"mpaa", "plot"}), "k",
+                     settings, items=[item], cert_gate=gate, reset=True)
+        reason = self._reason(tracker, "mpaa")
+        tracker.close()
+
+        assert not resolve.called and calls == [] and gate.requests == 0
+        assert _written(upd, "mpaa") is None
+        assert reason == "locked"
