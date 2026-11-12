@@ -239,6 +239,9 @@ def match_episode_by_number(
         return
 
     if not _show_checked(ctx, item):
+        if _show_kodi_id(item) not in ctx.tracked_shows:
+            # The show has no ids of its own: nothing to ask, now or later.
+            return
         ids.tmdb_transient = ids.tvdb_transient = True
         ids.defer()
         return

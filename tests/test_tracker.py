@@ -825,3 +825,11 @@ def test_clear_number_match_drops_ids_keeps_originals(tmp_path):
         None, None, None, None)
     assert row["number_matched"] == 0
     assert (row["orig_title"], row["orig_aired"]) == ("Real title", "2019-11-12")
+
+
+def test_tracked_show_ids(tmp_path):
+    db = TrackerDB(str(tmp_path / "t.db"))
+    db.upsert_item("tvshow", "tmdb:1", kodi_id=10)
+    db.upsert_item("tvshow", "tmdb:2")
+    db.upsert_item("episode", "Show S01E01", kodi_id=11)
+    assert db.get_tracked_show_ids() == frozenset({10})

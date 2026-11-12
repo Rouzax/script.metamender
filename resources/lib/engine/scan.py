@@ -845,6 +845,10 @@ def run_scan(
         imdb_ready=bool(settings.get("imdb_ready", False)),
         cert=_cert_config(media_type, enabled_fields, settings, breaker, monitor, cert_gate),
         reset=reset,
+        tracked_shows=(
+            tracker.get_tracked_show_ids()
+            if media_type.name == "episode" else frozenset()
+        ),
     )
     candidates = _candidate_fields(media_type, enabled_fields)
     if ctx.cert is not None:

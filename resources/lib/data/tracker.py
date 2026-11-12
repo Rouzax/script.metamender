@@ -720,6 +720,13 @@ class TrackerDB:
         )
         return {row["kodi_id"]: row["tvdb_id"] for row in cursor.fetchall()}
 
+    def get_tracked_show_ids(self) -> frozenset[int]:
+        """Kodi ids of every TV show the tracker knows."""
+        cursor = self._conn.execute(
+            "SELECT kodi_id FROM items WHERE media_type = 'tvshow' AND kodi_id IS NOT NULL"
+        )
+        return frozenset(row["kodi_id"] for row in cursor.fetchall())
+
     def get_checked_show_ids(self) -> frozenset[int]:
         """Kodi ids of the TV shows whose id cross-reference lookups have
         answered at least once.

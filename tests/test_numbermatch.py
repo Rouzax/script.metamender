@@ -17,7 +17,7 @@ ID = "Show S01E02"
 
 
 def _ctx(tracker, reset=False, checked=True, show_tmdb: str | None = "55",
-         show_tvdb: str | None = "77"):
+         show_tvdb: str | None = "77", tracked=True):
     return _ScanCtx(
         media_type=EPISODE, tracker=tracker, breaker=CircuitBreaker(),
         pacer=_Pacer(0), tmdb_api_key="k", default_language="en-US",
@@ -28,6 +28,7 @@ def _ctx(tracker, reset=False, checked=True, show_tmdb: str | None = "55",
         season_cache={}, tvdb_cache={}, logged_once=set(), counts={},
         schedule=(), rating_pref=0, text_order=0, fallback_order=0,
         default_fallback="", imdb_ready=False, reset=reset,
+        tracked_shows=frozenset({10}) if tracked else frozenset(),
     )
 
 
@@ -157,6 +158,16 @@ def test_unresolved_show_defers(tracker, providers):
     ids = _run(_ctx(tracker, checked=False, show_tmdb=None, show_tvdb=None), log=log)
     assert ids.tmdb_transient and ids.tvdb_transient and ids.lookup_failed
     assert "scan.number_match_rejected" not in _events(log)
+    assert not providers.season.called and not providers.numbers.called
+
+
+def test_show_without_ids_is_no_route_not_transient(tracker, providers):
+    """A show with no ids of its own is skipped before it reaches the
+    tracker, so its lookups never answer; its episodes have no route rather
+    than waiting forever."""
+    ids = _run(_ctx(tracker, checked=False, show_tmdb=None, show_tvdb=None, tracked=False))
+    assert not (ids.tmdb_transient or ids.tvdb_transient or ids.lookup_failed)
+    assert not ids.looked_up and not ids.any()
     assert not providers.season.called and not providers.numbers.called
 
 

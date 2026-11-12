@@ -230,6 +230,10 @@ class _ScanCtx:
     # (provider, show id) -> the show's original language, or None when the
     # provider names none; for matching episodes by number.
     original_language: dict[tuple[str, str], str | None] = field(default_factory=dict)
+    # Kodi ids of the shows the tracker knows (episode passes only). A show
+    # with no ids of its own is skipped before it is tracked, so it never
+    # joins checked_shows: its episodes have no route rather than waiting.
+    tracked_shows: frozenset[int] = frozenset()
 
 
 def _get_season_data(
