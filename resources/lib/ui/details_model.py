@@ -52,6 +52,8 @@ GROUP_HEADINGS = {GROUP_UPDATED: 32524, GROUP_LEFT: 32525, GROUP_WAITING: 32526}
 
 ACTION_RESTORE = "restore"
 ACTION_UNLOCK = "unlock"
+# Locks a field as it is now, for a value with no Restore (a hand edit).
+ACTION_KEEP = "keep"
 
 IDS_KEY = "ids"
 
@@ -323,6 +325,8 @@ def _field_row(
             action = ACTION_UNLOCK
         elif can_restore(field, current, fs, keep):
             action = ACTION_RESTORE
+        elif managed:
+            action = ACTION_KEEP
     return DetailRow(field, label, group, hint, label, lines, action)
 
 

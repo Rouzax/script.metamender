@@ -59,6 +59,7 @@ _CERT_TYPES = frozenset({"movie", "tvshow"})
 RESTORABLE_EXCLUDED = frozenset({"rating", "votes", "ratings"})
 
 RESTORED = "restored"
+KEPT = "kept"
 CHANGED = "changed"
 NOT_RESTORABLE = "not_restorable"
 LOCK_FAILED = "lock_failed"
@@ -181,6 +182,44 @@ def _save_lock(
                       identity=identity, media_type=media_type.name, field=field)
     tracker.rollback()
     return False
+
+
+def keep_field(
+    tracker: TrackerDB, media_type: MediaType, identity: str, field: str
+) -> str:
+    """Lock the field as Kodi holds it now, so MetaMender leaves it alone
+    (Keep this value): the way to keep a hand edit, which has no original to
+    restore. Kodi is not written. Returns KEPT, NOT_RESTORABLE (a rating
+    field, nothing saved) or LOCK_FAILED (nothing saved). The "locked"
+    reason is recorded with the lock, so an unlock later shows the field as
+    due again."""
+    if field in RESTORABLE_EXCLUDED:
+        return NOT_RESTORABLE
+    try:
+        saved = tracker.set_locked(media_type.name, identity, field, True)
+        if saved:
+            # A reason that cannot be recorded (the tracker logs it) costs
+            # only the displayed reason; the lock is what matters.
+            tracker.record_field_reason(media_type.name, identity, field, REASON_LOCKED)
+            tracker.commit()
+    except sqlite3.Error:
+        log.exception("Failed to save the lock", event="details.error",
+                      identity=identity, media_type=media_type.name, field=field)
+        saved = False
+    if not saved:
+        tracker.rollback()
+        log.warning(
+            "The lock could not be saved, field not kept",
+            event="details.keep_failed", identity=identity,
+            media_type=media_type.name, field=field,
+        )
+        return LOCK_FAILED
+    log.info(
+        "Field kept as it is and locked",
+        event="details.kept", identity=identity,
+        media_type=media_type.name, field=field,
+    )
+    return KEPT
 
 
 def unlock_field(
@@ -369,18 +408,37 @@ class DetailsSession:
         actions.update_now(self.dbtype, str(self.kodi_id))
 
     def run_action(self, row: DetailRow) -> None:
-        """The row's button: restore the original or unlock the field, each
-        under the scan lock. A running scan writes the tracker for long
+        """The row's button: restore the original, keep the value as it is,
+        or unlock the field, each under the scan lock. A running scan writes the tracker for long
         stretches, so the press says so at once rather than waiting on the
         database."""
-        from resources.lib.ui.details_model import ACTION_RESTORE, ACTION_UNLOCK
+        from resources.lib.ui.details_model import (
+            ACTION_KEEP,
+            ACTION_RESTORE,
+            ACTION_UNLOCK,
+        )
 
-        if row.action not in (ACTION_RESTORE, ACTION_UNLOCK):
+        if row.action not in (ACTION_RESTORE, ACTION_UNLOCK, ACTION_KEEP):
             return
         if not acquire_scan_lock():
             log.info("A scan is already running, skipping the action",
                      event="details.locked", action=row.action, field=row.key)
             notify(lang(32344))  # A scan is already running
+            return
+        if row.action == ACTION_KEEP:
+            tracker = None
+            kept = LOCK_FAILED
+            try:
+                tracker = TrackerDB(_get_db_path())
+                kept = keep_field(tracker, self.media_type, self.identity, row.key)
+            except Exception:
+                log.exception("Keep failed", event="details.error", field=row.key)
+            finally:
+                release_scan_lock()
+                if tracker is not None:
+                    tracker.close()
+            if kept != KEPT:
+                notify(lang(32627))  # Could not save the lock
             return
         if row.action == ACTION_UNLOCK:
             tracker = None

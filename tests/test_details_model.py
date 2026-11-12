@@ -180,7 +180,7 @@ def test_locked_field_offers_unlock_and_restorable_offers_restore():
     assert rows["title"].hint == "locked"
     assert "locked" in dict(rows["title"].lines)["Why"]
     assert rows["plot"].action == "restore"
-    assert rows["runtime"].action == ""  # no original kept
+    assert rows["runtime"].action == "keep"  # no original kept
     assert rows["ids"].action == ""
 
 
@@ -256,7 +256,7 @@ def test_never_checked_item():
     assert all(
         dict(r.lines)["Why"] == "Not checked by MetaMender yet." for r in fields
     )
-    assert all(r.action == "" for r in rows)
+    assert all(r.action != "restore" for r in rows)
     assert "votes" not in {r.key for r in rows}
     assert header_line(None, {}, "Dutch") == "Dutch folder · not checked by MetaMender yet"
 
@@ -285,7 +285,7 @@ def test_unlocked_field_is_due_at_the_next_scan():
         title = _by_key(_rows(fs_map={"title": fs}, keep={"title": unlocked}))["title"]
         assert title.group == "waiting"
         assert title.hint == "next scan"
-        assert title.action == ""
+        assert title.action != "restore"
         lines = dict(title.lines)
         assert lines["Next check"] == "at the next scan"
         assert lines["Why"] == (
@@ -333,7 +333,7 @@ def test_value_changed_since_metamenders_update_is_left_as_it_is():
     lines = dict(plot.lines)
     assert lines["Why"] == "Changed since MetaMender's update (your edit or a re-scrape)."
     assert "From" not in lines and "Replaced" not in lines
-    assert plot.action == ""
+    assert plot.action != "restore"
 
 
 def test_ids_say_how_a_number_match_found_them():
@@ -380,7 +380,7 @@ def test_blank_written_by_an_unfilled_refill_is_not_metamenders():
     ))
     plot = rows["plot"]
     assert plot.group != "updated"
-    assert plot.action == ""
+    assert plot.action != "restore"
     assert "From" not in dict(plot.lines)
 
 
@@ -395,7 +395,7 @@ def test_blanked_final_field_is_filled_again_at_the_next_scan():
     assert lines["Next check"] == "at the next scan"
     assert lines["Why"] == ("Kodi lost MetaMender's value (a refresh or a re-scrape), "
                             "so the next scan fills it again.")
-    assert plot.action == ""
+    assert plot.action != "restore"
 
 
 def test_unmanaged_field_promises_no_next_scan():
@@ -439,7 +439,7 @@ def test_refilled_placeholder_is_not_metamenders():
                         "locked": False, "written_fp": held}},
     ))["title"]
     assert title.group != "updated"
-    assert title.action == ""
+    assert title.action != "restore"
     # The placeholder is the scraper's, not TMDB's.
     assert dict(title.lines)["From"] == "your scraper"
     assert title.hint != "changed"
@@ -460,3 +460,22 @@ def test_unmanaged_certification_without_a_country_says_so():
     assert mpaa.hint == "no country"
     assert lines["Why"] == ("You unlocked this field; MetaMender checks it again once "
                             "an age rating country is set up.")
+
+
+def test_a_lockable_field_offers_keep_this_value():
+    """Any managed field that is not locked and has no Restore can be kept
+    as it is; a restorable one offers Restore (which locks too), a locked
+    one the unlock, a rating nothing."""
+    rows = _by_key(_rows())
+    assert rows["title"].action == "keep"
+    assert rows["director"].action == "keep"
+    assert rows["plot"].action == "restore"
+    assert rows["rating"].action == ""
+    locked = _by_key(_rows(keep={"title": {"locked": True}}))
+    assert locked["title"].action == "unlock"
+
+
+def test_a_field_the_scan_does_not_manage_offers_no_keep():
+    rows = _by_key(_rows(managed=["plot", "rating", "votes", "runtime", "firstaired",
+                                  "title", "writer"]))
+    assert rows["director"].action == ""

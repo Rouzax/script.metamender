@@ -418,7 +418,7 @@ def test_session_unlock(opened):
     assert row.action == "unlock"
     session.run_action(row)
     view = session.load()
-    assert next(r for r in view.rows if r.key == "genre").action == ""
+    assert next(r for r in view.rows if r.key == "genre").action == "keep"
 
 
 @pytest.mark.parametrize("failure", ["refused", "raised"])
@@ -674,3 +674,49 @@ def test_unknown_cert_country_logs_no_error_on_open(opened):
     assert not log.error.called and not log.exception.called
     _session, view = opened["shown"][0]
     assert "mpaa" not in _keys(view)
+
+
+def test_keep_locks_the_field_and_records_why(db):
+    assert details.keep_field(db, MOVIE, IDENT, "genre") == details.KEPT
+    assert db.get_keep("movie", IDENT)["genre"]["locked"] is True
+    assert db.get_field_status_map("movie", IDENT)["genre"]["last_reason"] == REASON_LOCKED
+
+
+def test_keep_lock_failure_keeps_nothing(db):
+    with patch.object(db, "set_locked", return_value=False):
+        assert details.keep_field(db, MOVIE, IDENT, "genre") == details.LOCK_FAILED
+    assert "genre" not in db.get_keep("movie", IDENT)
+
+
+def test_ratings_cannot_be_kept(db):
+    assert details.keep_field(db, MOVIE, IDENT, "rating") == details.NOT_RESTORABLE
+    assert "rating" not in db.get_keep("movie", IDENT)
+
+
+def test_session_keep_this_value(opened):
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=7)
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    session, view = opened["shown"][0]
+    row = next(r for r in view.rows if r.key == "genre")
+    assert row.action == "keep"
+    session.run_action(row)
+    assert opened["notes"] == []
+    assert opened["calls"]["release"] == 1
+    genre = next(r for r in session.load().rows if r.key == "genre")
+    assert genre.action == "unlock" and genre.group == "left"
+
+
+def test_session_keep_failure_tells_the_user(opened):
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=7)
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    session, view = opened["shown"][0]
+    row = next(r for r in view.rows if r.key == "genre")
+    with patch.object(TrackerDB, "set_locked", return_value=False):
+        session.run_action(row)
+    assert opened["notes"] == [_PO_STRINGS[32627]]

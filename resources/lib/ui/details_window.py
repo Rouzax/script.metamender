@@ -16,6 +16,7 @@ from typing import Any, Protocol, cast
 import xbmcgui
 
 from resources.lib.ui.details_model import (
+    ACTION_KEEP,
     ACTION_RESTORE,
     ACTION_UNLOCK,
     GROUP_HEADINGS,
@@ -37,7 +38,7 @@ _ACTION_NAV_BACK = 92
 _UPWARD = frozenset({3, 5, 104})      # up, page up, wheel up
 _DOWNWARD = frozenset({4, 6, 105})    # down, page down, wheel down
 
-_ACTION_LABELS = {ACTION_RESTORE: 32586, ACTION_UNLOCK: 32587}
+_ACTION_LABELS = {ACTION_RESTORE: 32586, ACTION_UNLOCK: 32587, ACTION_KEEP: 32626}
 # The grey of a label in the right pane's "label  text" lines.
 _LABEL_COLOUR = "FF7D8592"
 
