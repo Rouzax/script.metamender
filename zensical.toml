@@ -1,0 +1,110 @@
+[project]
+site_name = "MetaMender"
+site_description = "A Kodi add-on that fills the gaps in your video library, keeps scores from going stale and gives every title an age rating from your own country."
+site_url = "https://rouzax.github.io/script.metamender/docs/"
+repo_url = "https://github.com/Rouzax/script.metamender"
+repo_name = "Rouzax/script.metamender"
+edit_uri = "edit/main/docs/"
+copyright = "MetaMender, GPL-3.0-only"
+extra_css = ["stylesheets/extra.css"]
+docs_dir = "docs"
+# Under build/, which git ignores. The landing page (site/) is copied to
+# build/site/ next to it when the whole site is assembled.
+site_dir = "build/site/docs"
+nav = [
+  { "Home" = "index.md" },
+  { "Get started" = [
+    { "Install" = "install.md" },
+    { "Setup" = "setup.md" },
+  ] },
+  { "Using it" = [
+    { "Scans" = "scans.md" },
+    { "Update now" = "update-now.md" },
+    { "The Details window" = "details.md" },
+    { "Age ratings" = "age-ratings.md" },
+    { "Coming from EU Certification Fixer" = "coming-from-eu-cert-fixer.md" },
+  ] },
+  { "Reference" = [
+    { "Settings" = "settings.md" },
+    { "Where your data comes from" = "where-data-comes-from.md" },
+    { "Troubleshooting and FAQ" = "troubleshooting.md" },
+  ] },
+]
+
+[project.theme]
+language = "en"
+logo = "assets/icon.png"
+favicon = "assets/icon.png"
+# navigation.instant is left out: with it, a link clicked right after
+# scrolling can carry the old page's tracked heading into the new URL
+# (https://github.com/zensical/ui/issues/279).
+features = [
+  "content.action.edit",
+  "content.code.copy",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "search.suggest",
+]
+
+# Dark first, as the add-on's own windows are; light is one click away.
+[[project.theme.palette]]
+scheme = "slate"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to dark mode"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/Rouzax/script.metamender"
+name = "MetaMender on GitHub"
+
+[[project.extra.social]]
+icon = "simple/kofi"
+link = "https://ko-fi.com/O0W221GBUG"
+name = "Support MetaMender on Ko-fi"
+
+[project.plugins.glightbox]
+auto_caption = false
+
+# docs/art holds the art script and docs/superpowers local working files;
+# neither is a page.
+[project.plugins.exclude]
+glob = ["art/**", "superpowers/**"]
+
+[project.markdown_extensions]
+abbr = {}
+admonition = {}
+attr_list = {}
+def_list = {}
+footnotes = {}
+md_in_html = {}
+tables = {}
+toc.permalink = true
+pymdownx.betterem = {}
+pymdownx.details = {}
+pymdownx.emoji.emoji_generator = "zensical.extensions.emoji.to_svg"
+pymdownx.emoji.emoji_index = "zensical.extensions.emoji.twemoji"
+pymdownx.highlight.anchor_linenums = true
+pymdownx.inlinehilite = {}
+pymdownx.keys = {}
+pymdownx.mark = {}
+pymdownx.smartsymbols = {}
+pymdownx.superfences.custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+pymdownx.tabbed.alternate_style = true
+pymdownx.tabbed.combine_header_slug = true
+pymdownx.tasklist.custom_checkbox = true

@@ -1,0 +1,40 @@
+/* The add-on's Golden Hour palette (resources/lib/ui/theme.py and the
+   windows' navy panel): the amber accent in both schemes, the navy surfaces
+   in the dark one. */
+:root {
+  --mm-accent: #f5a623;
+  --md-primary-fg-color: #1a1d23;
+  --md-primary-fg-color--light: #262a33;
+  --md-primary-fg-color--dark: #0d1015;
+  --md-primary-bg-color: #f1f3f5;
+  --md-accent-fg-color: #d4912a;
+}
+
+/* Amber text on white is only about 2:1, so light-mode links use a darker
+   brown that reaches WCAG AA for body text. */
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color: #8a5a00;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #0d1015;
+  --md-default-fg-color: #f1f3f5;
+  --md-default-fg-color--light: #a8aeb8;
+  --md-code-bg-color: #1a1d23;
+  --md-footer-bg-color: #0d1015;
+  --md-footer-bg-color--dark: #0d1015;
+  --md-typeset-a-color: #f5a623;
+  --md-accent-fg-color: #f5c564;
+}
+
+/* The amber rule along the bottom of the header, as on the banner. */
+.md-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 3px;
+  background: var(--mm-accent);
+  pointer-events: none;
+}
