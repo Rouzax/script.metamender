@@ -13,7 +13,6 @@ from resources.lib.data.media_types import MediaType
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome, Step, run_chain
 from resources.lib.engine.fetch import (
     _find_episode_by_tmdb_id,
-    _get_season_data,
     _Primary,
 )
 from resources.lib.engine.ids import (
@@ -37,6 +36,7 @@ from resources.lib.engine.scanctx import (
     TEXT_FOLLOW_SCRAPER,
     TEXT_TVDB_FIRST,
     _call_provider,
+    _get_season_data,
     _ScanCtx,
 )
 from resources.lib.providers import imdb_ratings, tmdb, tvdb

@@ -45,6 +45,8 @@ def _mock_secondary_providers():
          patch("resources.lib.engine.scan.nfo_state", return_value=NO_NFO), \
          patch("resources.lib.providers.tvdb.fetch_series", return_value=None), \
          patch("resources.lib.providers.tvdb.fetch_series_episodes", return_value=None), \
+         patch("resources.lib.providers.tvdb.fetch_series_episode_numbers", return_value=None), \
+         patch("resources.lib.providers.tmdb.fetch_tvshow_original_language", return_value=None), \
          patch("resources.lib.providers.tmdb.fetch_episode_external_ids", return_value=None), \
          patch("resources.lib.providers.tmdb.fetch_tvshow_external_ids", return_value=None), \
          patch("resources.lib.providers.tmdb.find_episode_by_tvdb", return_value=None), \
@@ -6243,3 +6245,57 @@ class TestFollowScraperRatings:
         follow = self._scan(tmp_path / "a", dict(cur), 4)
         fixed = self._scan(tmp_path / "b", dict(cur), 0)
         assert follow == fixed
+
+
+class TestEpisodesWithoutUsableIds:
+    """Episodes carrying only ids metamender does not use (a TVmaze scrape)
+    are matched by number instead of skipped."""
+
+    @patch("resources.lib.data.kodi.get_all_items")
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_season")
+    def test_episode_without_any_id_reaches_resolution(
+        self, mock_season, mock_update, mock_get_all, tmp_path, kodi_stubs,
+    ):
+        ep = _make_episode_item(title="Pilot")
+        ep["uniqueid"] = {"tvmaze": "1"}
+        ep["firstaired"] = "2025-01-15"
+        mock_get_all.return_value = [ep]
+        mock_season.return_value = [_tmdb_episode_data(plot="Matched plot")]
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("tvshow", "tmdb:55555", kodi_id=10, tmdb_id="55555",
+                            ids_checked="2026-01-01")
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"plot"}),
+            "fake_key", _make_settings(), show_id_map={10: "55555"},
+        )
+        row = tracker.get_item("episode", "Test Show S01E01")
+        tracker.close()
+        assert row["tmdb_id"] == "99999" and row["number_matched"] == 1
+        written = [c for c in mock_update.call_args_list if c.kwargs.get("plot")]
+        assert written and written[0].kwargs["plot"] == "Matched plot"
+
+    @patch("resources.lib.data.kodi.get_all_items")
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_season")
+    def test_transient_match_leaves_clock_and_gate(
+        self, mock_season, mock_update, mock_get_all, tmp_path, kodi_stubs,
+    ):
+        ep = _make_episode_item(title="Pilot")
+        ep["uniqueid"] = {"tvmaze": "1"}
+        mock_get_all.return_value = [ep]
+        from resources.lib.utils import TransientProviderError
+        mock_season.side_effect = TransientProviderError("down")
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("tvshow", "tmdb:55555", kodi_id=10, tmdb_id="55555",
+                            ids_checked="2026-01-01")
+        run_scan(
+            EPISODE, tracker, _make_source_config(), frozenset({"plot"}),
+            "fake_key", _make_settings(), show_id_map={10: "55555"},
+        )
+        row = tracker.get_item("episode", "Test Show S01E01")
+        fs = tracker.get_field_status_map("episode", "Test Show S01E01")
+        tracker.close()
+        assert row["ids_checked"] is None and row["tmdb_id"] is None
+        assert not fs.get("plot", {}).get("fetch_count")
+        assert not mock_update.called

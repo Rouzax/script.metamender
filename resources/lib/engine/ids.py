@@ -81,6 +81,9 @@ class _Ids:
         # A lookup ran and answered / a lookup ran and did not answer.
         self.looked_up = False
         self.lookup_failed = False
+        # The TMDB/TVDB ids came from matching the episode by its number
+        # (engine/numbermatch.py), not from Kodi.
+        self.number_matched = False
 
     def defer(self) -> None:
         """A lookup this item needs could not run yet (its show is not
@@ -435,6 +438,10 @@ def _resolve_ids(
         verify(ctx, item, identity, ids, unknown_id, folder_lang)
 
     if kind == "episode":
+        # numbermatch imports this module's helpers, so it is imported here
+        # rather than at module level.
+        from resources.lib.engine.numbermatch import match_episode_by_number
+        match_episode_by_number(ctx, item, identity, ids, stored, folder_lang)
         if not ids.tmdb and ids.tvdb:
             _episode_tmdb_from_tvdb(ctx, item, identity, ids)
         return ids

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from resources.lib.constants import (
@@ -21,6 +21,7 @@ from resources.lib.engine.certchain import (
     SiteGate,
 )
 from resources.lib.engine.chain import TRANSIENT
+from resources.lib.providers import tmdb
 from resources.lib.utils import (
     ApiKeyError,
     TransientProviderError,
@@ -223,6 +224,30 @@ class _ScanCtx:
     # Certification settings for this pass; None when certifications are off
     # or no usable country preset exists (episodes never have one).
     cert: _CertConfig | None = None
+    # The Update now path (run_scan reset): lookups that answered empty and
+    # stored number matches are asked again at once.
+    reset: bool = False
+    # (provider, show id) -> the show's original language, or None when the
+    # provider names none; for matching episodes by number.
+    original_language: dict[tuple[str, str], str | None] = field(default_factory=dict)
+
+
+def _get_season_data(
+    show_tmdb_id: str,
+    season_number: int,
+    api_key: str,
+    language: str,
+    cache: dict[str, list[dict[str, Any]] | None],
+) -> list[dict[str, Any]] | None:
+    """Fetch season data from TMDB with caching.
+
+    Caches by show_tmdb_id, season_number, and language to avoid
+    repeated API calls for episodes of the same season.
+    """
+    key = "{}:{}:{}".format(show_tmdb_id, season_number, language)
+    if key not in cache:
+        cache[key] = tmdb.fetch_season(show_tmdb_id, season_number, api_key, language)
+    return cache[key]
 
 
 def _call_provider(

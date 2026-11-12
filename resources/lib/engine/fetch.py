@@ -21,6 +21,7 @@ from resources.lib.engine.ids import (
 )
 from resources.lib.engine.scanctx import (
     _call_provider,
+    _get_season_data,
     _ScanCtx,
 )
 from resources.lib.providers import tmdb
@@ -30,24 +31,6 @@ from resources.lib.utils import (
 )
 
 log = get_logger('scan')
-
-
-def _get_season_data(
-    show_tmdb_id: str,
-    season_number: int,
-    api_key: str,
-    language: str,
-    cache: dict[str, list[dict[str, Any]] | None],
-) -> list[dict[str, Any]] | None:
-    """Fetch season data from TMDB with caching.
-
-    Caches by show_tmdb_id, season_number, and language to avoid
-    repeated API calls for episodes of the same season.
-    """
-    key = "{}:{}:{}".format(show_tmdb_id, season_number, language)
-    if key not in cache:
-        cache[key] = tmdb.fetch_season(show_tmdb_id, season_number, api_key, language)
-    return cache[key]
 
 
 def _find_episode_by_tmdb_id(
@@ -137,8 +120,8 @@ def _episode_cross_ids(
     lookup did not answer.
 
     Best effort: a failure does not count against the TMDB breaker. A found
-    IMDb id is written back to Kodi (_enrich_imdb_id); a TVDB id goes to the
-    tracker only.
+    IMDb id is written back to Kodi (_enrich_imdb_id), except for a
+    number-matched episode; a TVDB id goes to the tracker only.
     """
     found = _call_provider(
         "tmdb",
@@ -156,7 +139,12 @@ def _episode_cross_ids(
     found = found or {}
     if not ids.imdb and found.get("imdb_id"):
         ids.imdb = found["imdb_id"]
-        _enrich_imdb_id(ctx, item, kodi_id, title, identity, ids.imdb)
+        if ids.number_matched:
+            # A number match is metamender's own inference, so the id it
+            # leads to stays in the tracker and never reaches Kodi.
+            ctx.tracker.upsert_item(ctx.media_type.name, identity, imdb_id=ids.imdb)
+        else:
+            _enrich_imdb_id(ctx, item, kodi_id, title, identity, ids.imdb)
     if not ids.tvdb and found.get("tvdb_id"):
         ids.tvdb = found["tvdb_id"]
         ctx.tracker.upsert_item(ctx.media_type.name, identity, tvdb_id=ids.tvdb)

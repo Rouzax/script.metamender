@@ -46,6 +46,13 @@ Logging:
           `reason` says which (name_mismatch, year_mismatch, ...)
         - scan.unknown_id_episodes (DEBUG): A show whose TVDB names match but
           whose year does not, checked against its own episode ids
+        - scan.number_match (DEBUG): An episode without ids of its own was
+          matched by season and episode number (engine/numbermatch.py)
+        - scan.number_match_rejected (INFO; DEBUG when the site has no such
+          number): a site's episode with that number failed the title/date
+          check, with both titles and dates
+        - scan.number_match_conflict (INFO): TMDB's own TVDB id for the
+          matched episode differs from TheTVDB's number match; neither used
         - scan.language_unmapped (WARNING): A folder or fallback language code
           has no TheTVDB language, so TVDB is not asked for it; once per code
           per scan
@@ -837,6 +844,7 @@ def run_scan(
         default_fallback=str(source_config.get("fallback_language") or ""),
         imdb_ready=bool(settings.get("imdb_ready", False)),
         cert=_cert_config(media_type, enabled_fields, settings, breaker, monitor, cert_gate),
+        reset=reset,
     )
     candidates = _candidate_fields(media_type, enabled_fields)
     if ctx.cert is not None:
@@ -931,7 +939,9 @@ def run_scan(
 
         # Extract external IDs
         kodi_ids = _extract_ids(item)
-        if not any(kodi_ids):
+        # An episode without ids of its own can still be matched by its
+        # number under the show (engine/numbermatch.py).
+        if not any(kodi_ids) and media_type.name != "episode":
             log.debug(
                 "Skipping item without external IDs",
                 event="scan.skip",
