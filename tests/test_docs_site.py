@@ -32,7 +32,7 @@ def _pages() -> list[str]:
 
 
 def _published_text() -> list[str]:
-    return _pages() + ["README.md"] + glob.glob("site/*.html") + glob.glob("site/*.css") \
+    return _pages() + ["README.md", "CONTRIBUTING.md"] + glob.glob("site/*.html") + glob.glob("site/*.css") \
         + glob.glob("site/*.js")
 
 

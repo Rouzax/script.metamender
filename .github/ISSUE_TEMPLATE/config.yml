@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting and FAQ
+    url: https://rouzax.github.io/script.metamender/docs/troubleshooting/
+    about: Common questions and problems, sorted by what you see. Check here before opening a bug report.
+  - name: Documentation
+    url: https://rouzax.github.io/script.metamender/docs/
+    about: How to set up and use MetaMender, and where each value comes from.
+  - name: Kodi forum thread
+    url: https://forum.kodi.tv/showthread.php?tid=389809
+    about: Questions, help with setup, and general discussion.

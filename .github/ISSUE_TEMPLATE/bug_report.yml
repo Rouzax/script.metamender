@@ -1,0 +1,93 @@
+name: Bug report
+description: Something in MetaMender does not work as described
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening a bug report, open the item's **Details window** (context menu, MetaMender, Details): it often says why a field looks the way it does. [Troubleshooting and FAQ](https://rouzax.github.io/script.metamender/docs/troubleshooting/) covers the common cases.
+
+  - type: input
+    id: addon-version
+    attributes:
+      label: MetaMender version
+      description: In Kodi, Add-ons, My add-ons, Program add-ons, MetaMender
+      placeholder: e.g. 1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: kodi-version
+    attributes:
+      label: Kodi version and platform
+      placeholder: e.g. Kodi 21.3 Omega on LibreELEC 12
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scraper
+    attributes:
+      label: Which scraper made the items involved?
+      multiple: true
+      options:
+        - TMDB (The Movie Database)
+        - TheTVDB
+        - TVmaze
+        - NFO files
+        - Another scraper
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: languages
+    attributes:
+      label: Library and folder languages, age rating country
+      description: As chosen in setup, for example "English, Dutch kids folder with English fallback, country NL"
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: One example item is enough. Which field, what it shows, and what it should show.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details window
+      description: A screenshot of the item's Details window with the field selected, if you can. Drag the image in here.
+    validations:
+      required: false
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        1. In the settings, General tab, turn on "Enable debug logging" (shown at the Advanced settings level)
+        2. Let a scan run, or use Update now on the item
+        3. Attach the newest file from `userdata/addon_data/script.metamender/logs/`, or paste the relevant part below
+
+        A log lists the titles and folders of the items it worked on; remove what you do not want to share.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Did it work in an earlier version? Anything else that might help.
+    validations:
+      required: false
