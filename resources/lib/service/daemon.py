@@ -27,6 +27,7 @@ import os
 import time
 from collections.abc import Iterable
 from datetime import date, timedelta
+from functools import partial
 from typing import Any
 
 import xbmc
@@ -44,18 +45,25 @@ from resources.lib.constants import (
 )
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.presets import country_for_setting
-from resources.lib.data.sources import kodi_ui_language, load_source_config
+from resources.lib.data.sources import (
+    discover_folders,
+    kodi_ui_language,
+    load_source_config,
+    match_source,
+)
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import SiteGate
 from resources.lib.engine.resolve import FOLLOW_SCRAPER, rating_sources
 from resources.lib.engine.scan import run_scan
 from resources.lib.providers import imdb_ratings
+from resources.lib.service import attention
 from resources.lib.service.lock import (
     acquire_scan_lock,
     clear_file_lock,
     release_scan_lock,
 )
+from resources.lib.ui.attention_window import show_attention_window
 from resources.lib.utils import (
     ApiKeyError,
     KodiQueryError,
@@ -379,6 +387,69 @@ def _select_trigger(
     return (False, "scheduled")
 
 
+def _playing() -> bool:
+    """Whether anything plays, video or audio: the background shows
+    nothing then."""
+    return bool(xbmc.getCondVisibility("Player.HasMedia"))
+
+
+def _check_folders(source_config: dict[str, Any]) -> dict[str, bool]:
+    """Whether each library folder answers, for the offline-folder
+    problem. Folders sources.json disables are not asked: their items are
+    not scanned either."""
+    sources = source_config.get("sources", [])
+    reachable: dict[str, bool] = {}
+    for folder in discover_folders():
+        path = folder.get("path", "")
+        if not path or not match_source(path, sources).get("enabled", True):
+            continue
+        try:
+            reachable[path] = bool(xbmcvfs.exists(path))
+        except Exception:
+            log.exception("Folder check failed", event="service.folder_check_failed")
+            reachable[path] = False
+    return reachable
+
+
+def _record_cycle(
+    record: attention.Attention, *, shutdown: bool, aborted: bool,
+    tvdb_rejected: bool, folders: dict[str, bool] | None, now: float,
+) -> None:
+    """What a finished background cycle tells the problem record: the key
+    worked, the attempt for the failure streak (not when Kodi shut down),
+    TheTVDB's credentials, and the folders when they were checked."""
+    record.clear(attention.KEY_REJECTED)
+    if not shutdown:
+        record.attempt(aborted, now)
+    if tvdb_rejected:
+        record.raise_problem(attention.TVDB_AUTH)
+    else:
+        record.clear(attention.TVDB_AUTH)
+    if folders is not None:
+        record.folders_checked(folders, now)
+
+
+def _attention_tick(tracker: TrackerDB) -> None:
+    """Show what the problem record holds that was not shown yet: the
+    attention window, and the TheTVDB toast. Nothing while anything plays;
+    it waits for the next tick without playback."""
+    if _playing():
+        return
+    record = attention.load(tracker)
+    pending = record.pending_window()
+    if pending is not None:
+        main, others = pending
+        log.info("Attention window shown", event="service.attention_shown",
+                 kind=main.kind, others=[p.kind for p in others])
+        answer = show_attention_window(main, others)
+        attention.update(tracker, lambda a: a.mark_window_shown())
+        if answer == "setup":
+            xbmc.executebuiltin("RunScript(script.metamender,wizard)")
+    if record.pending_toast(attention.TVDB_AUTH):
+        notify(lang(32352))  # TheTVDB rejected the credentials
+        attention.update(tracker, lambda a: a.mark_toast_shown(attention.TVDB_AUTH))
+
+
 def run() -> None:
     """Main service entry point. Blocks until Kodi requests abort."""
     # Re-initialize the logger now that Kodi settings are readable.
@@ -400,7 +471,9 @@ def run() -> None:
     tracker: TrackerDB | None = None
     last_scan = 0.0  # Force scan on first loop iteration
     next_retry_after = 0.0  # Backoff gate after a failed scan (both triggers)
-    needs_setup_shown = False
+    # What this service last wrote about setup, so the record is written on
+    # a change only, not every tick.
+    setup_known: bool | None = None
 
     try:
         tracker = TrackerDB(_get_db_path())
@@ -409,17 +482,23 @@ def run() -> None:
             try:
                 now = time.time()
 
-                if not is_setup_complete():
+                setup_done = is_setup_complete()
+                if setup_done != setup_known:
+                    setup_known = setup_done
+                    if setup_done:
+                        attention.update(tracker, lambda a: a.clear(attention.SETUP))
+                    else:
+                        log.info("Waiting for setup", event="service.needs_setup")
+                        attention.update(
+                            tracker, lambda a: a.raise_problem(attention.SETUP))
+                if not setup_done:
                     # Nothing scans before the wizard has run: no key, and
                     # no language the user confirmed. The wizard's Finish
                     # starts the first scan itself, so the schedule counts
                     # from now and library events seen meanwhile are dropped.
-                    if not needs_setup_shown:
-                        needs_setup_shown = True
-                        log.info("Waiting for setup", event="service.needs_setup")
-                        notify(lang(32466))
                     last_scan = now
                     monitor.clear_scan_request()
+                    _attention_tick(tracker)
                     if monitor.waitForAbort(SERVICE_SLEEP_INTERVAL_SEC):
                         break
                     continue
@@ -456,8 +535,12 @@ def run() -> None:
                             "No TMDB API key configured, skipping scan",
                             event="service.skip_no_key",
                         )
+                        attention.update(
+                            tracker, lambda a: a.raise_problem(attention.NO_KEY))
                         last_scan = time.time()
                         should_scan = False
+                    else:
+                        attention.update(tracker, lambda a: a.clear(attention.NO_KEY))
 
                 if should_scan and not acquire_scan_lock():
                     log.info(
@@ -510,6 +593,8 @@ def run() -> None:
                             # request, so it retries. Set a short backoff
                             # instead of a full interval so the next loop
                             # re-attempts soon without hammering Kodi.
+                            attention.update(
+                                tracker, lambda a: a.attempt(True, time.time()))
                             log.exception(
                                 "Scan aborted on Kodi query failure",
                                 event="service.scan_failed",
@@ -531,7 +616,10 @@ def run() -> None:
                                 reason=reason,
                                 provider=exc.provider,
                             )
-                            notify(lang(32341))  # Invalid TMDB API key
+                            attention.update(
+                                tracker,
+                                lambda a: a.raise_problem(attention.KEY_REJECTED),
+                            )
                             next_retry_after = (
                                 time.time() + SCAN_FAILURE_BACKOFF_SEC
                             )
@@ -583,25 +671,30 @@ def run() -> None:
                             # never prune.
                             _maybe_prune_orphans(tracker, settings, targeted)
 
-                        # Shown even with notifications off, like the invalid
-                        # TMDB key: otherwise the only trace of a provider
-                        # that is down for good is one ERROR line per cycle.
-                        if tvdb_auth_failed(all_stats.values()):
-                            notify(lang(32352))  # TheTVDB rejected the credentials
+                        # A pass stopped by Kodi shutting down says nothing
+                        # about whether scans work; any other early stop
+                        # (every provider down) counts as a failed attempt.
+                        shutdown = monitor.abortRequested()
+                        tvdb_rejected = tvdb_auth_failed(all_stats.values())
+                        folders = (
+                            _check_folders(source_config)
+                            if not targeted and not cycle_aborted else None
+                        )
 
-                        # Notification
-                        if settings["show_notifications"]:
-                            total_updated = (
-                                movie_stats.get("updated", 0)
-                                + tvshow_stats.get("updated", 0)
-                                + episode_stats.get("updated", 0)
-                            )
-                            parts = []
-                            if total_updated:
-                                parts.append(lang(32349).format(total_updated))  # {} updated
-                            if not parts:
-                                parts.append(lang(32348))  # No changes
-                            notify(", ".join(parts))
+                        attention.update(tracker, partial(
+                            _record_cycle, shutdown=shutdown, aborted=cycle_aborted,
+                            tvdb_rejected=tvdb_rejected, folders=folders,
+                            now=time.time(),
+                        ))
+
+                        total_updated = (
+                            movie_stats.get("updated", 0)
+                            + tvshow_stats.get("updated", 0)
+                            + episode_stats.get("updated", 0)
+                        )
+                        if (settings["show_notifications"] and total_updated
+                                and not _playing()):
+                            notify(lang(32349).format(total_updated))  # {} items updated
                     finally:
                         release_scan_lock()
 
@@ -612,7 +705,11 @@ def run() -> None:
                 # turning any unanticipated fault into a 1 Hz full-library scan.
                 log.exception("Scan cycle failed", event="service.scan_error")
                 next_retry_after = time.time() + SCAN_FAILURE_BACKOFF_SEC
+                if tracker is not None and not monitor.abortRequested():
+                    attention.update(tracker, lambda a: a.attempt(True, time.time()))
 
+            if tracker is not None:
+                _attention_tick(tracker)
             if monitor.waitForAbort(SERVICE_SLEEP_INTERVAL_SEC):
                 break
 

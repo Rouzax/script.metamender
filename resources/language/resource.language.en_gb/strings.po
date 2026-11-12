@@ -328,7 +328,7 @@ msgid "Show notifications"
 msgstr ""
 
 msgctxt "#32312"
-msgid "Display a Kodi notification when a scan starts, finishes, or encounters errors."
+msgid "Show a short notification after a background scan that changed something. Problems that need you are always shown."
 msgstr ""
 
 msgctxt "#32313"
@@ -401,7 +401,7 @@ msgid "No changes"
 msgstr ""
 
 msgctxt "#32349"
-msgid "{} updated"
+msgid "{} items updated"
 msgstr ""
 
 msgctxt "#32350"

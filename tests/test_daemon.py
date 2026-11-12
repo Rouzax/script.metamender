@@ -308,17 +308,6 @@ def _notified_ids(all_stats):
     return [c.args[0] for c in notify.call_args_list]
 
 
-def test_tvdb_auth_failure_notified_once_per_cycle(kodi_stubs):
-    stats = _complete_stats()
-    stats["tvshow"]["tvdb_auth_failed"] = True
-    stats["episode"]["tvdb_auth_failed"] = True
-
-    notified = _notified_ids(stats)
-
-    assert notified.count("s32352") == 1
-    assert "s32341" not in notified
-
-
 def test_no_tvdb_message_without_auth_failure(kodi_stubs):
     assert "s32352" not in _notified_ids(_complete_stats())
 
@@ -456,10 +445,10 @@ def _run_gated(setup_complete, ticks):
     return scan, notify, monitor
 
 
-def test_no_scan_before_setup_and_one_notification(kodi_stubs):
+def test_no_scan_before_setup(kodi_stubs):
     scan, notify, monitor = _run_gated(False, ticks=4)
     assert scan.call_count == 0
-    assert notify.call_count == 1
+    assert notify.call_count == 0  # the attention window says it instead
     assert monitor.cleared >= 1
 
 
@@ -504,3 +493,195 @@ def test_setup_buttons_close_the_settings_dialog():
     by_id = {s.get("id"): s for s in root.iter("setting")}
     for setting_id in ("run_setup_wizard", "configure_sources"):
         assert by_id[setting_id].find("control").findtext("close") == "true"
+
+
+# --- quiet scans and the attention window -------------------------------------
+
+import json  # noqa: E402
+
+from resources.lib.service import attention  # noqa: E402
+from resources.lib.utils import ApiKeyError  # noqa: E402
+
+
+class _Service:
+    """daemon.run() for a few ticks with the problem record kept in a dict,
+    so several runs share it like the real tracker."""
+
+    def __init__(self, store=None):
+        self.store = {} if store is None else store
+        self.notify = MagicMock()
+        self.window = MagicMock(return_value="later")
+        self.builtin = MagicMock()
+        self.check_folders = MagicMock(return_value={})
+        self.window_ticks = []
+
+    def run(self, ticks=2, scan=None, setup=True, key="k", notifications=False,
+            playing=lambda svc: False, monitor=None, aborting=lambda: False):
+        monitor = monitor or _FakeMonitor(ticks)
+        self.monitor = monitor
+        self.playing_now = False
+        tracker = MagicMock()
+        tracker.get_scan_state.side_effect = lambda k: self.store.get(k)
+        tracker.set_scan_state.side_effect = lambda k, v: self.store.__setitem__(k, v)
+        scan = scan or MagicMock(return_value=_complete_stats())
+
+        def cond(_name):
+            return playing(self)
+
+        def window(main, others):
+            self.window_ticks.append(monitor.waits)
+            return self.window(main, others)
+
+        real_abort = monitor.abortRequested
+        monitor.abortRequested = lambda: real_abort() or aborting()
+        with patch.object(daemon, "MetaMendMonitor", return_value=monitor), \
+                patch.object(daemon, "TrackerDB", return_value=tracker), \
+                patch.object(daemon, "_run_scan", scan), \
+                patch.object(daemon, "_load_settings",
+                             return_value={"tmdb_api_key": key,
+                                           "resume_interrupted": True,
+                                           "show_notifications": notifications,
+                                           "orphan_retention_days": 30}), \
+                patch.object(daemon, "load_source_config", return_value={}), \
+                patch.object(daemon, "acquire_scan_lock", return_value=True), \
+                patch.object(daemon, "release_scan_lock"), \
+                patch.object(daemon, "get_int_setting", return_value=24), \
+                patch.object(daemon, "is_setup_complete", return_value=setup), \
+                patch.object(daemon, "notify", self.notify), \
+                patch.object(daemon, "lang", side_effect=lambda i: "s{}".format(i)), \
+                patch.object(daemon, "show_attention_window", side_effect=window), \
+                patch.object(daemon, "_check_folders", self.check_folders), \
+                patch.object(daemon.xbmc, "executebuiltin", self.builtin), \
+                patch.object(daemon.xbmc, "getCondVisibility", side_effect=cond):
+            daemon.run()
+        return self
+
+    @property
+    def notified(self):
+        return [c.args[0] for c in self.notify.call_args_list]
+
+    def record(self):
+        return attention.Attention.from_json(self.store.get("attention"))
+
+    def streak(self):
+        return json.loads(self.store["attention"])["streak"]["count"]
+
+
+def _stats_updated(n):
+    stats = _complete_stats()
+    for s in stats.values():
+        s["updated"] = 0
+    stats["movie"]["updated"] = n
+    return stats
+
+
+def test_no_changes_scan_is_silent(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_stats_updated(0)),
+                         notifications=True)
+    assert svc.notified == []
+
+
+def test_updates_toast_only_when_not_playing(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_stats_updated(3)),
+                         notifications=True)
+    assert svc.notified == ["s32349"]
+
+    svc = _Service()
+
+    def scan_then_play(*a, **kw):
+        svc.playing_now = True
+        return _stats_updated(3)
+
+    svc.run(ticks=1, scan=MagicMock(side_effect=scan_then_play), notifications=True,
+            playing=lambda s: s.playing_now)
+    assert svc.notified == []
+
+
+def test_updates_toast_follows_the_setting(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_stats_updated(3)),
+                         notifications=False)
+    assert svc.notified == []
+
+
+def test_setup_incomplete_raises_setup_problem_not_a_toast(kodi_stubs):
+    svc = _Service().run(ticks=4, setup=False)
+    assert svc.notified == []
+    assert svc.window.call_count == 1
+    main, others = svc.window.call_args.args
+    assert main.kind == attention.SETUP and others == []
+
+
+def test_window_waits_for_playback_to_stop(kodi_stubs):
+    svc = _Service().run(ticks=5, setup=False, playing=lambda s: s.monitor.waits < 2)
+    assert svc.window.call_count == 1
+    assert svc.window_ticks[0] >= 2
+
+
+def test_open_setup_runs_the_wizard(kodi_stubs):
+    svc = _Service()
+    svc.window.return_value = "setup"
+    svc.run(ticks=2, setup=False)
+    svc.builtin.assert_called_once_with("RunScript(script.metamender,wizard)")
+
+
+def test_no_key_raises_the_no_key_problem(kodi_stubs):
+    svc = _Service().run(ticks=2, key="")
+    assert svc.window.call_args.args[0].kind == attention.NO_KEY
+
+
+def test_api_key_error_raises_key_rejected_and_completed_scan_clears_it(kodi_stubs):
+    svc = _Service().run(ticks=2, scan=MagicMock(side_effect=ApiKeyError("tmdb")))
+    assert "s32341" not in svc.notified
+    assert svc.window.call_args.args[0].kind == attention.KEY_REJECTED
+    assert svc.streak() == 0  # a rejected key is its own problem
+    svc.run(ticks=1)
+    assert svc.record().pending_window() is None
+    assert attention.KEY_REJECTED not in json.loads(svc.store["attention"])["open"]
+
+
+def test_failed_and_aborted_scans_extend_the_streak(kodi_stubs):
+    stats = _complete_stats(aborted=True)
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=stats))
+    assert svc.streak() == 1
+    svc.run(ticks=1, scan=MagicMock(side_effect=RuntimeError("boom")))
+    assert svc.streak() == 2
+    svc.run(ticks=1)
+    assert svc.streak() == 0
+
+
+def test_shutdown_abort_does_not_count_as_failure(kodi_stubs):
+    svc = _Service()
+    state = {"down": False}
+
+    def scan(*a, **kw):
+        state["down"] = True
+        return _complete_stats(aborted=True)
+
+    svc.run(ticks=1, scan=MagicMock(side_effect=scan), aborting=lambda: state["down"])
+    assert json.loads(svc.store.get("attention", '{"streak": {"count": 0}}'))["streak"]["count"] == 0
+
+
+def test_tvdb_toast_once_across_cycles(kodi_stubs):
+    auth = _complete_stats()
+    auth["episode"]["tvdb_auth_failed"] = True
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=auth))
+    assert svc.notified.count("s32352") == 1
+    svc.run(ticks=1, scan=MagicMock(return_value=auth))
+    assert svc.notified.count("s32352") == 1
+    svc.run(ticks=1)
+    svc.run(ticks=1, scan=MagicMock(return_value=auth))
+    assert svc.notified.count("s32352") == 2
+
+
+def test_folders_checked_after_full_scan_only(kodi_stubs):
+    svc = _Service().run(ticks=2, monitor=_PendingMonitor(2))
+    assert svc.check_folders.call_count == 1
+
+
+def test_check_folders_skips_disabled_entries(kodi_stubs):
+    config = {"sources": [{"path": "smb://b/", "enabled": False}]}
+    with patch.object(daemon, "discover_folders",
+                      return_value=[{"path": "smb://a/", "label": "A"},
+                                    {"path": "smb://b/", "label": "B"}]), \
+            patch.object(daemon.xbmcvfs, "exists", return_value=False):
+        assert daemon._check_folders(config) == {"smb://a/": False}
