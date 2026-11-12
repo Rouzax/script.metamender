@@ -39,19 +39,19 @@
     "group": "update-now",
     "window": "script-metamender-progress.xml",
     "kind": "progress",
-    "title": "Het gouden uur"
+    "title": "The Night Ferry"
   },
   "update-now-corner-bar": {
     "group": "update-now",
     "window": "native",
     "active": "extendedprogressdialog",
     "kind": "corner-bar",
-    "title": "Het gouden uur",
+    "title": "The Night Ferry",
     "crop": [
       1180,
       0,
       740,
-      200
+      95
     ]
   },
   "attention-window": {
@@ -153,6 +153,18 @@
     "window": "native",
     "active": "contextmenu",
     "kind": "context",
-    "crop": "full"
+    "crop": [
+      600,
+      230,
+      1320,
+      640
+    ]
+  },
+  "details-plot-dutch-folder": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "episode-dutch",
+    "focus": "plot"
   }
 }

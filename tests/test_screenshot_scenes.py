@@ -51,7 +51,6 @@ def test_scene_names_are_file_and_argument_safe():
         assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", name), name
 
 
-@pytest.mark.xfail(strict=True, reason="captured in the screenshot run")
 def test_every_scene_has_a_committed_screenshot():
     for name, scene in SCENES.items():
         path = SHOTS / scene["group"] / f"{name}.png"

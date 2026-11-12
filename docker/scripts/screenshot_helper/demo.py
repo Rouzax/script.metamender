@@ -15,7 +15,10 @@ from resources.lib.engine.protect import fingerprint
 # The scenes are dated, so a re-take gives the same "next check" dates.
 TODAY = "2026-11-12"
 
-EPISODE_PLOT = ("Agenten Mardik en Shannon worden opgeroepen voor een melding op "
+EPISODE_PLOT = ("The night crossing to the islands is delayed when a passenger who "
+                "boarded at the harbour cannot be found anywhere on the ferry. The "
+                "crew has until dawn to work out who saw her last.")
+DUTCH_PLOT = ("Agenten Mardik en Shannon worden opgeroepen voor een melding op "
                 "Amsterdam Centraal, waar een verdachte tas is gevonden. Wat begint "
                 "als routine, loopt snel uit de hand.")
 MOVIE_PLOT = ("A retired lighthouse keeper takes in a runaway who claims to have "
@@ -34,18 +37,18 @@ def _fs(reason: str, *, source: str | None = None, count: int = 1,
 
 def episode() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any],
                        dict[str, Any], str]:
-    """A new Dutch episode, scraped by TVmaze, matched by its number."""
+    """A new episode scraped by TVmaze without a plot, matched by its number."""
     item = {
-        "title": "Amsterdam Centraal", "showtitle": "Het gouden uur",
+        "title": "Departure", "showtitle": "The Night Ferry",
         "season": 1, "episode": 1, "firstaired": "2026-11-01",
         "plot": EPISODE_PLOT, "rating": 7.4, "votes": 312, "runtime": 2700,
-        "director": [], "writer": ["Noor de Vries"],
+        "director": [], "writer": ["Sam Okafor"],
         "uniqueid": {"tvmaze": "1000001"},
         "ratings": {"imdb": {"rating": 7.4, "votes": 312, "default": True}},
     }
     item_row = {
         "tmdb_id": "200001", "tvdb_id": "300001", "imdb_id": "tt0000001",
-        "tmdb_season": 1, "number_matched": 1, "orig_title": "Amsterdam Centraal",
+        "tmdb_season": 1, "number_matched": 1, "orig_title": "Departure",
         "orig_aired": "2026-11-01", "ids_checked": TODAY, "last_seen": TODAY,
         "match_note": json.dumps([
             {"site": "tmdb", "matched": "date"}, {"site": "tvdb", "matched": "date"},
@@ -60,17 +63,35 @@ def episode() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any]
                      written=json.dumps({"imdb": "demo"})),
         "runtime": _fs("updated", source="tmdb", next_retry="2026-11-19",
                        written=fingerprint(2700)),
-        "title": _fs("fill_only", next_retry="2026-11-19"),
+        "title": _fs("unchanged", source="tmdb", next_retry="2026-11-19"),
         "firstaired": _fs("unchanged", source="tmdb", count=3),
         "writer": _fs("unchanged", source="tmdb", next_retry="2026-11-19"),
         "director": _fs("nothing", next_retry="2026-11-15"),
     }
+    # The scraper had no plot: MetaMender filled the gap.
+    keep = {
+        "plot": {"original": "", "has_original": True,
+                 "locked": False, "written_fp": fingerprint(EPISODE_PLOT)},
+    }
+    return EPISODE, item, item_row, fs_map, keep, "English"
+
+
+def episode_dutch() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any],
+                             dict[str, Any], str]:
+    """The same story in a Dutch folder: the scraper's English plot replaced
+    by TMDB's Dutch one."""
+    media_type, item, item_row, fs_map, _, _ = episode()
+    item.update({"title": "Amsterdam Centraal", "showtitle": "Het gouden uur",
+                 "plot": DUTCH_PLOT, "writer": ["Noor de Vries"]})
+    item_row["orig_title"] = "Amsterdam Centraal"
+    fs_map["plot"] = _fs("updated", source="tmdb", next_retry="2026-11-19",
+                         written=fingerprint(DUTCH_PLOT))
     keep = {
         "plot": {"original": "Officers Mardik and Shannon are called to Amsterdam "
                              "Central Station.", "has_original": True,
-                 "locked": False, "written_fp": fingerprint(EPISODE_PLOT)},
+                 "locked": False, "written_fp": fingerprint(DUTCH_PLOT)},
     }
-    return EPISODE, item, item_row, fs_map, keep, "Dutch"
+    return media_type, item, item_row, fs_map, keep, "Dutch"
 
 
 def episode_not_matched() -> tuple[MediaType, dict[str, Any], dict[str, Any],
@@ -121,4 +142,4 @@ def movie() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any],
     return MOVIE, item, item_row, fs_map, keep, ""
 
 
-PRESETS = {"episode": episode, "episode-not-matched": episode_not_matched, "movie": movie}
+PRESETS = {"episode": episode, "episode-dutch": episode_dutch, "episode-not-matched": episode_not_matched, "movie": movie}

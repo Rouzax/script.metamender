@@ -3,6 +3,10 @@
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
     <import addon="script.metamender" version="0.0.1"/>
+    <!-- Kodi puts only the direct imports on the helper's path, and MetaMender's
+         window modules import its providers. -->
+    <import addon="script.module.requests" version="2.22.0"/>
+    <import addon="script.module.imdbratings" version="1.0.0"/>
   </requires>
   <extension point="xbmc.python.script" library="default.py"/>
   <extension point="xbmc.addon.metadata">
