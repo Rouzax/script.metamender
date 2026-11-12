@@ -558,6 +558,7 @@ def test_older_schema_is_recreated(tmp_path, monkeypatch):
     )
     db = TrackerDB(path)
     cols = {r["name"] for r in db._conn.execute("PRAGMA table_info(field_status)")}
+    item_cols = {r["name"] for r in db._conn.execute("PRAGMA table_info(items)")}
     n_items = db._conn.execute("SELECT COUNT(*) FROM items").fetchone()[0]
     n_fields = db._conn.execute("SELECT COUNT(*) FROM field_status").fetchone()[0]
     version = db._conn.execute(
@@ -566,8 +567,9 @@ def test_older_schema_is_recreated(tmp_path, monkeypatch):
     db.close()
 
     assert {"written_value", "from_fallback", "fallback_checks", "settings_fp"} <= cols
+    assert {"orig_title", "orig_aired", "number_matched"} <= item_cols
     assert n_items == 0 and n_fields == 0
-    assert version == "3"
+    assert version == str(SCHEMA_VERSION)
     assert [k.get("event") for _, k in warnings] == ["tracker.schema_reset"]
 
 
@@ -798,3 +800,28 @@ def test_record_manual_check_keeps_the_clock(tmp_path):
     assert (row["fetch_count"], row["next_retry"]) == (3, "2027-01-01")
     assert (row["settings_fp"], row["written_value"], row["source"],
             row["from_fallback"]) == ("b", "P", "tmdb", 1)
+
+
+# Number-matched episodes (engine/numbermatch.py)
+
+def test_number_match_columns_round_trip(tmp_path):
+    db = TrackerDB(str(tmp_path / "t.db"))
+    db.upsert_item("episode", "Show S01E03", orig_title="Aflevering 3",
+                   orig_aired="2019-11-12", number_matched=1)
+    row = db.get_item("episode", "Show S01E03")
+    assert row["orig_title"] == "Aflevering 3"
+    assert row["orig_aired"] == "2019-11-12"
+    assert row["number_matched"] == 1
+
+
+def test_clear_number_match_drops_ids_keeps_originals(tmp_path):
+    db = TrackerDB(str(tmp_path / "t.db"))
+    db.upsert_item("episode", "Show S01E03", tmdb_id="11", tvdb_id="22",
+                   imdb_id="tt3", tmdb_season=1, orig_title="Real title",
+                   orig_aired="2019-11-12", number_matched=1)
+    db.clear_number_match("episode", "Show S01E03")
+    row = db.get_item("episode", "Show S01E03")
+    assert (row["tmdb_id"], row["tvdb_id"], row["imdb_id"], row["tmdb_season"]) == (
+        None, None, None, None)
+    assert row["number_matched"] == 0
+    assert (row["orig_title"], row["orig_aired"]) == ("Real title", "2019-11-12")

@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS items (
     -- TMDB season of an episode whose TMDB id came from /find; TMDB can
     -- number seasons differently from Kodi.
     tmdb_season INTEGER,
+    -- An episode without a usable id of its own, matched by season and
+    -- episode number: the title and date it had when first seen unmatched
+    -- (the scraper's, which a match is always checked against), and whether
+    -- its ids came from such a match. See engine/numbermatch.py.
+    orig_title TEXT,
+    orig_aired TEXT,
+    number_matched INTEGER DEFAULT 0,
     UNIQUE(media_type, identity)
 );
 
@@ -92,7 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_field_status ON field_status(item_id, field);
 _UPSERT_KWARGS = frozenset((
     "kodi_id", "tmdb_id", "imdb_id", "tvdb_id",
     "source_path", "premiered", "date_added", "ids_checked",
-    "tmdb_season",
+    "tmdb_season", "orig_title", "orig_aired", "number_matched",
 ))
 
 _ID_KWARGS = frozenset(("tmdb_id", "imdb_id", "tvdb_id"))
@@ -778,6 +785,23 @@ class TrackerDB:
         covered the whole library.
         """
         self.set_scan_state(_CYCLE_COMPLETE_KEY, "1")
+
+    def clear_number_match(self, media_type: str, identity: str) -> None:
+        """Drop the ids a number match gave an episode (upsert_item never
+        clears an id); the kept original title and date stay."""
+        try:
+            self._conn.execute(
+                "UPDATE items SET tmdb_id = NULL, tvdb_id = NULL, imdb_id = NULL, "
+                "tmdb_season = NULL, number_matched = 0 "
+                "WHERE media_type = ? AND identity = ?",
+                (media_type, identity),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            log.exception(
+                "Failed to clear number match",
+                event="tracker.error", media_type=media_type, identity=identity,
+            )
 
     def mark_cycle_processed(self, media_type: str, identity: str) -> None:
         """Mark an item as processed in the current cycle."""
