@@ -72,7 +72,7 @@ link = "https://github.com/Rouzax/script.metamender"
 name = "MetaMender on GitHub"
 
 [[project.extra.social]]
-icon = "simple/kofi"
+icon = "fontawesome/brands/ko-fi"
 link = "https://ko-fi.com/O0W221GBUG"
 name = "Support MetaMender on Ko-fi"
 
