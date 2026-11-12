@@ -44,7 +44,7 @@ and [troubleshooting](https://rouzax.github.io/script.metamender/docs/troublesho
 
 ## Support
 
-Found a problem or have an idea? [Open an issue](https://github.com/Rouzax/script.metamender/issues).
+Found a problem or have an idea? [Open an issue](https://github.com/Rouzax/script.metamender/issues). Questions are welcome in the [Kodi forum thread](https://forum.kodi.tv/showthread.php?tid=389809).
 
 Building tools that solve my own problems and sharing them in the hope they solve yours too. This one saves you hunting down missing plots and checking whether that 9.4 from opening week still holds.
 

@@ -79,6 +79,12 @@ def test_the_links_are_the_published_site_and_repository():
     assert repo is not None and _root().findtext(".//source") == repo.group(1)
 
 
+def test_the_forum_link_is_a_kodi_forum_thread():
+    """The official repository expects the add-on's support thread."""
+    forum = _root().findtext(".//forum") or ""
+    assert re.fullmatch(r"https://forum\.kodi\.tv/showthread\.php\?tid=\d+", forum), forum
+
+
 def test_the_licence_matches_the_licence_file():
     assert _root().findtext(".//license") == "GPL-3.0-only"
     assert "GNU GENERAL PUBLIC LICENSE" in (ROOT / "LICENSE.txt").read_text()[:200]

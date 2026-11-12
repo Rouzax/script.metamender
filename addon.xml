@@ -35,6 +35,7 @@
         <license>GPL-3.0-only</license>
         <website>https://rouzax.github.io/script.metamender/</website>
         <source>https://github.com/Rouzax/script.metamender</source>
+        <forum>https://forum.kodi.tv/showthread.php?tid=389809</forum>
         <news>v1.0.0
 - First release: fills missing plots, titles, credits and more in each folder's language
 - Keeps new movies' and episodes' scores up to date while their votes come in

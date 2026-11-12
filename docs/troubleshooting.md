@@ -149,3 +149,6 @@ GitHub](https://github.com/Rouzax/script.metamender/issues) with:
 
 Look through a log before you post it: it lists the titles and folders of the
 items it worked on.
+
+Questions, and anything that is not quite a bug, are welcome in the
+[Kodi forum thread](https://forum.kodi.tv/showthread.php?tid=389809).
