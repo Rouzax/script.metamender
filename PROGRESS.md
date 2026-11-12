@@ -109,7 +109,7 @@ feat/7d-provider-replacement.
 - [x] 10.1 Background notifications: nothing while anything plays, a toast only after a scan that changed something, and an attention window (own style) for problems that need the user: setup not finished, no or a rejected TMDB key, background scans failing for a day, a library folder offline for 3 days; each shown once, again only when it changes or comes back
 - [x] 10.4 Item details window ("MetaMender" context submenu: Update now, Details): per field where the value came from, when it was checked and is next due, why it was left alone, and what it replaced; Restore original locks the field, Unlock makes it due again; locks and kept originals survive Reset tracker. Theme setting (Golden Hour, Ultraviolet, Ember, Nightfall) for every MetaMender window
 - [x] 10.2 Docker test scripts (setup.sh, run-test.sh, teardown.sh, backup/restore, verify.py, the matrix rig); run-test.sh follows a scan's own log file
-- [ ] 10.3 CLAUDE.md and documentation
+- [x] 10.3 CLAUDE.md and documentation: Zensical docs site, landing page, README, wordmark and art, automated screenshots
 
 ## Audits
 - [x] Audit 1 (post Phase 3): Fixed 15 logging/error handling issues across tracker, kodi, sources
