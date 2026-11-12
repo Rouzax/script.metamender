@@ -141,10 +141,6 @@ msgctxt "#32125"
 msgid "Staleness threshold (days)"
 msgstr ""
 
-msgctxt "#32126"
-msgid "Content older than this many days is considered to have stable ratings. Only items with empty ratings are backfilled for older content."
-msgstr ""
-
 msgctxt "#32140"
 msgid "Sources"
 msgstr ""
@@ -492,10 +488,6 @@ msgstr ""
 
 msgctxt "#32397"
 msgid "Which provider to ask first for TV show and episode text in a folder's fallback language, for folders that have one. Changing it fetches values filled from the fallback again."
-msgstr ""
-
-msgctxt "#32402"
-msgid "MetaMender setup"
 msgstr ""
 
 msgctxt "#32404"

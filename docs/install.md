@@ -44,7 +44,7 @@ Kodi installs the add-ons MetaMender needs along with it, including the
 ## Install from a zip file
 
 If you would rather not add a repository, download the latest
-`script.metamender-x.y.z.zip` from
+`script.metamender-vX.Y.Z.zip` from
 [MetaMender's releases](https://github.com/Rouzax/script.metamender/releases/latest)
 and install it with **Settings > Add-ons > Install from zip file**. Kodi
 fetches the add-ons MetaMender needs from the official Kodi repository. You do

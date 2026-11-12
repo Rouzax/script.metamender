@@ -1,0 +1,51 @@
+MetaMender Changelog
+====================
+
+v1.0.0 (unreleased)
+-------------------
+New Features:
+  - First release. A background service that fills missing and refreshes
+    stale video library metadata for movies, TV shows and episodes from
+    TMDB, TheTVDB and IMDb's public ratings (script.module.imdbratings),
+    written back over JSON-RPC, with per-field progress in a local
+    sqlite tracker.
+  - Fields: ratings and votes (TMDB and IMDb slots beside the scraper's,
+    shown rating per the Rating source setting), plots, episode titles,
+    show and movie titles (optional), taglines, directors and writers,
+    genre, studio, country, runtime, first aired date and trailers, each
+    group switched on or off in setup or the settings.
+  - Languages: text in each source folder's own language, with an
+    optional fallback language that only fills empty fields; a folder
+    without a language only gets its empty fields filled.
+  - Maturity model: a field is checked again on a schedule while its
+    content is new (7, 30 and 90 days between checks, then at one year)
+    and settled after that; a failed check never counts as a check.
+  - Age ratings in one country's system for NL, BE, DE, AT, GB, US, FR,
+    DK, SE and AU: TMDB's rating for that country, the FSK, BBFC and
+    Medieraadet sites, then other countries' ratings converted through
+    the preset tables (resources/presets/*.json); a converted rating is
+    re-checked monthly for a year.
+  - Episodes without ids (the TVmaze scraper) are matched by season and
+    episode number only when the air date (within a day, unique in its
+    season) or the title agrees; a conflict between TMDB and TheTVDB
+    uses neither.
+  - NFO files: an item with an NFO file only gets its empty fields
+    filled, matching Kodi's own NFO lookup.
+  - Setup wizard (TMDB key, library and folder languages, what to fill,
+    age rating country); nothing is scanned before it is finished.
+  - Context menu MetaMender submenu: Update now for a movie, show,
+    season or episode (with a progress window that can be stopped or
+    sent to the background), and Details.
+  - Details window: per field where the value came from, what it
+    replaced, when it was checked and is due, and why it was left
+    alone; Restore original, Keep this value and unlock; the ids and
+    how each was found.
+  - Quiet background operation: nothing while anything plays, a short
+    notification after a scan that changed something, and a "MetaMender
+    needs you" window for problems that need the user (setup, key,
+    failing scans, unreachable folders).
+  - Window colour themes: Golden Hour, Ultraviolet, Ember, Nightfall.
+
+Internal:
+  - Tested with full service scans of a 431-movie, 438-show,
+    6,603-episode library on Kodi 21.3 and Kodi 22 RC1.

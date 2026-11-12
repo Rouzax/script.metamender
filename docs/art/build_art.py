@@ -9,7 +9,8 @@ Writes icon.png (512x512, full colour) and the textures under
 resources/skins/Default/media/metamender/, then the docs art: the wordmark
 (icon, a light "Meta" and a heavy amber "Mender") for dark and for light
 backgrounds, the docs banner and the GitHub social preview, under
-docs/assets/, with the landing page's copies under site/images/. The textures are white on
+docs/assets/, with the landing page's copies under site/images/, and the
+add-on's fanart.jpg. The textures are white on
 transparent so the window XML tints each one with colordiffuse; the nine-slice
 ones (panel, frame, button, row) are 64x64 with their rounding inside a 20px
 border. Also writes docs/art/preview-small.png, the icon at Kodi toast sizes,
@@ -273,6 +274,16 @@ def _poster(out: str, size: tuple[int, int], mark_width: int, mark_top: int,
     poster.convert("RGB").save(out)
 
 
+def fanart() -> None:
+    """The add-on's fanart.jpg: the banner backdrop at 1920x1080, which Kodi
+    shows behind the add-on's information page."""
+    with tempfile.TemporaryDirectory() as tmp:
+        png = os.path.join(tmp, "fanart.png")
+        _poster(png, (1920, 1080), 1300, 380, 760, 54)
+        Image.open(png).convert("RGB").save(os.path.join(ROOT, "fanart.jpg"), "JPEG",
+                                            quality=90, optimize=True)
+
+
 def docs_art() -> None:
     os.makedirs(DOCS_ASSETS, exist_ok=True)
     os.makedirs(SITE_IMAGES, exist_ok=True)
@@ -294,6 +305,7 @@ def main() -> None:
         _render(svg, os.path.join(MEDIA, name + ".png"), width)
     preview_small(icon_path, os.path.join(ART, "preview-small.png"))
     docs_art()
+    fanart()
 
 
 if __name__ == "__main__":
