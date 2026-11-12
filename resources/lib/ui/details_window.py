@@ -52,14 +52,18 @@ class ListEntry:
     row: DetailRow | None
 
 
-class DetailsView(Protocol):
+class ViewLike(Protocol):
+    """What the window reads of service.details.DetailsView."""
+
     heading: str
     sub: str
     rows: list[DetailRow]
 
 
-class DetailsSession(Protocol):
-    def reload(self) -> DetailsView | None: ...
+class SessionLike(Protocol):
+    """What the window calls on service.details.DetailsSession."""
+
+    def reload(self) -> ViewLike | None: ...
     def update_now(self) -> None: ...
     def run_action(self, row: DetailRow) -> None: ...
 
@@ -140,8 +144,8 @@ class DetailsWindow(xbmcgui.WindowXMLDialog):
     """The properties of the first view are set before doModal(), so the
     visibility conditions hold from the first frame."""
 
-    session: DetailsSession
-    view: DetailsView
+    session: SessionLike
+    view: ViewLike
     entries: list[ListEntry]
 
     def onInit(self) -> None:
@@ -231,7 +235,7 @@ class DetailsWindow(xbmcgui.WindowXMLDialog):
                 self._reload()
 
 
-def show_details_window(session: DetailsSession, view: DetailsView) -> None:
+def show_details_window(session: SessionLike, view: ViewLike) -> None:
     """Show the window until the user closes it."""
     window = DetailsWindow(_XML, get_addon().getAddonInfo("path"), "Default", "1080i")
     window.session = session
