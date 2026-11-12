@@ -1,7 +1,7 @@
 MetaMender Changelog
 ====================
 
-v1.0.0 (unreleased)
+v1.0.0 (2026-11-12)
 -------------------
 New Features:
   - First release. A background service that fills missing and refreshes
@@ -49,3 +49,6 @@ New Features:
 Internal:
   - Tested with full service scans of a 431-movie, 438-show,
     6,603-episode library on Kodi 21.3 and Kodi 22 RC1.
+  - Installed from the release zip through Kodi's Install from zip file:
+    Kodi fetched script.module.imdbratings from the official repository
+    itself; the context menu entry appears after a Kodi restart.
