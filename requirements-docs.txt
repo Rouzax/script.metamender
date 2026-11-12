@@ -9,4 +9,4 @@
 #
 # CI installs from requirements-docs.lock with --require-hashes. Neither file
 # ships in the add-on zip.
-zensical==0.0.71
+zensical==0.1.0
