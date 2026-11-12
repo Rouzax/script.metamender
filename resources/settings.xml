@@ -275,6 +275,18 @@
                     <default>true</default>
                     <control type="toggle" />
                 </setting>
+                <setting id="theme" type="integer" label="32578" help="32579">
+                    <default>0</default>
+                    <constraints>
+                        <options>
+                            <option label="32580">0</option>
+                            <option label="32581">1</option>
+                            <option label="32582">2</option>
+                            <option label="32583">3</option>
+                        </options>
+                    </constraints>
+                    <control type="list" format="string" />
+                </setting>
             </group>
             <group id="maintenance" label="32330">
                 <setting id="orphan_retention_days" type="integer" label="32331" help="32332">

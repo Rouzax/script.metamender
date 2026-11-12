@@ -51,6 +51,7 @@ from resources.lib.ui.setup_model import (
     mask_key,
     settings_to_write,
 )
+from resources.lib.ui.theme import THEMES, theme_colours
 from resources.lib.utils import (
     get_addon,
     get_bool_setting,
@@ -403,11 +404,7 @@ class SetupController:
         return lang(_COUNTRY_LABEL_BASE + index)
 
 
-GOLDEN_HOUR = {
-    "MM.Accent": "FFF5A623",
-    "MM.ButtonFocus": "FFD4912A",
-    "MM.ButtonTextFocused": "FF0D1117",
-}
+GOLDEN_HOUR = THEMES[0]
 
 
 def window_properties(c: SetupController) -> dict[str, str]:
@@ -424,7 +421,7 @@ def window_properties(c: SetupController) -> dict[str, str]:
         "MM.StepTotal": str(c.flow.total(c.state)) if wizard else "",
         "MM.Marker": c.marker_kind(),
     }
-    props.update(GOLDEN_HOUR)
+    props.update(theme_colours())
     return props
 
 

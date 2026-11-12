@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import xbmcgui
 
-from resources.lib.ui.setup_window import GOLDEN_HOUR
+from resources.lib.ui.theme import theme_colours
 from resources.lib.utils import get_addon, lang
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ def progress_properties(progress: RefreshProgress, heading: str, now: float) -> 
         "MM.Stop": lang(32480),
         "MM.Background": lang(32481),
     }
-    props.update(GOLDEN_HOUR)
+    props.update(theme_colours())
     return props
 
 

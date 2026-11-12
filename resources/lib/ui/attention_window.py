@@ -19,7 +19,7 @@ from resources.lib.service.attention import (
     SETUP,
     Problem,
 )
-from resources.lib.ui.setup_window import GOLDEN_HOUR
+from resources.lib.ui.theme import theme_colours
 from resources.lib.utils import get_addon, lang
 
 _XML = "script-metamender-attention.xml"
@@ -49,7 +49,7 @@ def attention_properties(main: Problem, others: list[Problem]) -> dict[str, str]
         "MM.Action": lang(32502) if main.kind in _FIXED_BY_SETUP else "",
         "MM.Later": lang(32503),
     }
-    props.update(GOLDEN_HOUR)
+    props.update(theme_colours())
     return props
 
 
