@@ -39,5 +39,10 @@ stays.
 | When nothing is found | Retries for 30 days, then the not-found value | Retries every month for about a year, then the not-found value if you switched it on |
 | Seeing why | The log | The [Details window](details.md) for any movie or show |
 
+MetaMender leaves out two of the fixer's sources on purpose. The Kijkwijzer
+website now blocks automated lookups, so asking it would only fail; TMDB still
+carries Kijkwijzer ratings for most titles. OMDb only adds the American
+rating, which TMDB already has.
+
 How MetaMender finds and converts ratings is on the [Age ratings](age-ratings.md)
 page.

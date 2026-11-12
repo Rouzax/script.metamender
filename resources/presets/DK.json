@@ -1,8 +1,8 @@
 {
     "country_code": "DK",
     "country_name": "Denmark",
-    "system_name": "Medieradet",
-    "display_name": "DK - Medieradet",
+    "system_name": "Medieraadet",
+    "display_name": "DK - Medieraadet",
     "valid_ratings": ["A", "7", "11", "15", "F"],
     "default_prefix": "DK:",
     "inference_countries": ["SE", "NL", "BE", "DE", "AT", "FR", "GB", "US"],

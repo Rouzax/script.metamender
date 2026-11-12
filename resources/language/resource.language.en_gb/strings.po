@@ -106,7 +106,7 @@ msgid "Enable credits backfill"
 msgstr ""
 
 msgctxt "#32111"
-msgid "Backfill missing director, writer, and studio credits from TMDB."
+msgid "Directors and writers, from TMDB."
 msgstr ""
 
 msgctxt "#32112"
@@ -130,7 +130,7 @@ msgid "Enable details backfill"
 msgstr ""
 
 msgctxt "#32117"
-msgid "Backfill missing supplementary details such as genres, premiere dates, and runtime from TMDB."
+msgid "Genre, studio, country, runtime and first aired date, from TMDB."
 msgstr ""
 
 msgctxt "#32120"
@@ -437,7 +437,7 @@ msgid "Refresh schedule (days)"
 msgstr ""
 
 msgctxt "#32377"
-msgid "Comma-separated list of ages in days at which recently-released content is re-fetched. Example: 7,30,90 re-fetches at one week, one month, and three months after release."
+msgid "Days between the checks of new content, separated by commas. 7,30,90 checks again about a week after the first check, a month after that, then three months after that; one last check follows when the content reaches the staleness threshold."
 msgstr ""
 
 msgctxt "#32378"
@@ -659,7 +659,7 @@ msgid "Details"
 msgstr ""
 
 msgctxt "#32449"
-msgid "Studio, country, runtime and first aired date."
+msgid "Genre, studio, country, runtime and first aired date."
 msgstr ""
 
 msgctxt "#32450"
@@ -1325,4 +1325,12 @@ msgstr ""
 
 msgctxt "#32625"
 msgid "You unlocked this field; MetaMender checks it again once an age rating country is set up."
+msgstr ""
+
+msgctxt "#32626"
+msgid "Keep this value"
+msgstr ""
+
+msgctxt "#32627"
+msgid "Could not save the lock, so the field is not kept."
 msgstr ""
