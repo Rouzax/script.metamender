@@ -13,7 +13,8 @@ In your library, open the context menu of a movie, TV show, season or episode
 ![The MetaMender submenu in the context menu](screenshots/library/context-submenu.png)
 
 The **MetaMender** submenu also has **Details** for movies, shows and episodes;
-see [the Details window](details.md).
+see [the Details window](details.md). Right after installing MetaMender the
+submenu is not there yet; it appears once Kodi has been restarted.
 
 ## What it does
 

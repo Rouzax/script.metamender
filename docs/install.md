@@ -62,6 +62,10 @@ can do anything useful.
 
 Then follow the [setup](setup.md).
 
+The **MetaMender** entry in the context menu (for [Update now](update-now.md)
+and the [Details window](details.md)) appears after Kodi has been restarted
+once: Kodi loads add-ons' context menu entries when it starts.
+
 The first time MetaMender needs IMDb ratings, the IMDb Ratings module
 downloads IMDb's ratings data. Until that download has finished, IMDb ratings
 wait and are filled on a later scan; everything else is updated as normal.
