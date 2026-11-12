@@ -162,3 +162,36 @@ def test_manual_does_not_scan_before_setup(patched, monkeypatch):
     manual.run()
     patched["run_scan"].assert_not_called()
     manual.notify.assert_called_once()
+
+
+def _scan_state_store(tracker):
+    """Back the tracker mock's scan_state with a dict, as the real table."""
+    store = {}
+    tracker.get_scan_state.side_effect = store.get
+    tracker.set_scan_state.side_effect = store.__setitem__
+    return store
+
+
+def _open_problems(store):
+    import json
+    return set(json.loads(store.get("attention", "{}")).get("open", {}))
+
+
+def test_manual_rejected_key_is_recorded(monkeypatch, patched):
+    from resources.lib.utils import ApiKeyError
+    store = _scan_state_store(patched["tracker"])
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    monkeypatch.setattr(manual, "lang", lambda i: "s{}".format(i))
+    patched["run_scan"].side_effect = ApiKeyError("tmdb")
+    manual.run()
+    assert "key_rejected" in _open_problems(store)
+    assert "s32341" in [c.args[0] for c in manual.notify.call_args_list]
+
+
+def test_manual_working_key_clears_the_problem(monkeypatch, patched):
+    store = _scan_state_store(patched["tracker"])
+    store["attention"] = '{"open": {"key_rejected": ""}}'
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    monkeypatch.setattr(manual, "lang", lambda i: "s{}".format(i))
+    manual.run()
+    assert "key_rejected" not in _open_problems(store)

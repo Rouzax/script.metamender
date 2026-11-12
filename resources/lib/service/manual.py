@@ -22,6 +22,7 @@ from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
+from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
     _get_sources_config_path,
@@ -143,6 +144,8 @@ def run() -> None:
             duration_ms=duration_ms,
         )
 
+        attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
+
         # Only a pass that reached the end of the library closes the cycle;
         # otherwise the next run would start fresh over items it never visited.
         if not any(s.get("aborted") for s in all_stats.values()):
@@ -166,6 +169,9 @@ def run() -> None:
     except ApiKeyError:
         log.exception("Manual scan stopped: invalid API key", event="manual.apikey")
         notify(lang(32341))  # Invalid TMDB API key
+        if tracker is not None:
+            attention.update(
+                tracker, lambda a: a.raise_problem(attention.KEY_REJECTED))
     except Exception:
         log.exception("Manual scan failed", event="manual.error")
 

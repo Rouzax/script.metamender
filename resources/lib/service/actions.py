@@ -31,6 +31,7 @@ from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
+from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
     _get_sources_config_path,
@@ -236,6 +237,8 @@ def update_now(dbtype: str, dbid: str) -> None:
             show_id_map=show_id_map,
         )
 
+        # The key worked: a rejected-key problem the service recorded is over.
+        attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
         title = item.get("title", "") or str(item_id)
         updated = stats.get("updated", 0)
         log.info(
@@ -261,6 +264,9 @@ def update_now(dbtype: str, dbid: str) -> None:
     except ApiKeyError:
         log.exception("Update now stopped: invalid API key", event="actions.apikey")
         notify(lang(32341))  # Invalid TMDB API key
+        if tracker is not None:
+            attention.update(
+                tracker, lambda a: a.raise_problem(attention.KEY_REJECTED))
     except Exception:
         log.exception("Update now action failed", event="actions.error")
         notify(lang(32347))  # Update failed

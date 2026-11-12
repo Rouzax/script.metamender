@@ -326,3 +326,32 @@ def test_update_now_on_a_movie_while_a_refresh_runs_says_busy(update_patched, mo
     monkeypatch.setattr(actions, "bring_back_or_busy", lambda show: "busy")
     actions.update_now("movie", "7")
     assert "already running" in update_patched["notify"].call_args[0][0]
+
+
+def _scan_state_store(tracker):
+    """Back the tracker mock's scan_state with a dict, as the real table."""
+    store = {}
+    tracker.get_scan_state.side_effect = store.get
+    tracker.set_scan_state.side_effect = store.__setitem__
+    return store
+
+
+def _open_problems(store):
+    import json
+    return set(json.loads(store.get("attention", "{}")).get("open", {}))
+
+
+def test_update_now_rejected_key_is_recorded(update_patched):
+    from resources.lib.utils import ApiKeyError
+    store = _scan_state_store(update_patched["tracker"])
+    update_patched["run_scan"].side_effect = ApiKeyError("tmdb")
+    actions.update_now("movie", "7")
+    assert "key_rejected" in _open_problems(store)
+    assert _fake_lang(32341) in [c.args[0] for c in update_patched["notify"].call_args_list]
+
+
+def test_update_now_working_key_clears_the_problem(update_patched):
+    store = _scan_state_store(update_patched["tracker"])
+    store["attention"] = '{"open": {"key_rejected": ""}}'
+    actions.update_now("movie", "7")
+    assert "key_rejected" not in _open_problems(store)

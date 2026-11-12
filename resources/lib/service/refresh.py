@@ -27,6 +27,7 @@ from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
+from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
     _get_sources_config_path,
@@ -399,9 +400,13 @@ def open_refresh(dbtype: str, dbid: int) -> None:
                 result["outcome"] = run_refresh(
                     scope, progress, settings, source_config, tracker, monitor,
                     prepare=lambda: _prepare_imdb_ratings(settings, monitor))
+                attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
             except ApiKeyError:
                 log.exception("Refresh stopped: invalid API key", event="refresh.apikey")
                 result["error"] = 32341
+                if tracker is not None:
+                    attention.update(
+                        tracker, lambda a: a.raise_problem(attention.KEY_REJECTED))
             except Exception:
                 log.exception("Refresh failed", event="refresh.error")
                 result["error"] = 32347

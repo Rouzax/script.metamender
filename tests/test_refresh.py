@@ -370,7 +370,19 @@ def flow(monkeypatch):
     monkeypatch.setattr(refresh, "notify", notes.append)
     monkeypatch.setattr(refresh, "lang", lambda i: "#%d {}" % i)
     monkeypatch.setattr(refresh, "_load_settings", lambda: {"tmdb_api_key": "k"})
-    monkeypatch.setattr(refresh, "TrackerDB", lambda path: type("T", (), {"close": lambda s: None})())
+    store = state.setdefault("store", {})
+
+    class _Tracker:
+        def close(self):
+            pass
+
+        def get_scan_state(self, key):
+            return store.get(key)
+
+        def set_scan_state(self, key, value):
+            store[key] = value
+
+    monkeypatch.setattr(refresh, "TrackerDB", lambda path: _Tracker())
     monkeypatch.setattr(refresh, "_get_db_path", lambda: ":memory:")
     monkeypatch.setattr(refresh, "load_source_config", lambda p: {"sources": []})
     monkeypatch.setattr(refresh, "_get_sources_config_path", lambda: "x")
@@ -558,3 +570,25 @@ def test_bring_back_or_busy_while_stopping(running, clicked, stopping, expected)
     with patch.object(refresh, "refresh_running_show", return_value=running), \
             patch.object(refresh, "_refresh_stopping", return_value=stopping):
         assert refresh.bring_back_or_busy(clicked) == expected
+
+
+
+def _open_problems(store):
+    import json
+    return set(json.loads(store.get("attention", "{}")).get("open", {}))
+
+
+def test_flow_rejected_key_is_recorded(flow):
+    from resources.lib.utils import ApiKeyError
+    home, notes, released, state = flow
+    state["raise"] = ApiKeyError("tmdb")
+    refresh.open_refresh("tvshow", 7)
+    assert "key_rejected" in _open_problems(state["store"])
+    assert notes == ["#32341 {}"]
+
+
+def test_flow_working_key_clears_the_problem(flow):
+    home, notes, released, state = flow
+    state["store"]["attention"] = '{"open": {"key_rejected": ""}}'
+    refresh.open_refresh("tvshow", 7)
+    assert "key_rejected" not in _open_problems(state["store"])
