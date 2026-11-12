@@ -125,6 +125,8 @@ class DetailRow:
     title: str
     lines: list[tuple[str, str]]
     action: str
+    # The field is locked: the list shows a padlock beside its hint.
+    locked: bool = False
 
 
 def long_date(iso: str | None) -> str:
@@ -327,7 +329,7 @@ def _field_row(
             action = ACTION_RESTORE
         elif managed:
             action = ACTION_KEEP
-    return DetailRow(field, label, group, hint, label, lines, action)
+    return DetailRow(field, label, group, hint, label, lines, action, locked)
 
 
 def _from_text(field: str, source: str | None, fs: dict[str, Any], language: str) -> str:

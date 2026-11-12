@@ -479,3 +479,9 @@ def test_a_field_the_scan_does_not_manage_offers_no_keep():
     rows = _by_key(_rows(managed=["plot", "rating", "votes", "runtime", "firstaired",
                                   "title", "writer"]))
     assert rows["director"].action == ""
+
+
+def test_only_a_locked_field_row_is_marked_locked():
+    rows = _by_key(_rows(keep={"title": {"locked": True}}))
+    assert rows["title"].locked is True
+    assert rows["plot"].locked is False and rows["ids"].locked is False

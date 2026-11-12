@@ -9,7 +9,7 @@ from PIL import Image
 MEDIA = "resources/skins/Default/media/metamender/"
 XML = "resources/skins/Default/1080i/script-metamender-setup.xml"
 TEXTURES = ["panel", "frame", "button", "row", "check_off", "check_on", "radio_off",
-            "radio_on", "badge", "pulse", "dot", "divider"]
+            "radio_on", "badge", "pulse", "dot", "divider", "lock"]
 
 
 def test_icon_is_512_square():

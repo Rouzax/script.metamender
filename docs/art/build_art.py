@@ -164,6 +164,13 @@ def textures() -> dict[str, tuple[str, int]]:
                 ).format(TICK)
     pulse = ('<polyline points="8,33 20,33 26,20 34,46 41,26 46,33 56,33" fill="none" '
              'stroke="#fff" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>')
+    # A padlock: the shackle as a stroke, the body with a keyhole cut out.
+    lock = ('<defs><mask id="k"><rect width="64" height="64" fill="#fff"/>'
+            '<circle cx="32" cy="40" r="5" fill="#000"/>'
+            '<rect x="29.5" y="42" width="5" height="10" rx="2" fill="#000"/></mask></defs>'
+            '<path d="M20 28 V20 a12 12 0 0 1 24 0 V28" fill="none" stroke="#fff" '
+            'stroke-width="6" stroke-linecap="round"/>'
+            '<rect x="12" y="27" width="40" height="31" rx="7" fill="#fff" mask="url(#k)"/>')
     divider = ('<defs><linearGradient id="d" x1="0" y1="0" x2="1" y2="0">'
                '<stop offset="0" stop-color="#fff" stop-opacity="0"/>'
                '<stop offset="0.5" stop-color="#fff" stop-opacity="1"/>'
@@ -185,6 +192,7 @@ def textures() -> dict[str, tuple[str, int]]:
         "pulse": (_svg(64, 64, pulse), 64),
         "dot": (_svg(32, 32, '<circle cx="16" cy="16" r="15" fill="#fff"/>'), 32),
         "divider": (_svg(512, 4, divider), 512),
+        "lock": (_svg(64, 64, lock), 64),
     }
 
 

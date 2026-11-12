@@ -82,6 +82,15 @@ def list_entries(rows: list[DetailRow]) -> list[ListEntry]:
     return entries
 
 
+def entry_properties(entry: ListEntry) -> dict[str, str]:
+    """The list item's properties the row layout reads: a heading, and the
+    padlock of a locked field."""
+    return {
+        "heading": "1" if entry.heading else "",
+        "locked": "1" if entry.row is not None and entry.row.locked else "",
+    }
+
+
 def first_field_position(entries: list[ListEntry]) -> int:
     """Where focus starts: the first field, else the Ids entry."""
     for pos, entry in enumerate(entries):
@@ -165,7 +174,8 @@ class DetailsWindow(xbmcgui.WindowXMLDialog):
         items = []
         for entry in self.entries:
             item = xbmcgui.ListItem(entry.label, entry.label2)
-            item.setProperty("heading", "1" if entry.heading else "")
+            for key, value in entry_properties(entry).items():
+                item.setProperty(key, value)
             items.append(item)
         control.addItems(items)
         position = first_field_position(self.entries)

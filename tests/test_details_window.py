@@ -11,6 +11,7 @@ from resources.lib.ui import details_window
 from resources.lib.ui.details_model import DetailRow
 from resources.lib.ui.details_window import (
     details_properties,
+    entry_properties,
     first_field_position,
     header_properties,
     list_entries,
@@ -181,3 +182,25 @@ def test_action_button_fits_the_unlock_label():
     _, root = _list_control()
     button = next(c for c in root.iter("control") if c.get("id") == "31")
     assert int(button.findtext("width")) >= 640
+
+
+def test_only_a_locked_row_carries_the_padlock():
+    rows = _rows()
+    aired = next(r for r in rows if r.key == "firstaired")
+    aired.locked = True
+    entries = list_entries(rows)
+    props = {e.row.key if e.row else e.label: entry_properties(e) for e in entries}
+    assert props["firstaired"] == {"heading": "", "locked": "1"}
+    assert props["title"] == {"heading": "", "locked": ""}
+    heading = next(e for e in entries if e.heading)
+    assert entry_properties(heading) == {"heading": "1", "locked": ""}
+
+
+def test_padlock_shows_in_both_layouts_by_the_locked_property():
+    lst, _ = _list_control()
+    for tag in ("itemlayout", "focusedlayout"):
+        layout = lst.find(tag)
+        locks = [c for c in layout.iter("control") if c.get("type") == "image"
+                 and "metamender/lock.png" in (c.findtext("texture") or "")]
+        assert locks, tag
+        assert all("ListItem.Property(locked)" in (c.findtext("visible") or "") for c in locks)

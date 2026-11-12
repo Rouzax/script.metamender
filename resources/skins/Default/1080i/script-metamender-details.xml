@@ -109,6 +109,12 @@
                             <textcolor>FF7D8592</textcolor>
                             <label>$INFO[ListItem.Label2]</label>
                         </control>
+                        <!-- The padlock of a locked field, just left of its "locked" hint. -->
+                        <control type="image">
+                            <left>380</left><top>18</top><width>20</width><height>20</height>
+                            <visible>!String.IsEmpty(ListItem.Property(locked))</visible>
+                            <texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/lock.png</texture>
+                        </control>
                     </control>
                 </itemlayout>
                 <focusedlayout height="56">
@@ -164,6 +170,17 @@
                             <textcolor>$INFO[Window.Property(MM.ButtonTextFocused)]</textcolor>
                             <visible>Control.HasFocus(50)</visible>
                             <label>$INFO[ListItem.Label2]</label>
+                        </control>
+                        <!-- The padlock of a locked field, just left of its "locked" hint. -->
+                        <control type="image">
+                            <left>380</left><top>18</top><width>20</width><height>20</height>
+                            <visible>!String.IsEmpty(ListItem.Property(locked)) + !Control.HasFocus(50)</visible>
+                            <texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/lock.png</texture>
+                        </control>
+                        <control type="image">
+                            <left>380</left><top>18</top><width>20</width><height>20</height>
+                            <visible>!String.IsEmpty(ListItem.Property(locked)) + Control.HasFocus(50)</visible>
+                            <texture colordiffuse="$INFO[Window.Property(MM.ButtonTextFocused)]">metamender/lock.png</texture>
                         </control>
                     </control>
                 </focusedlayout>
