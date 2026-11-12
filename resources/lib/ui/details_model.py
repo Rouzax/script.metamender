@@ -219,22 +219,19 @@ def _field_row(
     )
     settled = _settled(field, fs, age, today, threshold)
     checked = count > 0 or reason in (REASON_NOTHING, REASON_UNCHECKED)
-    # An unlock leaves the "locked" reason until the next scan records one;
-    # the field is then grouped by its clock alone.
+    # An unlock leaves the "locked" reason until the next scan records one,
+    # and makes the field due at that scan (details.unlock_field). Kodi then
+    # holds the restored original, so this wins over "changed".
     unlocked = reason == REASON_LOCKED and not locked
 
     if locked:
         group, hint, why = GROUP_LEFT, lang(32548), _WHY[REASON_LOCKED]
     elif not checked:
         group, hint, why = GROUP_WAITING, lang(32551), _NEVER_CHECKED
+    elif unlocked:
+        group, hint, why = GROUP_WAITING, lang(32552), _UNLOCKED
     elif changed:
         group, hint, why = GROUP_LEFT, lang(32575), _CHANGED_SINCE
-    elif unlocked:
-        if settled:
-            group, hint = GROUP_LEFT, lang(32547)
-        else:
-            group, hint = GROUP_WAITING, ""
-        why = _UNLOCKED
     elif reason == REASON_UPDATED or (
         source and source != _SCRAPER_SOURCE and mine
     ):
@@ -268,7 +265,9 @@ def _field_row(
         lines.append((lang(32529), long_date(fs["fetched_at"])))
     if checked and not locked:
         decision = _decision(field, fs, age, today, threshold)
-        if settled:
+        if unlocked:
+            next_text = lang(32539)
+        elif settled:
             next_text = lang(32538)
         elif decision == SKIP_NOT_DUE:
             next_text = long_date(fs.get("next_retry"))

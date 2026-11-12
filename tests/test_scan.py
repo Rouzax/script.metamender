@@ -6552,6 +6552,40 @@ class TestFieldReasonsAndKeep:
         for col in ("fetch_count", "fetched_at", "next_retry", "settings_fp"):
             assert after[col] == before[col], col
 
+    def test_unlocked_settled_field_is_checked_at_the_next_scan(self, tmp_path, kodi_stubs):
+        from resources.lib.service.details import unlock_field
+
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        # Settled: sampled under the current settings, nothing left to sample.
+        tracker.record_field_fetch(
+            "movie", _MOVIE_IDENTITY, "plot", next_retry=None, source="tmdb",
+            settings_fp=_fp("plot"),
+        )
+        tracker.set_locked("movie", _MOVIE_IDENTITY, "plot", True)
+        tracker.commit()
+        old = _make_movie_item(plot="Scraper plot")
+        old["premiered"] = "1995-01-01"
+        tmdb = _tmdb_movie_response(plot="Fresh plot")
+
+        # A bare lock flag off is not enough: the settled field stays put.
+        tracker.set_locked("movie", _MOVIE_IDENTITY, "plot", False)
+        tracker.commit()
+        _upd, fetch = self._scan(tracker, old, ("plot",), tmdb=tmdb)
+        assert not fetch.called
+
+        tracker.set_locked("movie", _MOVIE_IDENTITY, "plot", True)
+        tracker.commit()
+        unlock_field(tracker, MOVIE, _MOVIE_IDENTITY, "plot")
+        tracker.start_new_cycle()
+        upd, fetch = self._scan(tracker, old, ("plot",), tmdb=tmdb)
+        row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        tracker.close()
+
+        assert fetch.called
+        assert _written(upd, "plot") == "Fresh plot"
+        assert row["settings_fp"] == _fp("plot") and row["last_reason"] == "updated"
+
     def test_locked_field_beside_a_due_field_is_left_alone(self, tmp_path, kodi_stubs):
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")

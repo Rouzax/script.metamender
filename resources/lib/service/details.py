@@ -123,8 +123,11 @@ def restore_field(
 def unlock_field(
     tracker: TrackerDB, media_type: MediaType, identity: str, field: str
 ) -> None:
-    """Let the scan treat the field normally again; the kept original stays."""
+    """Let MetaMender update the field again from the next scan on; the kept
+    original stays. The field may be settled, and a lock flag alone would
+    leave it settled forever, so it is made due at the next scan."""
     tracker.set_locked(media_type.name, identity, field, False)
+    tracker.forget_field_fingerprint(media_type.name, identity, field)
     tracker.commit()
     log.info(
         "Field unlocked",

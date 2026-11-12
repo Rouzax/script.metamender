@@ -264,26 +264,37 @@ def test_header_line():
     )
 
 
-def test_unlocked_field_is_not_reported_as_locked_or_empty():
-    """After an unlock the last reason stays "locked" until the next scan."""
+def test_unlocked_field_is_due_at_the_next_scan():
+    """After an unlock the last reason stays "locked" until the next scan,
+    which checks the field again whatever its clock says."""
     unlocked = {"original": "Amsterdam Centraal", "has_original": True,
                 "locked": False, "written_fp": None}
-    rows = _by_key(_rows(
-        fs_map={"title": _fs("locked", count=2, next_retry="2026-11-19")},
-        keep={"title": unlocked},
-    ))
-    title = rows["title"]
-    assert title.group == "waiting"
-    assert title.hint == "19 Nov"
-    assert title.action == ""
-    why = dict(title.lines)["Why"]
-    assert "unlocked" in why
-    assert "nothing" not in why and "You locked" not in why
-    settled = _by_key(_rows(
-        fs_map={"title": _fs("locked", count=2)}, keep={"title": unlocked},
-    ))["title"]
-    assert settled.group == "left" and settled.hint == "settled"
-    assert "unlocked" in dict(settled.lines)["Why"]
+    for fs in (_fs("locked", count=2, next_retry="2026-11-19"), _fs("locked", count=2)):
+        title = _by_key(_rows(fs_map={"title": fs}, keep={"title": unlocked}))["title"]
+        assert title.group == "waiting"
+        assert title.hint == "next scan"
+        assert title.action == ""
+        lines = dict(title.lines)
+        assert lines["Next check"] == "at the next scan"
+        assert lines["Why"] == (
+            "You unlocked this field, so MetaMender checks it again at the next scan."
+        )
+
+
+def test_unlocked_wins_over_changed_after_a_restore():
+    """Restore put the original back (not MetaMender's value), then Unlock:
+    the row tells the unlock, not "changed since MetaMender's update"."""
+    entry = {"original": "Old plot", "has_original": True, "locked": False,
+             "written_fp": fingerprint(PLOT)}
+    plot = _by_key(_rows(
+        item={"plot": "Old plot"},
+        fs_map={"plot": _fs("locked", source="tmdb", count=3, written=fingerprint(PLOT))},
+        keep={"plot": entry},
+    ))["plot"]
+    assert plot.group == "waiting" and plot.hint == "next scan"
+    lines = dict(plot.lines)
+    assert lines["Next check"] == "at the next scan"
+    assert "unlocked" in lines["Why"] and "Changed since" not in lines["Why"]
 
 
 def test_partial_number_match_names_the_rejected_site():

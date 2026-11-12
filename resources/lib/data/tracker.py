@@ -846,6 +846,20 @@ class TrackerDB:
             log.exception("Failed to clear field status", event="tracker.error")
             return 0
 
+    def forget_field_fingerprint(self, media_type: str, identity: str, field: str) -> None:
+        """Clear one field's settings fingerprint (no commit), so the next
+        scan checks it again whatever its clock says, keeping its provenance,
+        as forget_disabled_fields does for a re-enabled field."""
+        try:
+            self._conn.execute(
+                "UPDATE field_status SET settings_fp = NULL WHERE field = ? AND item_id IN "
+                "(SELECT id FROM items WHERE media_type = ? AND identity = ?)",
+                (field, media_type, identity),
+            )
+        except sqlite3.Error:
+            log.exception("Failed to forget field fingerprint", event="tracker.error",
+                          media_type=media_type, identity=identity, field=field)
+
     def forget_disabled_fields(self, media_type: str, enabled: Iterable[str]) -> int:
         """Clear the settings fingerprint of every field of ``media_type`` not
         in ``enabled``. A field switched off and on again then no longer

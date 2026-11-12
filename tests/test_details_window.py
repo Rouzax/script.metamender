@@ -147,3 +147,35 @@ def test_window_xml_parses_and_reads_every_property():
     for key in keys:
         assert "Window.Property(%s)" % key in xml, key
     assert "ListItem.Property(heading)" in xml
+
+
+def _list_control():
+    root = ET.fromstring(_XML.read_text())
+    return next(c for c in root.iter("control") if c.get("id") == "50"), root
+
+
+def test_headings_switch_by_visibility_in_one_layout():
+    # Kodi 22 ignored layouts chosen by a condition, so each layout shows
+    # the heading or the row parts by ListItem.Property(heading).
+    lst, _ = _list_control()
+    for tag in ("itemlayout", "focusedlayout"):
+        layouts = lst.findall(tag)
+        assert len(layouts) == 1 and layouts[0].get("condition") is None
+        visible = [v.text for v in layouts[0].iter("visible")]
+        assert any(v.startswith("!String.IsEmpty(ListItem.Property(heading))") for v in visible)
+        assert any(v.startswith("String.IsEmpty(ListItem.Property(heading))") for v in visible)
+
+
+def test_right_from_the_list_goes_to_the_action_button_when_there_is_one():
+    lst, _ = _list_control()
+    targets = {(e.get("condition") or ""): e.text for e in lst.findall("onright")}
+    assert targets == {
+        "!String.IsEmpty(Window.Property(MM.RowAction))": "31",
+        "String.IsEmpty(Window.Property(MM.RowAction))": "32",
+    }
+
+
+def test_action_button_fits_the_unlock_label():
+    _, root = _list_control()
+    button = next(c for c in root.iter("control") if c.get("id") == "31")
+    assert int(button.findtext("width")) >= 640
