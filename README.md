@@ -15,7 +15,7 @@ background:
 - **Scores that keep up.** A new episode's score is checked again while its
   votes come in, instead of staying at its first-week number forever.
 - **Age ratings you can trust.** Movies and shows get their age rating in
-  your own country's system, for nine countries.
+  your own country's system, for ten countries.
 
 It respects what is yours (items with an NFO file keep their values, and a
 replaced value can be put back), and its Details window shows, for any item,

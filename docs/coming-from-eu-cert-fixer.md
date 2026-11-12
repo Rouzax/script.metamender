@@ -1,7 +1,7 @@
 # Coming from EU Certification Fixer
 
 MetaMender replaces EU Certification Fixer. It fills and corrects age ratings
-for the same nine countries, and keeps the rest of your library's information
+for the same nine countries plus Australia, and keeps the rest of your library's information
 up to date as well. The fixer will not get new features.
 
 ## Switching

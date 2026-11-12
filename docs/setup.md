@@ -118,6 +118,7 @@ writes age ratings in the rating system of one country:
 | France | CNC |
 | Denmark | Medieraadet |
 | Sweden | Mediemyndigheten |
+| Australia | ACB (Australian Classification Board) |
 
 **Automatic** uses the country of Kodi's interface language, so English (United
 Kingdom) gives the BBFC. When that country has no rating system in the list,

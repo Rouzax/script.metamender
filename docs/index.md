@@ -22,7 +22,7 @@ your own country.
     they settle. [How often a field is checked](scans.md#how-often-a-field-is-checked)
 
 **Age ratings you can trust.**
-:   Age ratings in your own country's system, for nine countries, from TMDB,
+:   Age ratings in your own country's system, for ten countries, from TMDB,
     official rating sites, or converted from neighbouring countries. Useful
     when you decide what the kids may watch. [Age ratings](age-ratings.md)
 

@@ -23,10 +23,18 @@ Kodi; the show's rating covers them.
 | France | CNC | `FR:12` |
 | Denmark | Medieraadet | `DK:11` |
 | Sweden | Mediemyndigheten | `SE:11` |
+| Australia | ACB (Australian Classification Board) | `AU:MA 15+` |
 
 **Automatic** (the default) uses the country of Kodi's interface language.
 Some skins expect a different prefix; **Override certification prefix** in the
 settings lets you choose your own, or none.
+
+Australian ratings are written with their official spelling (`MA 15+`,
+`R 18+`); a value already in Kodi as `AU:MA15+` counts as the same rating and
+is written back as `AU:MA 15+`. Australia's children's TV ratings P and C,
+the adults-only X 18+, and RC (refused classification) are only used when
+TMDB has them as the title's Australian rating; MetaMender never converts
+another country's rating into one of them.
 
 Your country missing? It cannot be chosen yet. Requests are welcome on
 [GitHub](https://github.com/Rouzax/script.metamender/issues).
@@ -42,6 +50,8 @@ answer:
 3. **TMDB's ratings for neighbouring countries**, converted to your system.
    For example a Dutch library looks at Belgium, then Germany, Austria,
    France, the United Kingdom, Denmark, Sweden and finally the United States.
+   An Australian library looks at the United Kingdom first, then the United
+   States, then the European countries.
 4. **The other countries' rating sites**, converted the same way.
 
 A rating from steps 1 and 2 is your country's real rating; it never changes,
@@ -49,7 +59,8 @@ so MetaMender does not check it again. A converted rating from steps 3 and 4
 is MetaMender's best estimate: it is checked again every month for about a
 year, and replaced as soon as your country's real rating appears.
 
-The [Details window](details.md) shows where an item's rating came from.
+The [Details window](details.md) shows where an item's rating came from; a
+converted one says so, for example "TMDB (GB), converted".
 
 ## What MetaMender changes, and what it keeps
 
