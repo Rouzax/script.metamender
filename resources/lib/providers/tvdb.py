@@ -120,7 +120,7 @@ def _series_year(record: Dict[str, Any]) -> Optional[int]:
 def fetch_series(tvdb_id: str, lang: str) -> Optional[Dict[str, Any]]:
     """Fetch a series' text in `lang` (a TVDB code such as "nld") and its names.
 
-    Returns {"name", "overview", "names", "year"} or None when TVDB has no
+    Returns {"name", "overview", "names", "year", "original_language"} or None when TVDB has no
     such series. ``year`` is the series' first-aired year as an int, or None
     when TVDB has neither a year nor a first-aired date. name/overview are the `lang` translation only ("" when TVDB has
     none), never the primary-language text, so a caller cannot mistake a
@@ -149,7 +149,36 @@ def fetch_series(tvdb_id: str, lang: str) -> Optional[Dict[str, Any]]:
         "overview": native["overview"],
         "names": names,
         "year": _series_year(record),
+        "original_language": record.get("originalLanguage") or "",
     }
+
+
+def _episode_records(
+    tvdb_id: str, order: str, lang: str
+) -> Optional[List[Dict[str, Any]]]:
+    """Every raw episode record of a series in `order` ("default", "official")
+    and `lang`, across all pages; None when TVDB has no such series. Raises
+    TransientProviderError when any later page fails or vanishes, so a partial
+    list is never returned or cached."""
+    records: List[Dict[str, Any]] = []
+    for page in range(_MAX_EPISODE_PAGES):
+        body = _get("/series/{}/episodes/{}/{}?page={}".format(tvdb_id, order, lang, page))
+        if body is None:
+            if page == 0:
+                return None
+            raise TransientProviderError("tvdb episode page {} missing".format(page))
+        records.extend((body.get("data") or {}).get("episodes") or [])
+        if not (body.get("links") or {}).get("next"):
+            log.debug(
+                "TVDB episodes fetched",
+                event="tvdb.episodes",
+                tvdb_id=tvdb_id,
+                order=order,
+                lang=lang,
+                episodes=len(records),
+            )
+            return records
+    raise TransientProviderError("tvdb episode paging did not end")
 
 
 def fetch_series_episodes(
@@ -164,27 +193,35 @@ def fetch_series_episodes(
     are skipped. Raises TransientProviderError when any page
     fails or vanishes, so a partial list is never returned or cached.
     """
-    episodes: Dict[str, Dict[str, str]] = {}
-    for page in range(_MAX_EPISODE_PAGES):
-        body = _get("/series/{}/episodes/default/{}?page={}".format(tvdb_id, lang, page))
-        if body is None:
-            if page == 0:
-                return None
-            raise TransientProviderError("tvdb episode page {} missing".format(page))
-        for ep in (body.get("data") or {}).get("episodes") or []:
-            if ep.get("id") is None:
-                continue
-            episodes[str(ep["id"])] = {
-                "title": ep.get("name") or "",
-                "plot": ep.get("overview") or "",
-            }
-        if not (body.get("links") or {}).get("next"):
-            log.debug(
-                "TVDB episodes fetched",
-                event="tvdb.episodes",
-                tvdb_id=tvdb_id,
-                lang=lang,
-                episodes=len(episodes),
-            )
-            return episodes
-    raise TransientProviderError("tvdb episode paging did not end")
+    records = _episode_records(tvdb_id, "default", lang)
+    if records is None:
+        return None
+    return {
+        str(ep["id"]): {"title": ep.get("name") or "", "plot": ep.get("overview") or ""}
+        for ep in records if ep.get("id") is not None
+    }
+
+
+def fetch_series_episode_numbers(
+    tvdb_id: str, lang: str
+) -> Optional[List[Dict[str, Any]]]:
+    """Every episode of a series in the aired ("official") order, the order
+    TVmaze numbers by, for matching an episode by its season and number.
+
+    Returns [{"tvdb_id", "season", "number", "aired", "title"}] with "" for a
+    missing date or `lang` translation, or None when TVDB has no such series.
+    Raises TransientProviderError as fetch_series_episodes does.
+    """
+    records = _episode_records(tvdb_id, "official", lang)
+    if records is None:
+        return None
+    return [
+        {
+            "tvdb_id": str(ep["id"]),
+            "season": int(ep.get("seasonNumber") or 0),
+            "number": int(ep.get("number") or 0),
+            "aired": ep.get("aired") or "",
+            "title": ep.get("name") or "",
+        }
+        for ep in records if ep.get("id") is not None
+    ]

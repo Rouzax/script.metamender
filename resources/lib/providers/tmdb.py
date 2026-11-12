@@ -522,6 +522,21 @@ def fetch_tvshow_external_ids(
     return ids or None
 
 
+def fetch_tvshow_original_language(show_tmdb_id: str, api_key: str) -> str | None:
+    """The show's original language as a TMDB code ("de"), or None when TMDB
+    has no such show or names none. Raises TransientProviderError when TMDB
+    could not be reached and ApiKeyError on HTTP 401."""
+    url = "{}/tv/{}".format(TMDB_BASE_URL, show_tmdb_id)
+    with log_timing(log, "tmdb.tvshow_language", tmdb_id=show_tmdb_id):
+        data = provider_get(
+            url, logger=log, label="tmdb.tvshow_language",
+            params={"api_key": api_key}, provider="tmdb",
+        )
+    if data is None:
+        return None
+    return str(data.get("original_language") or "") or None
+
+
 def check_api_key(api_key: str) -> str:
     """Whether TMDB accepts ``api_key`` (a v3 API key): KEY_OK, KEY_REFUSED
     (TMDB answered 401, or the key is empty), or KEY_UNCHECKED when TMDB

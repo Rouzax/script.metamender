@@ -292,3 +292,67 @@ def test_project_key_not_logged(caplog):
         tvdb.fetch_series("80767", "nld")
     assert key not in caplog.text and token not in caplog.text
     assert key not in str(exc.value) and token not in str(exc.value)
+
+
+# Aired-order episode numbers for matching (engine/numbermatch.py)
+
+def _numbers_page(rows, nxt):
+    return {
+        "data": {"episodes": [
+            {"id": i, "seasonNumber": s, "number": n, "aired": aired, "name": name}
+            for i, s, n, aired, name in rows
+        ]},
+        "links": {"next": nxt},
+    }
+
+
+def test_episode_numbers_use_official_order_and_all_pages():
+    pages = {
+        "page=0": _numbers_page([(1, 1, 1, "2016-01-08", "Slachter"),
+                                 (2, 1, 2, None, None)], "x?page=1"),
+        "page=1": _numbers_page([(3, 2, 1, "2017-01-06", "Drie")], None),
+    }
+    gets: List[Any] = []
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router(pages, gets)):
+        result = tvdb.fetch_series_episode_numbers("302673", "nld")
+    assert result == [
+        {"tvdb_id": "1", "season": 1, "number": 1, "aired": "2016-01-08", "title": "Slachter"},
+        {"tvdb_id": "2", "season": 1, "number": 2, "aired": "", "title": ""},
+        {"tvdb_id": "3", "season": 2, "number": 1, "aired": "2017-01-06", "title": "Drie"},
+    ]
+    assert all("/series/302673/episodes/official/nld" in g[0] for g in gets)
+
+
+def test_episode_numbers_404_returns_none():
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router({"page=0": None})):
+        assert tvdb.fetch_series_episode_numbers("9", "nld") is None
+
+
+def test_episode_numbers_later_page_missing_is_transient():
+    pages = {"page=0": _numbers_page([(1, 1, 1, "", "A")], "x?page=1"), "page=1": None}
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router(pages)), \
+            pytest.raises(TransientProviderError):
+        tvdb.fetch_series_episode_numbers("80767", "nld")
+
+
+def test_default_order_episodes_unchanged_by_shared_paging():
+    gets: List[Any] = []
+    pages = {"page=0": _page([1], None)}
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router(pages, gets)):
+        assert tvdb.fetch_series_episodes("80767", "nld") == {"1": {"title": "T1", "plot": ""}}
+    assert "/episodes/default/nld" in gets[0][0]
+
+
+def test_series_original_language():
+    routes = _series_routes()
+    routes["/series/80767"] = {"data": dict(SERIES["data"], originalLanguage="ces")}
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router(routes)):
+        assert tvdb.fetch_series("80767", "nld")["original_language"] == "ces"
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router(_series_routes())):
+        assert tvdb.fetch_series("80767", "nld")["original_language"] == ""

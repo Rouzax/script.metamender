@@ -22,6 +22,7 @@ from resources.lib.providers.tmdb import (
     fetch_season,
     fetch_tvshow,
     fetch_tvshow_external_ids,
+    fetch_tvshow_original_language,
     find_episode_by_tvdb,
     resolve_id,
 )
@@ -920,3 +921,24 @@ def test_check_api_key_strips_and_rejects_empty(mock_get):
     mock_get.assert_not_called()
     check_api_key(" abc ")
     assert mock_get.call_args.kwargs["params"] == {"api_key": "abc"}
+
+
+class TestOriginalLanguage:
+    @patch("resources.lib.providers.http._send")
+    def test_original_language(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(200, {"original_language": "de"})
+        assert fetch_tvshow_original_language("70523", "k") == "de"
+        assert mock_get.call_args[0][0].endswith("/tv/70523")
+
+    @patch("resources.lib.providers.http._send")
+    def test_404_or_empty_is_none(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(404)
+        assert fetch_tvshow_original_language("1", "k") is None
+        mock_get.return_value = _mock_response(200, {"original_language": ""})
+        assert fetch_tvshow_original_language("1", "k") is None
+
+    @patch("resources.lib.providers.http._send")
+    def test_transient_propagates(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(503)
+        with pytest.raises(TransientProviderError):
+            fetch_tvshow_original_language("1", "k")
