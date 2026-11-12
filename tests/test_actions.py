@@ -353,5 +353,9 @@ def test_update_now_rejected_key_is_recorded(update_patched):
 def test_update_now_working_key_clears_the_problem(update_patched):
     store = _scan_state_store(update_patched["tracker"])
     store["attention"] = '{"open": {"key_rejected": ""}}'
+    update_patched["run_scan"].return_value = {"updated": 0, "tmdb_answered": False}
+    actions.update_now("movie", "7")
+    assert "key_rejected" in _open_problems(store)  # TMDB was never asked
+    update_patched["run_scan"].return_value = {"updated": 1, "tmdb_answered": True}
     actions.update_now("movie", "7")
     assert "key_rejected" not in _open_problems(store)

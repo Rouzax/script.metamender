@@ -343,6 +343,24 @@ def discover_folders() -> list[dict[str, str]]:
     return folders
 
 
+def library_folders_in_use(sources: list[dict[str, Any]]) -> list[str]:
+    """The folders worth watching for being offline: every folder of the
+    video sources (a multipath source split into its folders) that holds
+    library items and that sources.json does not disable. A source without
+    library items (a USB stick, a downloads folder) is left out: it being
+    gone says nothing about the library."""
+    files = (_library_files("VideoLibrary.GetMovies", "movies")
+             + _library_files("VideoLibrary.GetTVShows", "tvshows"))
+    folders: list[str] = []
+    for source in discover_folders():
+        for folder in source_paths(source.get("path", "")):
+            if (folder and folder not in folders
+                    and match_source(folder, sources).get("enabled", True)
+                    and any(_path_matches(f, folder) for f in files)):
+                folders.append(folder)
+    return folders
+
+
 def _path_matches(file_path: str, source_path: str) -> bool:
     """Whether file_path lies under source_path, on a path boundary.
 

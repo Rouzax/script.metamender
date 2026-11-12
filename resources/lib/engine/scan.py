@@ -227,6 +227,8 @@ def _make_stats() -> dict[str, Any]:
         # (in this pass or an earlier one sharing the breaker), so the caller
         # can tell the user TVDB text is paused.
         "tvdb_auth_failed": False,
+        "tmdb_answered": False,
+        "tvdb_answered": False,
     }
 
 
@@ -1288,6 +1290,8 @@ def run_scan(
         stats["processed"] += 1
 
     stats["tvdb_auth_failed"] = "tvdb" in breaker.auth_rejected()
+    stats["tmdb_answered"] = breaker.answered("tmdb")
+    stats["tvdb_answered"] = breaker.answered("tvdb")
     log.info(
         "Scan complete",
         event="scan.complete",

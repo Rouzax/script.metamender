@@ -144,7 +144,9 @@ def run() -> None:
             duration_ms=duration_ms,
         )
 
-        attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
+        # TMDB answered, so the key works: a rejected-key problem is over.
+        if any(s.get("tmdb_answered") for s in all_stats.values()):
+            attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
 
         # Only a pass that reached the end of the library closes the cycle;
         # otherwise the next run would start fresh over items it never visited.

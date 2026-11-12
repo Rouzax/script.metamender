@@ -46,10 +46,9 @@ from resources.lib.constants import (
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.presets import country_for_setting
 from resources.lib.data.sources import (
-    discover_folders,
     kodi_ui_language,
+    library_folders_in_use,
     load_source_config,
-    match_source,
 )
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
@@ -395,14 +394,9 @@ def _playing() -> bool:
 
 def _check_folders(source_config: dict[str, Any]) -> dict[str, bool]:
     """Whether each library folder answers, for the offline-folder
-    problem. Folders sources.json disables are not asked: their items are
-    not scanned either."""
-    sources = source_config.get("sources", [])
+    problem (see library_folders_in_use for which folders count)."""
     reachable: dict[str, bool] = {}
-    for folder in discover_folders():
-        path = folder.get("path", "")
-        if not path or not match_source(path, sources).get("enabled", True):
-            continue
+    for path in library_folders_in_use(source_config.get("sources", [])):
         try:
             reachable[path] = bool(xbmcvfs.exists(path))
         except Exception:
@@ -413,17 +407,22 @@ def _check_folders(source_config: dict[str, Any]) -> dict[str, bool]:
 
 def _record_cycle(
     record: attention.Attention, *, shutdown: bool, aborted: bool,
-    tvdb_rejected: bool, folders: dict[str, bool] | None, now: float,
+    tvdb_rejected: bool, tmdb_answered: bool, tvdb_answered: bool,
+    folders: dict[str, bool] | None, now: float,
 ) -> None:
-    """What a finished background cycle tells the problem record: the key
-    worked, the attempt for the failure streak (not when Kodi shut down),
-    TheTVDB's credentials, and the folders when they were checked."""
-    record.clear(attention.KEY_REJECTED)
+    """What a finished background cycle tells the problem record: the
+    attempt for the failure streak (not when Kodi shut down), TheTVDB's
+    credentials, and the folders when they were checked. A key or
+    credential problem clears only when that provider answered: a cycle
+    that never asked it proves nothing, and clearing would show the problem
+    again the next time it is hit."""
+    if tmdb_answered:
+        record.clear(attention.KEY_REJECTED)
     if not shutdown:
         record.attempt(aborted, now)
     if tvdb_rejected:
         record.raise_problem(attention.TVDB_AUTH)
-    else:
+    elif tvdb_answered:
         record.clear(attention.TVDB_AUTH)
     if folders is not None:
         record.folders_checked(folders, now)
@@ -432,22 +431,33 @@ def _record_cycle(
 def _attention_tick(tracker: TrackerDB) -> None:
     """Show what the problem record holds that was not shown yet: the
     attention window, and the TheTVDB toast. Nothing while anything plays;
-    it waits for the next tick without playback."""
-    if _playing():
-        return
-    record = attention.load(tracker)
-    pending = record.pending_window()
-    if pending is not None:
-        main, others = pending
-        log.info("Attention window shown", event="service.attention_shown",
-                 kind=main.kind, others=[p.kind for p in others])
-        answer = show_attention_window(main, others)
-        attention.update(tracker, lambda a: a.mark_window_shown())
-        if answer == "setup":
-            xbmc.executebuiltin("RunScript(script.metamender,wizard)")
-    if record.pending_toast(attention.TVDB_AUTH):
-        notify(lang(32352))  # TheTVDB rejected the credentials
-        attention.update(tracker, lambda a: a.mark_toast_shown(attention.TVDB_AUTH))
+    it waits for the next tick without playback.
+
+    Never raises: the service loop calls it outside its own error handling,
+    and a window that cannot open counts as shown, so it is not retried
+    every second."""
+    try:
+        if _playing():
+            return
+        record = attention.load(tracker)
+        pending = record.pending_window()
+        if pending is not None:
+            main, others = pending
+            log.info("Attention window shown", event="service.attention_shown",
+                     kind=main.kind, others=[p.kind for p in others])
+            answer = "later"
+            try:
+                answer = show_attention_window(main, others)
+            finally:
+                attention.update(tracker, lambda a: a.mark_window_shown())
+            if answer == "setup":
+                xbmc.executebuiltin("RunScript(script.metamender,wizard)")
+        if record.pending_toast(attention.TVDB_AUTH):
+            attention.update(
+                tracker, lambda a: a.mark_toast_shown(attention.TVDB_AUTH))
+            notify(lang(32352))  # TheTVDB rejected the credentials
+    except Exception:
+        log.exception("Showing a problem failed", event="service.attention_failed")
 
 
 def run() -> None:
@@ -676,6 +686,10 @@ def run() -> None:
                         # (every provider down) counts as a failed attempt.
                         shutdown = monitor.abortRequested()
                         tvdb_rejected = tvdb_auth_failed(all_stats.values())
+                        tmdb_answered = any(
+                            s.get("tmdb_answered") for s in all_stats.values())
+                        tvdb_answered = any(
+                            s.get("tvdb_answered") for s in all_stats.values())
                         folders = (
                             _check_folders(source_config)
                             if not targeted and not cycle_aborted else None
@@ -683,7 +697,8 @@ def run() -> None:
 
                         attention.update(tracker, partial(
                             _record_cycle, shutdown=shutdown, aborted=cycle_aborted,
-                            tvdb_rejected=tvdb_rejected, folders=folders,
+                            tvdb_rejected=tvdb_rejected, tmdb_answered=tmdb_answered,
+                            tvdb_answered=tvdb_answered, folders=folders,
                             now=time.time(),
                         ))
 

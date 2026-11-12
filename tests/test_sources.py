@@ -242,3 +242,23 @@ def test_discover_folders_empty_library():
     })
     with patch("resources.lib.data.sources.xbmc.executeJSONRPC", side_effect=rpc):
         assert discover_folders() == []
+
+
+def test_library_folders_in_use_expands_multipath_and_skips_empty_and_disabled(monkeypatch):
+    from urllib.parse import quote
+
+    from resources.lib.data import sources
+    multi = "multipath://{}/{}/".format(
+        quote("smb://user:secret@nas/Series/", safe=""), quote("smb://nas/Docs/", safe=""))
+    monkeypatch.setattr(sources, "discover_folders", lambda: [
+        {"path": multi, "label": "TV"},
+        {"path": "smb://nas/Movies/", "label": "Movies"},
+        {"path": "/media/usb/", "label": "USB stick"},
+    ])
+    files = {"movies": ["smb://nas/Movies/Alien (1979)/Alien.mkv"],
+             "tvshows": ["smb://user:secret@nas/Series/Lost/"]}
+    monkeypatch.setattr(sources, "_library_files", lambda method, key: files[key])
+    config = [{"path": "smb://nas/Movies/", "enabled": False}]
+    assert sources.library_folders_in_use(config) == ["smb://user:secret@nas/Series/"]
+    assert sources.library_folders_in_use([]) == [
+        "smb://user:secret@nas/Series/", "smb://nas/Movies/"]

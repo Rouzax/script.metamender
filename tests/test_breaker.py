@@ -93,3 +93,12 @@ def test_plain_disable_is_not_an_auth_rejection():
     cb = CircuitBreaker()
     cb.disable("tvdb")
     assert cb.auth_rejected() == []
+
+
+def test_answered_records_a_real_answer_per_provider():
+    breaker = CircuitBreaker()
+    assert not breaker.answered("tmdb")
+    breaker.record_failure("tmdb")
+    assert not breaker.answered("tmdb")
+    breaker.record_success("tmdb")
+    assert breaker.answered("tmdb") and not breaker.answered("tvdb")

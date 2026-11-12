@@ -24,6 +24,9 @@ class CircuitBreaker:
         # Disabled because the provider rejected the add-on's credentials,
         # which the user is told about; a tripped breaker is not.
         self._auth_rejected: Set[str] = set()
+        # Providers that answered at least once this cycle: proof their
+        # credentials work, which a cycle that never asked them is not.
+        self._answered: Set[str] = set()
 
     def is_disabled(self, provider: str) -> bool:
         return provider in self._disabled
@@ -55,6 +58,11 @@ class CircuitBreaker:
 
     def record_success(self, provider: str) -> None:
         self._failures[provider] = 0
+        self._answered.add(provider)
+
+    def answered(self, provider: str) -> bool:
+        """Whether the provider answered at least once this cycle."""
+        return provider in self._answered
 
     def record_failure(self, provider: str) -> bool:
         """Increment the provider's failure count. Return True only on the

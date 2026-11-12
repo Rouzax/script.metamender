@@ -187,6 +187,8 @@ class RefreshOutcome:
     aborted: bool = False
     # TheTVDB rejected the add-on's credentials during the refresh.
     tvdb_auth_failed: bool = False
+    # TMDB answered at least once: the key works.
+    tmdb_answered: bool = False
 
 
 def _label(media_type: MediaType, item: dict[str, Any]) -> str:
@@ -279,6 +281,7 @@ def run_refresh(
         could_not_finish=not shutdown and any(s.get("aborted") for s in passes),
         aborted=shutdown,
         tvdb_auth_failed=tvdb_auth_failed(passes),
+        tmdb_answered=any(s.get("tmdb_answered") for s in passes),
     )
     log.info("Refresh finished", event="refresh.finish", tvshowid=scope.tvshowid,
              season=scope.season, done=progress.done, total=progress.total,
@@ -400,7 +403,9 @@ def open_refresh(dbtype: str, dbid: int) -> None:
                 result["outcome"] = run_refresh(
                     scope, progress, settings, source_config, tracker, monitor,
                     prepare=lambda: _prepare_imdb_ratings(settings, monitor))
-                attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
+                if result["outcome"].tmdb_answered:
+                    attention.update(
+                        tracker, lambda a: a.clear(attention.KEY_REJECTED))
             except ApiKeyError:
                 log.exception("Refresh stopped: invalid API key", event="refresh.apikey")
                 result["error"] = 32341

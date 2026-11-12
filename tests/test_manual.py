@@ -194,4 +194,7 @@ def test_manual_working_key_clears_the_problem(monkeypatch, patched):
     monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
     monkeypatch.setattr(manual, "lang", lambda i: "s{}".format(i))
     manual.run()
+    assert "key_rejected" in _open_problems(store)  # TMDB was never asked
+    patched["run_scan"].return_value = {"updated": 0, "tmdb_answered": True}
+    manual.run()
     assert "key_rejected" not in _open_problems(store)

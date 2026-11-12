@@ -6351,3 +6351,19 @@ class TestUpdateNowReasksEmptyLookups:
         row = tracker.get_item("episode", "Test Show S01E01")
         tracker.close()
         assert (row["number_matched"], row["tmdb_id"]) == (0, None)
+
+
+
+class TestProviderAnswers:
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_stats_say_whether_tmdb_answered(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
+        mock_fetch.return_value = _tmdb_movie_response(plot="New")
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+                         "k", _make_settings(), items=[_make_movie_item(plot="Old")], reset=True)
+        assert stats["tmdb_answered"] is True and stats["tvdb_answered"] is False
+        stats = run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+                         "k", _make_settings(), items=[])
+        tracker.close()
+        assert stats["tmdb_answered"] is False

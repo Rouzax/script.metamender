@@ -226,9 +226,10 @@ def test_kodi_query_failure_backs_off(monkeypatch, kodi_stubs):
     assert scan_mock.call_count == 1
 
 
-def _complete_stats(aborted=False):
+def _complete_stats(aborted=False, tmdb_answered=True, tvdb_answered=True):
     s = {"processed": 1, "skipped": 0, "updated": 1, "errors": 0,
-         "fields": {}, "aborted": aborted}
+         "fields": {}, "aborted": aborted,
+         "tmdb_answered": tmdb_answered, "tvdb_answered": tvdb_answered}
     return {"movie": s, "tvshow": dict(s), "episode": dict(s)}
 
 
@@ -678,10 +679,37 @@ def test_folders_checked_after_full_scan_only(kodi_stubs):
     assert svc.check_folders.call_count == 1
 
 
-def test_check_folders_skips_disabled_entries(kodi_stubs):
+def test_check_folders_asks_the_folders_in_use(kodi_stubs):
     config = {"sources": [{"path": "smb://b/", "enabled": False}]}
-    with patch.object(daemon, "discover_folders",
-                      return_value=[{"path": "smb://a/", "label": "A"},
-                                    {"path": "smb://b/", "label": "B"}]), \
+    with patch.object(daemon, "library_folders_in_use",
+                      return_value=["smb://a/"]) as in_use, \
             patch.object(daemon.xbmcvfs, "exists", return_value=False):
         assert daemon._check_folders(config) == {"smb://a/": False}
+    in_use.assert_called_once_with(config["sources"])
+
+
+def test_a_cycle_that_never_asked_tmdb_keeps_the_key_problem(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(side_effect=ApiKeyError("tmdb")))
+    svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(tmdb_answered=False)))
+    assert attention.KEY_REJECTED in json.loads(svc.store["attention"])["open"]
+    assert svc.window.call_count == 1  # not shown again
+
+
+def test_tvdb_toast_not_repeated_after_a_cycle_without_tvdb(kodi_stubs):
+    auth = _complete_stats()
+    auth["episode"]["tvdb_auth_failed"] = True
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=auth))
+    svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(tvdb_answered=False)))
+    svc.run(ticks=1, scan=MagicMock(return_value=auth))
+    assert svc.notified.count("s32352") == 1
+
+
+def test_a_failing_window_does_not_stop_the_service(kodi_stubs):
+    svc = _Service()
+    svc.window.side_effect = RuntimeError("skin could not load the window")
+    scan = MagicMock(return_value=_complete_stats())
+    svc.run(ticks=4, setup=False)
+    assert svc.window.call_count == 1  # marked shown, not retried every second
+    svc.window.side_effect = None
+    svc.run(ticks=2, scan=scan)
+    assert scan.call_count == 1

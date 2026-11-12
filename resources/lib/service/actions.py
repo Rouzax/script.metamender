@@ -237,8 +237,9 @@ def update_now(dbtype: str, dbid: str) -> None:
             show_id_map=show_id_map,
         )
 
-        # The key worked: a rejected-key problem the service recorded is over.
-        attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
+        # TMDB answered, so the key works: a rejected-key problem is over.
+        if stats.get("tmdb_answered"):
+            attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
         title = item.get("title", "") or str(item_id)
         updated = stats.get("updated", 0)
         log.info(

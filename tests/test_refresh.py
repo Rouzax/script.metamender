@@ -591,4 +591,20 @@ def test_flow_working_key_clears_the_problem(flow):
     home, notes, released, state = flow
     state["store"]["attention"] = '{"open": {"key_rejected": ""}}'
     refresh.open_refresh("tvshow", 7)
+    assert "key_rejected" in _open_problems(state["store"])  # TMDB was never asked
+    state["outcome"] = refresh.RefreshOutcome(tmdb_answered=True)
+    refresh.open_refresh("tvshow", 7)
     assert "key_rejected" not in _open_problems(state["store"])
+
+
+
+def test_tmdb_answer_is_part_of_the_outcome():
+    class Answering(FakeScan):
+        def __call__(self, *a, **kw):
+            stats = super().__call__(*a, **kw)
+            stats["tmdb_answered"] = kw["items"][0].get("title") == "Ep 1"
+            return stats
+    outcome, _, _ = _run(Scope(7, None, "Lost"), Answering(), [_episode(1)])
+    assert outcome.tmdb_answered is True
+    outcome, _, _ = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)])
+    assert outcome.tmdb_answered is False
