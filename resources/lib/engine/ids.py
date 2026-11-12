@@ -445,7 +445,7 @@ def _resolve_ids(
         # numbermatch imports this module's helpers, so it is imported here
         # rather than at module level.
         from resources.lib.engine.numbermatch import match_episode_by_number
-        match_episode_by_number(ctx, item, identity, ids, stored, folder_lang)
+        match_episode_by_number(ctx, item, identity, ids, stored, folder_lang, kodi_ids)
         if not ids.tmdb and ids.tvdb:
             _episode_tmdb_from_tvdb(ctx, item, identity, ids)
         return ids

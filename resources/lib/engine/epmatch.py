@@ -52,13 +52,24 @@ class MatchVerdict:
     reason: str
 
 
+# A key that is only a number, a generic word and a number, or an SxxEyy code
+# names a position, not an episode: "Deel 3" at two sites that cut a series
+# differently are two different episodes.
+_GENERIC_KEY = re.compile(
+    r"^(?:(?:chapter|episode|ep|afl|aflevering|folge|capitulo|hoofdstuk)\s*)?\d+$"
+    r"|^s\d+\s*e\d+$"
+)
+
+
 def episode_title_key(text: str | None) -> str:
     """The comparison form of an episode title; "" when the title says
-    nothing about which episode it is (blank, a placeholder, a bare number)."""
+    nothing about which episode it is (blank, a placeholder, a bare number,
+    "Part 3", "Afl. 3", "S01E03")."""
     text = (text or "").strip()
-    if not text or text.isdigit() or is_placeholder_title(text):
+    if not text or is_placeholder_title(text):
         return ""
-    return _PART_MARKER.sub(r"\1", normalize_title(text))
+    key = _PART_MARKER.sub(r"\1", normalize_title(text))
+    return "" if _GENERIC_KEY.match(key) else key
 
 
 def _parse_date(value: str | None) -> date | None:

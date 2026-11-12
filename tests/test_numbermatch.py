@@ -87,10 +87,12 @@ def providers():
                         numbers=numbers, series=series)
 
 
-def _run(ctx, item=None, ids=None, stored=None, folder="en-US", log=None):
+def _run(ctx, item=None, ids=None, stored=None, folder="en-US", log=None,
+         kodi_ids=(None, None, None, None)):
     ids = ids or _ids()
     with patch("resources.lib.engine.numbermatch.log", log or MagicMock()):
-        match_episode_by_number(ctx, item or _item(), ID, ids, stored or {}, folder)
+        match_episode_by_number(ctx, item or _item(), ID, ids, stored or {}, folder,
+                                kodi_ids)
     return ids
 
 
@@ -242,3 +244,57 @@ def test_number_matched_imdb_not_written_to_kodi(tracker):
     assert not update.called
     assert ids.imdb == "tt9"
     assert tracker.get_item("episode", ID)["imdb_id"] == "tt9"
+
+
+def _stored_match(tracker, **kw):
+    values = dict(tmdb_id="502", tvdb_id="702", tmdb_season=1,
+                  orig_title="Amsterdam Centraal", orig_aired="2022-10-23",
+                  number_matched=1)
+    values.update(kw)
+    tracker.upsert_item("episode", ID, **values)
+    return tracker.get_item("episode", ID)
+
+
+def test_kodi_typed_ids_clear_a_stored_number_match(tracker, providers):
+    """A rescrape gave the episode real ids: the number match is dropped and
+    Kodi's ids are used, on Update now and on a scheduled scan alike."""
+    for reset in (True, False):
+        stored = _stored_match(tracker)
+        ids = _run(_ctx(tracker, reset=reset), ids=_ids(tmdb="900", tvdb="702"),
+                   stored=stored, kodi_ids=("900", None, None, None))
+        assert (ids.tmdb, ids.tvdb, ids.imdb) == ("900", None, None)
+        assert not ids.number_matched
+        assert tracker.get_item("episode", ID)["number_matched"] == 0
+    assert not providers.season.called
+
+
+def test_recheck_keeps_an_empty_original(tracker, providers):
+    """Originals were captured with no date: the date metamender wrote later
+    must not confirm the match."""
+    providers.season.return_value = SHIFTED_TMDB
+    providers.numbers.return_value = None
+    providers.cross.return_value = {}
+    stored = _stored_match(tracker, orig_title="Aflevering 2", orig_aired="", tvdb_id=None)
+    ids = _run(_ctx(tracker, reset=True), item=_item(title="Iets anders", aired="2022-10-30"),
+               ids=_ids(tmdb="502"), stored=stored)
+    assert not ids.any()
+    assert tracker.get_item("episode", ID)["number_matched"] == 0
+
+
+def test_recheck_transient_keeps_number_matched(tracker, providers):
+    providers.numbers.side_effect = TransientProviderError("down")
+    stored = _stored_match(tracker)
+    ids = _run(_ctx(tracker, reset=True), ids=_ids(tmdb="502", tvdb="702"), stored=stored)
+    assert ids.number_matched and ids.lookup_failed
+
+
+def test_kodi_imdb_id_is_kept(tracker, providers):
+    providers.cross.return_value = {"tvdb_id": "702"}
+    ids = _run(_ctx(tracker), ids=_ids(imdb="tt5"), kodi_ids=(None, "tt5", None, None))
+    assert ids.imdb == "tt5" and ids.tmdb == "502"
+
+
+def test_one_site_transient_marks_both(tracker, providers):
+    providers.numbers.side_effect = TransientProviderError("down")
+    ids = _run(_ctx(tracker), ids=_ids(imdb="tt5"), kodi_ids=(None, "tt5", None, None))
+    assert ids.tmdb_transient and ids.tvdb_transient and ids.lookup_failed

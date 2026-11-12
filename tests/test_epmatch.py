@@ -92,3 +92,15 @@ class TestNotFound:
         assert check_number_match("x", "1999-10-20", 0, 1, site) == MatchVerdict(None, "not_found")
         assert check_number_match("x", "1999-10-20", 1999, 1, site).reason == "not_found"
         assert check_number_match("x", "1999-10-20", 1, 1, []).reason == "not_found"
+
+
+class TestGenericTitles:
+    def test_part_and_short_generic_titles_never_agree(self):
+        for title in ("Part 3", "Deel 3", "Teil 3", "Afl. 3", "Ep. 3", "S01E03",
+                      "Chapter 1", "Episode 3", "3"):
+            assert episode_title_key(title) == "", title
+        site = [_ep(3, "2020-01-14", "Deel 3")]
+        assert check_number_match("Deel 3", "2020-01-07", 1, 3, site).reason == "rejected"
+
+    def test_real_title_with_part_still_counts(self):
+        assert episode_title_key("Home, Part 1") == episode_title_key("Home (1)") != ""

@@ -216,6 +216,7 @@ def match_episode_by_number(
     ids: _Ids,
     stored: dict[str, Any],
     folder_lang: str,
+    kodi_ids: tuple[str | None, str | None, str | None, str | None],
 ) -> None:
     """Match an episode with no TMDB and no TheTVDB id by its number, each
     site separately, and record what passed (tracker only).
@@ -224,18 +225,34 @@ def match_episode_by_number(
     which checks it again and drops it when it no longer passes. A transient
     failure anywhere records nothing and leaves `ids` as they were, so the
     next scan asks again; a show whose own lookups have not answered yet
-    defers the episode the same way.
+    defers the episode the same way. Until the match is settled again,
+    ``ids.number_matched`` keeps saying where the loaded ids came from, so
+    nothing they lead to reaches Kodi.
+
+    ``kodi_ids`` are the episode's own typed ids (_extract_ids): an episode
+    that has a TMDB or TheTVDB id of its own (a rescrape) drops any stored
+    number match, and an IMDb id of its own is never replaced.
     """
     if ctx.media_type.name != "episode":
         return
+    kodi_tmdb, kodi_imdb, kodi_tvdb, _unknown = kodi_ids
     recheck = bool(stored.get("number_matched"))
+    if kodi_tmdb or kodi_tvdb:
+        if recheck:
+            ctx.tracker.clear_number_match(ctx.media_type.name, identity)
+            ctx.tracker.upsert_item(
+                ctx.media_type.name, identity,
+                tmdb_id=kodi_tmdb, tvdb_id=kodi_tvdb, imdb_id=kodi_imdb,
+            )
+            ids.tmdb, ids.tvdb, ids.imdb = kodi_tmdb, kodi_tvdb, kodi_imdb
+            ids.tmdb_season = None
+        return
+    ids.number_matched = recheck
     if recheck and not ctx.reset:
-        ids.number_matched = True
         return
     if not recheck and (ids.tmdb or ids.tvdb):
         return
     if not ids.may_look_up:
-        ids.number_matched = recheck
         return
 
     if not _show_checked(ctx, item):
@@ -246,13 +263,20 @@ def match_episode_by_number(
         ids.defer()
         return
 
+    # Once captured, the originals are used as they were, empty ones too:
+    # falling back to Kodi's current value would compare a site with what
+    # metamender wrote from that site.
+    captured = stored.get("orig_title") is not None or stored.get("orig_aired") is not None
+    source = stored if captured else {
+        "orig_title": item.get("title"), "orig_aired": item.get(ctx.media_type.date_field),
+    }
     kept = _Kept(
-        title=str(stored.get("orig_title") or item.get("title") or ""),
-        aired=str(stored.get("orig_aired") or item.get(ctx.media_type.date_field) or ""),
+        title=str(source.get("orig_title") or ""),
+        aired=str(source.get("orig_aired") or ""),
         season=int(item.get("season", 0) or 0),
         number=int(item.get("episode", 0) or 0),
     )
-    if not stored.get("orig_title") and not stored.get("orig_aired"):
+    if not captured:
         ctx.tracker.upsert_item(
             ctx.media_type.name, identity, orig_title=kept.title, orig_aired=kept.aired,
         )
@@ -275,8 +299,9 @@ def match_episode_by_number(
     if isinstance(tmdb_verdict, MatchVerdict) and tmdb_verdict.episode and show_tmdb_id:
         cross = _cross_ids(ctx, show_tmdb_id, kept, identity)
     if TRANSIENT in (tmdb_verdict, tvdb_verdict, cross):
-        ids.tmdb_transient = ids.tmdb_transient or TRANSIENT in (tmdb_verdict, cross)
-        ids.tvdb_transient = ids.tvdb_transient or tvdb_verdict is TRANSIENT
+        # Both sites, even one that answered: its match is not used this
+        # scan, so a field it would serve must not read as "no such episode".
+        ids.tmdb_transient = ids.tvdb_transient = True
         ids.lookup_failed = True
         return
 
@@ -291,9 +316,12 @@ def match_episode_by_number(
     cross_tvdb = cross.get("tvdb_id")
     if recheck:
         ctx.tracker.clear_number_match(ctx.media_type.name, identity)
-        ids.tmdb = ids.tvdb = ids.imdb = None
+        ids.tmdb = ids.tvdb = None
         ids.tmdb_season = None
+        ids.imdb = kodi_imdb
         ids.number_matched = False
+        if kodi_imdb:
+            ctx.tracker.upsert_item(ctx.media_type.name, identity, imdb_id=kodi_imdb)
     if tmdb_ep and tvdb_ep and cross_tvdb and str(cross_tvdb) != tvdb_ep.ep_id:
         log.info(
             "TMDB and TheTVDB number matches name different episodes, neither used",
@@ -308,7 +336,7 @@ def match_episode_by_number(
     ids.tmdb = tmdb_ep.ep_id if tmdb_ep else None
     ids.tmdb_season = kept.season if tmdb_ep else None
     ids.tvdb = tvdb_ep.ep_id if tvdb_ep else (str(cross_tvdb) if cross_tvdb else None)
-    ids.imdb = cross.get("imdb_id") or None
+    ids.imdb = kodi_imdb or cross.get("imdb_id") or None
     ids.number_matched = True
     ctx.tracker.upsert_item(
         ctx.media_type.name, identity, tmdb_id=ids.tmdb, tmdb_season=ids.tmdb_season,
