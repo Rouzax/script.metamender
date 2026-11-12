@@ -34,7 +34,8 @@ def test_xml_textures_exist():
 
 
 def test_xml_reads_only_properties_the_window_sets():
-    from resources.lib.ui.setup_window import GOLDEN_HOUR
+    from resources.lib.ui.theme import THEMES
+    GOLDEN_HOUR = THEMES[0]
     with open(XML) as handle:
         text = handle.read()
     used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))
@@ -56,7 +57,8 @@ def test_addon_xml_declares_the_icon():
 
 
 def test_every_colour_the_window_sets_is_used():
-    from resources.lib.ui.setup_window import GOLDEN_HOUR
+    from resources.lib.ui.theme import THEMES
+    GOLDEN_HOUR = THEMES[0]
     with open(XML) as handle:
         text = handle.read()
     used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))

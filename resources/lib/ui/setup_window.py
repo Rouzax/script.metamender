@@ -51,7 +51,7 @@ from resources.lib.ui.setup_model import (
     mask_key,
     settings_to_write,
 )
-from resources.lib.ui.theme import THEMES, theme_colours
+from resources.lib.ui.theme import theme_colours
 from resources.lib.utils import (
     get_addon,
     get_bool_setting,
@@ -402,9 +402,6 @@ class SetupController:
                 return lang(32453)
             return lang(32452).format(self._country_label(1 + COUNTRY_CODES.index(code)))
         return lang(_COUNTRY_LABEL_BASE + index)
-
-
-GOLDEN_HOUR = THEMES[0]
 
 
 def window_properties(c: SetupController) -> dict[str, str]:

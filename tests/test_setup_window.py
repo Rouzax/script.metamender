@@ -8,11 +8,13 @@ import pytest
 from resources.lib.providers.tmdb import KEY_OK, KEY_REFUSED, KEY_UNCHECKED
 from resources.lib.ui.setup_model import FEATURES, initial_state
 from resources.lib.ui.setup_window import (
-    GOLDEN_HOUR,
     SetupController,
     list_position,
     window_properties,
 )
+from resources.lib.ui.theme import THEMES
+
+GOLDEN_HOUR = THEMES[0]
 
 _MP = "multipath://%2fa%2f/%2fb%2f/"
 _DISCOVERED = [{"path": _MP, "label": "Kids"}, {"path": "/c/", "label": "Films"}]

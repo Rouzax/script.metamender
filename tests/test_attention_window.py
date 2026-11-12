@@ -20,7 +20,9 @@ from resources.lib.ui.attention_window import (
     FULL_TEXT,
     attention_properties,
 )
-from resources.lib.ui.setup_window import GOLDEN_HOUR
+from resources.lib.ui.theme import THEMES
+
+GOLDEN_HOUR = THEMES[0]
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PO = (_ROOT / "resources/language/resource.language.en_gb/strings.po").read_text()

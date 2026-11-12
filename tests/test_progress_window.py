@@ -7,7 +7,9 @@ import pytest
 from resources.lib.service.refresh import RefreshProgress
 from resources.lib.ui import progress_window
 from resources.lib.ui.progress_window import progress_properties
-from resources.lib.ui.setup_window import GOLDEN_HOUR
+from resources.lib.ui.theme import THEMES
+
+GOLDEN_HOUR = THEMES[0]
 
 _LANG = {
     32474: "{} of {} episodes", 32475: "About {} minutes left",
