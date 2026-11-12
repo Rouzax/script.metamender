@@ -135,9 +135,9 @@ def restore_field(
         # write; without the re-key they lose their rows and locks. It
         # commits the reason with it.
         if tracker.rename_show_episodes(current_title, str(original)) is None:
-            # Nothing of the failed re-key may be committed later: a row
-            # renamed without its keep rows would lose its locks.
-            tracker.rollback()
+            # The tracker undid the partial re-key; the reason is still
+            # pending, and losing it costs only the displayed reason.
+            _commit_reason(tracker, media_type, identity, field)
             log.warning(
                 "Original restored, but the episode rows kept the old show title",
                 event="details.rekey_failed", identity=identity,
@@ -145,19 +145,26 @@ def restore_field(
             )
             return EPISODES_NOT_MOVED
     else:
-        try:
-            tracker.commit()
-        except sqlite3.Error:
-            # The lock is saved and Kodi holds the original; only the
-            # displayed reason is lost.
-            log.exception("Failed to record the locked reason", event="details.error",
-                          identity=identity, media_type=media_type.name, field=field)
+        _commit_reason(tracker, media_type, identity, field)
     log.info(
         "Original restored and field locked",
         event="details.restored", identity=identity,
         media_type=media_type.name, field=field,
     )
     return RESTORED
+
+
+def _commit_reason(
+    tracker: TrackerDB, media_type: MediaType, identity: str, field: str
+) -> None:
+    """Commit the "locked" reason after a restore. A failure is logged and
+    swallowed: the lock is saved and Kodi holds the original, so the user is
+    told what happened to those, not a database error."""
+    try:
+        tracker.commit()
+    except sqlite3.Error:
+        log.exception("Failed to record the locked reason", event="details.error",
+                      identity=identity, media_type=media_type.name, field=field)
 
 
 def _save_lock(
@@ -239,17 +246,27 @@ def _read_identity(
     return identity, identity
 
 
+def certifications_on(media_type: MediaType, enabled_fields: frozenset[str]) -> bool:
+    """Certifications are switched on for this media type."""
+    return "mpaa" in enabled_fields and media_type.name in _CERT_TYPES
+
+
+def cert_country_usable(cert_country: str | None) -> bool:
+    """The configured country has a usable preset, as scan._cert_config
+    requires. Not logged: the scan reports an unusable preset, and the
+    window asks on every view."""
+    return bool(cert_country) and load_preset(str(cert_country), report=False) is not None
+
+
 def managed_fields(
-    media_type: MediaType, enabled_fields: frozenset[str], cert_country: str | None,
+    media_type: MediaType, enabled_fields: frozenset[str], cert_usable: bool,
     identity: str,
 ) -> list[str]:
     """The fields a scan manages for this item under the current settings.
-    ``identity`` is the key the scan uses (after adopting a row). As
-    scan._cert_config decides, certifications need a country with a usable
-    preset."""
+    ``identity`` is the key the scan uses (after adopting a row);
+    ``cert_usable`` is cert_country_usable() for the configured country."""
     fields = candidate_fields(media_type, enabled_fields)
-    if ("mpaa" in enabled_fields and media_type.name in _CERT_TYPES
-            and cert_country and load_preset(cert_country) is not None):
+    if certifications_on(media_type, enabled_fields) and cert_usable:
         fields = sorted(set(fields) | {"mpaa"})
     return item_fields(fields, media_type, identity)
 
@@ -314,15 +331,15 @@ class DetailsSession:
         finally:
             tracker.close()
         self.identity = identity
-        managed = managed_fields(
-            self.media_type, settings["enabled_fields"], settings.get("cert_country"),
-            scan_identity,
-        )
+        enabled = settings["enabled_fields"]
+        cert_usable = cert_country_usable(settings.get("cert_country"))
+        managed = managed_fields(self.media_type, enabled, cert_usable, scan_identity)
         rows = build_rows(
             self.media_type, item, item_row, fs_map, keep, date.today().isoformat(),
             language=text_language,
             fields=_shown_fields(self.media_type, managed, fs_map, keep),
             managed=managed,
+            cert_country_missing=certifications_on(self.media_type, enabled) and not cert_usable,
             threshold_days=settings["stale_threshold_days"],
         )
         return DetailsView(

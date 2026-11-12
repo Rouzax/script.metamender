@@ -424,3 +424,39 @@ def test_dates_and_separator_come_from_the_strings():
     assert details_model._short_date("2026-12-05") == "5 Dec"
     for code in range(32610, 32625):
         assert _STRINGS.get(code), code
+
+
+def test_refilled_placeholder_is_not_metamenders():
+    """The scan refills a placeholder like an empty value; a refill that
+    found nothing records the placeholder as written. It is no value of
+    MetaMender's: not updated, no Restore."""
+    held = fingerprint("Episode 5")
+    title = _by_key(_rows(
+        item={"title": "Episode 5"},
+        fs_map={"title": _fs("nothing", source="tmdb", next_retry="2026-11-19",
+                             written=held)},
+        keep={"title": {"original": "Episode 5", "has_original": True,
+                        "locked": False, "written_fp": held}},
+    ))["title"]
+    assert title.group != "updated"
+    assert title.action == ""
+    # The placeholder is the scraper's, not TMDB's.
+    assert dict(title.lines)["From"] == "your scraper"
+    assert title.hint != "changed"
+
+
+def test_unmanaged_certification_without_a_country_says_so():
+    item = {"title": "Heat", "premiered": "1995-12-15", "mpaa": "NL:12",
+            "uniqueid": {"tmdb": "949"}}
+    fs_map = {"mpaa": _fs("locked", count=2, next_retry="2026-11-19")}
+    keep = {"mpaa": {"original": "", "has_original": True, "locked": False,
+                     "written_fp": None}}
+    rows = _by_key(build_rows(MOVIE, item, None, fs_map, keep, TODAY,
+                              fields=["mpaa", "plot"], managed=["plot"],
+                              cert_country_missing=True))
+    mpaa = rows["mpaa"]
+    lines = dict(mpaa.lines)
+    assert lines["Next check"] == "not while no age rating country is set up"
+    assert mpaa.hint == "no country"
+    assert lines["Why"] == ("You unlocked this field; MetaMender checks it again once "
+                            "an age rating country is set up.")

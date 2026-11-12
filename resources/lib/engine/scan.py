@@ -56,6 +56,8 @@ Logging:
         - scan.language_unmapped (WARNING): A folder or fallback language code
           has no TheTVDB language, so TVDB is not asked for it; once per code
           per scan
+        - scan.rekey_failed (WARNING): A show's title was written, but its
+          episode rows could not be re-keyed to it
 """
 from __future__ import annotations
 
@@ -1262,9 +1264,17 @@ def run_scan(
         _keep_originals(
             tracker, media_type.name, identity, item, written, fields_to_write, fs_map,
         )
-        if media_type.name == "tvshow" and "title" in written and item.get("title"):
-            # Episodes are keyed on their show's title; keep their rows.
-            tracker.rename_show_episodes(item["title"], fields_to_write["title"])
+        # Episodes are keyed on their show's title; keep their rows. A failed
+        # re-key is undone in the tracker, so the episodes keep the old key
+        # and start over under the new title.
+        if (media_type.name == "tvshow" and "title" in written and item.get("title")
+                and tracker.rename_show_episodes(
+                    item["title"], fields_to_write["title"]) is None):
+            log.warning(
+                "Show title written, but its episode rows kept the old title",
+                event="scan.rekey_failed", identity=identity,
+                old_title=item["title"], new_title=fields_to_write["title"],
+            )
 
         # A field whose write was attempted and rejected by Kodi was NOT filled,
         # so its clock must not advance: otherwise aged content reaches FINAL on

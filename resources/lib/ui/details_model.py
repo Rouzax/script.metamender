@@ -32,7 +32,7 @@ from resources.lib.engine.maturity import (
     decide_certification,
     decide_field,
 )
-from resources.lib.engine.protect import fingerprint
+from resources.lib.engine.protect import fingerprint, is_blank
 from resources.lib.engine.scan import blanked, content_age_days
 from resources.lib.engine.scanctx import (
     LANGUAGE_FIELDS,
@@ -98,6 +98,11 @@ _REFILL = 32601
 _OFF_HINT = 32602
 _OFF_NEXT = 32603
 _UNLOCKED_OFF = 32604
+# The same three for a certification left out because no usable age rating
+# country is set up, though the field itself is switched on.
+_NO_COUNTRY_HINT = 32609
+_NO_COUNTRY_NEXT = 32608
+_UNLOCKED_NO_COUNTRY = 32625
 _TVMAZE_ONLY = 32599
 # How a number match found an id (numbermatch's match note), "matched" key.
 _MATCHED_HOW = {"date": 32597, "title": 32598, "tmdb_list": 32555}
@@ -210,9 +215,12 @@ def _field_row(
     language: str,
     threshold: int,
     managed: bool,
+    no_country: bool,
 ) -> DetailRow:
     """``managed``: the scan checks this field under the current settings;
-    a field shown only for its lock is not, and gets no next-scan promise."""
+    a field shown only for its lock is not, and gets no next-scan promise.
+    ``no_country``: an unmanaged certification is left out for want of a
+    usable age rating country, not because the field is switched off."""
     label = lang(_FIELD_LABELS.get(field, 0)) or field
     entry = keep.get(field) or {}
     rating = field in RATING_FIELDS
@@ -224,9 +232,9 @@ def _field_row(
     current = item.get(field)
     mine = holds_written_value(field, current, fs, entry)
     written = entry.get("written_fp") or fs.get("written_value")
-    blank = not rating and is_empty(kodi_form(current))
+    blank = not rating and is_blank(kodi_form(current))
     # A refill that found nothing recorded the blank Kodi holds as written:
-    # the field is empty, not changed since a write.
+    # the field is blank (empty or a placeholder), not changed since a write.
     written_blank = blank and written == fingerprint(kodi_form(current))
     # MetaMender wrote this field once, but Kodi now holds something else.
     changed = not rating and not mine and bool(written) and not written_blank
@@ -248,7 +256,8 @@ def _field_row(
         group, hint, why = GROUP_WAITING, lang(32551), _NEVER_CHECKED
     elif unlocked:
         group, hint = GROUP_WAITING, lang(32552)
-        why = _UNLOCKED if managed else _UNLOCKED_OFF
+        why = _UNLOCKED if managed else (
+            _UNLOCKED_NO_COUNTRY if no_country else _UNLOCKED_OFF)
     elif refill:
         group, hint, why = GROUP_WAITING, lang(32552), _REFILL
     elif changed:
@@ -288,7 +297,7 @@ def _field_row(
         lines.append((lang(32529), long_date(fs["fetched_at"])))
     if checked and not locked:
         if not managed:
-            next_text = lang(_OFF_NEXT)
+            next_text = lang(_NO_COUNTRY_NEXT if no_country else _OFF_NEXT)
         elif unlocked or refill:
             next_text = lang(32539)
         elif settled:
@@ -304,7 +313,7 @@ def _field_row(
                 else lang(32552)
             )
     if not managed and not locked:
-        hint = lang(_OFF_HINT)
+        hint = lang(_NO_COUNTRY_HINT if no_country else _OFF_HINT)
     if why:
         lines.append((lang(32531), lang(why)))
 
@@ -434,6 +443,7 @@ def build_rows(
     language: str = "",
     fields: Iterable[str] | None = None,
     managed: Iterable[str] | None = None,
+    cert_country_missing: bool = False,
     threshold_days: int = DEFAULT_THRESHOLD_DAYS,
 ) -> list[DetailRow]:
     """The Ids entry, then the fields grouped updated, left as it is and
@@ -443,6 +453,8 @@ def build_rows(
     "From" line of a field written in a language. ``fields`` are the fields
     to show (default: every field of the media type); ``managed`` those the
     scan checks under the current settings (default: ``fields``).
+    ``cert_country_missing``: certifications are switched on but no usable
+    age rating country is set up.
     ``threshold_days`` is the stale_threshold_days setting, which decides
     when a field is settled. Rating and votes are one "Rating" row.
     """
@@ -457,7 +469,8 @@ def build_rows(
             names.sort()
     rows = [
         _field_row(media_type, f, item, fs_map.get(f) or {}, keep, today, language,
-                   threshold_days, f in managed_set)
+                   threshold_days, f in managed_set,
+                   f == "mpaa" and cert_country_missing)
         for f in names
     ]
     ordered = [_ids_row(media_type, item, item_row)]

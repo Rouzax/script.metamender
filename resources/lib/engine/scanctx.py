@@ -21,14 +21,13 @@ from resources.lib.engine.certchain import (
     SiteGate,
 )
 from resources.lib.engine.chain import TRANSIENT
-from resources.lib.engine.protect import fingerprint
+from resources.lib.engine.protect import fingerprint, is_blank
 from resources.lib.providers import tmdb
 from resources.lib.utils import (
     ApiKeyError,
     TransientProviderError,
     TvdbAuthError,
     get_logger,
-    is_empty,
 )
 
 log = get_logger('scan')
@@ -156,15 +155,15 @@ def holds_written_value(
     ``keep_entry`` is the field's get_keep() entry: its written_fp survives
     Reset tracker, so field_status's written_value is only the fallback. A
     rating row's written value is the JSON of the slots metamender owns,
-    beside the scraper's own slots, so any recorded write counts. An empty
-    value never does: a refill that found nothing records the blank as
-    written so the same blank does not trigger it again, but the blank is
-    not a value metamender put there.
+    beside the scraper's own slots, so any recorded write counts. A blank
+    value (empty or a placeholder, as scan.blanked sees it) never does: a
+    refill that found nothing records the blank as written so the same
+    blank does not trigger it again, but metamender never writes a blank.
     """
     if field in RATING_FIELDS:
         return bool(fs.get("written_value"))
     form = kodi_form(current)
-    if is_empty(form):
+    if is_blank(form):
         return False
     written = keep_entry.get("written_fp") or fs.get("written_value")
     return written is not None and fingerprint(form) == written

@@ -1254,6 +1254,14 @@ msgctxt "#32607"
 msgid "Appearance"
 msgstr ""
 
+msgctxt "#32608"
+msgid "not while no age rating country is set up"
+msgstr ""
+
+msgctxt "#32609"
+msgid "no country"
+msgstr ""
+
 # Short month names and date formats of the details window
 msgctxt "#32610"
 msgid "Jan"
@@ -1313,4 +1321,8 @@ msgstr ""
 
 msgctxt "#32624"
 msgid "{} · {}"
+msgstr ""
+
+msgctxt "#32625"
+msgid "You unlocked this field; MetaMender checks it again once an age rating country is set up."
 msgstr ""

@@ -347,7 +347,9 @@ class TrackerDB:
         row and restart its clocks. A row whose new key is already taken keeps
         its old one. Returns the number of rows renamed, or None when the
         re-key failed, so the caller can tell the user that the episodes
-        lost their rows.
+        lost their rows. A failed re-key is undone to a savepoint: none of
+        it is committed later, while the caller's own pending writes stay
+        for its next commit.
         """
         prefix = old_title + " "
         rows = self._conn.execute(
@@ -357,6 +359,9 @@ class TrackerDB:
         ).fetchall()
         renamed = 0
         try:
+            # A savepoint opens a transaction when none is pending, so the
+            # renames and the commit below stay one unit either way.
+            self._conn.execute("SAVEPOINT rekey")
             for row in rows:
                 rest = row["identity"][len(prefix):]
                 if not _EPISODE_SUFFIX.match(rest):
@@ -369,12 +374,14 @@ class TrackerDB:
                 )
                 self._move_keep("episode", row["identity"], new_identity)
                 renamed += 1
+            self._conn.execute("RELEASE rekey")
             self._conn.commit()
         except sqlite3.Error:
             log.exception(
                 "Failed to re-key episode rows", event="tracker.error",
                 old_title=old_title, new_title=new_title,
             )
+            self._undo_rekey()
             return None
         log.info(
             "Episode rows re-keyed after a show title change",
@@ -382,6 +389,15 @@ class TrackerDB:
             new_title=new_title, renamed=renamed,
         )
         return renamed
+
+    def _undo_rekey(self) -> None:
+        """Drop a failed re-key's renames, best effort: when even that fails
+        the connection is left to its own rollback on close."""
+        try:
+            self._conn.execute("ROLLBACK TO rekey")
+            self._conn.execute("RELEASE rekey")
+        except sqlite3.Error:
+            log.exception("Failed to undo a partial episode re-key", event="tracker.error")
 
     def known_kodi_ids(self, media_type: str) -> set[int]:
         """Kodi ids of the tracked items of this type, as last scanned."""

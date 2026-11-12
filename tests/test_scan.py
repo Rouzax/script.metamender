@@ -5881,6 +5881,31 @@ class TestMainTitles:
         assert _written(mock_update, "title") == "Testserie"
         assert names == ["Testserie S01E01"]
 
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_failed_episode_rekey_is_logged_and_the_title_kept(
+        self, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_tvshow_item(title="Test Show")
+        mock_tmdb.return_value = _tmdb_tvshow_response(title="Testserie")
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("episode", "Test Show S01E01", kodi_id=100)
+        tracker.commit()
+        with patch.object(tracker, "rename_show_episodes", return_value=None), \
+                patch("resources.lib.engine.scan.log") as log:
+            run_scan(
+                TVSHOW, tracker, _make_source_config(), frozenset({"main_title"}),
+                "k", _make_settings(), items=[item],
+            )
+        reason = tracker.get_field_status(
+            "tvshow", compute_identity(item, TVSHOW), "title")["last_reason"]
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Testserie"
+        assert reason == "updated"
+        events = [c.kwargs.get("event") for c in log.warning.call_args_list]
+        assert "scan.rekey_failed" in events
+
 
 class TestCertifications:
     """mpaa for movies and TV shows: TMDB first, sites only when due, the

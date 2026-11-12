@@ -1099,3 +1099,42 @@ def test_rename_show_episodes_reports_a_failure(tmp_path):
     # Nothing to rename is not a failure.
     assert db.rename_show_episodes("No Such Show", "Other") == 0
     db.close()
+
+
+class _FailingSecondRename(_FailingUpdates):
+    """The first episode re-key succeeds, the second fails."""
+
+    def __init__(self, conn):
+        super().__init__(conn)
+        self.renames = 0
+
+    def execute(self, sql, *args):
+        if sql.startswith("UPDATE items SET identity"):
+            self.renames += 1
+            if self.renames > 1:
+                raise sqlite3.OperationalError("database is locked")
+        return self._conn.execute(sql, *args)
+
+
+def test_failed_rename_leaves_no_partial_rekey_and_keeps_pending_writes(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("episode", "Old Show S01E01", kodi_id=1)
+    db.upsert_item("episode", "Old Show S01E02", kodi_id=2)
+    db.set_locked("episode", "Old Show S01E01", "plot", True)
+    db.upsert_item("tvshow", "tmdb:1", kodi_id=9)
+    db.commit()
+    # A caller's write still pending when the re-key runs (a scan's item).
+    db.record_field_reason("tvshow", "tmdb:1", "title", "updated")
+    real = db._conn
+    db._conn = _FailingSecondRename(real)
+    try:
+        assert db.rename_show_episodes("Old Show", "New Show") is None
+    finally:
+        db._conn = real
+    db.commit()
+    names = {r[0] for r in db._conn.execute(
+        "SELECT identity FROM items WHERE media_type = 'episode'")}
+    assert names == {"Old Show S01E01", "Old Show S01E02"}
+    assert db.locked_fields("episode", "Old Show S01E01") == frozenset({"plot"})
+    assert db.get_field_status("tvshow", "tmdb:1", "title")["last_reason"] == "updated"
+    db.close()

@@ -41,19 +41,21 @@ class Preset:
     mappings: dict[str, dict[str, str]]
 
 
-def load_preset(country: str) -> Preset | None:
+def load_preset(country: str, *, report: bool = True) -> Preset | None:
     """The preset for ``country`` (a code in COUNTRY_CODES), or None, logged
-    at ERROR, when it is missing or invalid."""
+    at ERROR, when it is missing or invalid. ``report=False`` leaves the
+    logging to the scan, for a read-only caller that asks on every view."""
     if country not in COUNTRY_CODES:
-        _invalid(country, "unknown country")
+        _invalid(country, "unknown country", report)
         return None
     path = os.path.join(_PRESET_DIR, country + ".json")
     try:
         with open(path, encoding="utf-8") as fh:
             raw = json.load(fh)
     except (OSError, ValueError):
-        log.exception("Certification preset unreadable", event="presets.invalid",
-                      country=country, path=path)
+        if report:
+            log.exception("Certification preset unreadable", event="presets.invalid",
+                          country=country, path=path)
         return None
     try:
         valid = frozenset(str(r) for r in raw["valid_ratings"])
@@ -64,13 +66,13 @@ def load_preset(country: str) -> Preset | None:
             for src, table in raw["mappings"].items()
         }
     except (KeyError, TypeError, AttributeError):
-        _invalid(country, "missing or malformed keys")
+        _invalid(country, "missing or malformed keys", report)
         return None
     if not valid:
-        _invalid(country, "no valid ratings")
+        _invalid(country, "no valid ratings", report)
         return None
     if sanitize_prefix(prefix, "\0") != prefix:
-        _invalid(country, "unusable prefix")
+        _invalid(country, "unusable prefix", report)
         return None
     outside = sorted(
         "{}:{}".format(src, target)
@@ -78,7 +80,8 @@ def load_preset(country: str) -> Preset | None:
         if target not in valid
     )
     if outside:
-        _invalid(country, "mapping targets outside valid_ratings: " + ", ".join(outside))
+        _invalid(country, "mapping targets outside valid_ratings: " + ", ".join(outside),
+                 report)
         return None
     return Preset(country, valid, prefix, inference, mappings)
 
@@ -96,6 +99,8 @@ def country_for_setting(index: int, ui_language: str) -> str | None:
     return None
 
 
-def _invalid(country: str, reason: str) -> None:
+def _invalid(country: str, reason: str, report: bool) -> None:
+    if not report:
+        return
     log.error("Certification preset unusable", event="presets.invalid",
               country=country, reason=reason)

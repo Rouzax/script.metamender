@@ -630,3 +630,47 @@ def test_stale_identity_after_an_adoption_is_resolved_on_reload(opened):
         assert session.identity == "tmdb:949"
         session.run_action(next(r for r in view.rows if r.key == "plot"))
     assert upd.call_args.kwargs["plot"] == "old plot"
+
+
+def test_refilled_placeholder_is_not_restorable(db):
+    _setup(db, "title", "Episode 5", "Episode 5")
+    keep = db.get_keep("movie", IDENT)
+    assert details.can_restore("title", "Episode 5", {}, keep) is False
+
+
+def test_restore_rekey_failure_survives_a_failing_commit(tmp_path):
+    tracker = TrackerDB(str(tmp_path / "backfill.db"))
+    tracker.upsert_item("tvshow", "tmdb:1", "Kwak")
+    tracker.keep_original("tvshow", "tmdb:1", "title", "Alfred J. Kwak")
+    tracker.set_written_fp("tvshow", "tmdb:1", "title", fingerprint("Alfred Jodocus Kwak"))
+    tracker.commit()
+    with patch.object(details.kodi, "get_item_by_id",
+                      return_value={"title": "Alfred Jodocus Kwak"}), \
+            patch.object(details.kodi, "update_item", return_value=True), \
+            patch.object(tracker, "rename_show_episodes", return_value=None):
+        real_commit = tracker.commit
+        calls = []
+
+        def commit():
+            calls.append(1)
+            if len(calls) > 1:  # the lock's own commit succeeds
+                raise sqlite3.OperationalError("database is locked")
+            real_commit()
+
+        with patch.object(tracker, "commit", side_effect=commit), \
+                patch.object(tracker, "rollback",
+                             side_effect=sqlite3.OperationalError("disk I/O error")):
+            result = details.restore_field(tracker, TVSHOW, 5, "tmdb:1", "title")
+    assert result == details.EPISODES_NOT_MOVED
+    tracker.close()
+
+
+def test_unknown_cert_country_logs_no_error_on_open(opened):
+    from resources.lib.data import presets
+
+    opened["settings"]["cert_country"] = "XX"
+    with patch.object(presets, "log") as log:
+        details.open_details("movie", "7")
+    assert not log.error.called and not log.exception.called
+    _session, view = opened["shown"][0]
+    assert "mpaa" not in _keys(view)

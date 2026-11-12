@@ -195,19 +195,15 @@ def _note_entry(
     }
 
 
-def _log_rejected(fields: dict[str, Any]) -> dict[str, Any] | None:
+def _log_rejected(fields: dict[str, Any]) -> None:
     """One line per site that did not pass: INFO for a rejected candidate, so
     the user can see why the episode stayed as it was; DEBUG when the site
     has no episode with that number (a whole year-numbered season would
-    otherwise flood the log).
-
-    Returns a rejected candidate's entry for the item's match note, None
-    when the site had no such episode."""
+    otherwise flood the log)."""
     if fields["reason"] == "rejected":
         log.info("Episode number match rejected", event="scan.number_match_rejected", **fields)
-        return {k: fields[k] for k in _NOTE_KEYS}
-    log.debug("Episode number not found", event="scan.number_match_rejected", **fields)
-    return None
+    else:
+        log.debug("Episode number not found", event="scan.number_match_rejected", **fields)
 
 
 def _cross_ids(ctx: _ScanCtx, show_tmdb_id: str, kept: _Kept, identity: str) -> Any:
@@ -343,9 +339,12 @@ def match_episode_by_number(
     for name, site, verdict in (("tmdb", tmdb_list, tmdb_verdict),
                                 ("tvdb", tvdb_list, tvdb_verdict)):
         if verdict.episode is None:
-            note = _log_rejected(_note_entry(name, site, verdict, kept, identity))
-            if note is not None:
-                notes.append(note)
+            fields = _note_entry(name, site, verdict, kept, identity)
+            _log_rejected(fields)
+            # A rejected candidate goes in the note with both titles and
+            # dates; a site without such an episode has nothing to show.
+            if verdict.reason == "rejected":
+                notes.append({k: fields[k] for k in _NOTE_KEYS})
 
     tmdb_ep = tmdb_verdict.episode
     tvdb_ep = tvdb_verdict.episode
