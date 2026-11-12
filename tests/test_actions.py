@@ -372,16 +372,27 @@ def test_reset_confirmation_says_locks_and_originals_stay():
     assert "original" in text.lower()
 
 
-def test_addon_declares_the_details_context_item():
+def _dbtypes(visible):
+    return set(re.findall(r"String\.IsEqual\(ListItem\.DBType,(\w+)\)", visible))
+
+
+def test_addon_context_menu_is_one_metamender_submenu():
     root_dir = Path(__file__).resolve().parent.parent
     root = ET.parse(str(root_dir / "addon.xml")).getroot()
-    items = root.findall("./extension[@point='kodi.context.item']/menu/item")
-    item = next(i for i in items if i.get("library") == "context_details.py")
-    assert item.findtext("label") == "32584"
-    visible = item.findtext("visible")
-    for dbtype in ("movie", "episode", "tvshow"):
-        assert "String.IsEqual(ListItem.DBType,%s)" % dbtype in visible
-    assert "season" not in visible
-    assert (root_dir / "context_details.py").is_file()
+    main = root.find("./extension[@point='kodi.context.item']/menu[@id='kodi.core.main']")
+    assert main.findall("item") == []
+    (submenu,) = main.findall("menu")
     po = (root_dir / "resources/language/resource.language.en_gb/strings.po").read_text()
-    assert 'msgctxt "#32584"\nmsgid "MetaMender: Details"' in po
+    strings = dict(re.findall(r'msgctxt "#(\d+)"\nmsgid "(.*)"', po))
+    assert strings[submenu.findtext("label")] == "MetaMender"
+    assert _dbtypes(submenu.findtext("visible")) == {"movie", "episode", "tvshow", "season"}
+
+    items = {i.get("library"): i for i in submenu.findall("item")}
+    assert set(items) == {"context.py", "context_details.py"}
+    update, details = items["context.py"], items["context_details.py"]
+    assert strings[update.findtext("label")] == "Update now"
+    assert _dbtypes(update.findtext("visible")) == {"movie", "episode", "tvshow", "season"}
+    assert strings[details.findtext("label")] == "Details"
+    assert _dbtypes(details.findtext("visible")) == {"movie", "episode", "tvshow"}
+    for library in items:
+        assert (root_dir / library).is_file()

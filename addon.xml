@@ -13,14 +13,18 @@
     <extension point="xbmc.python.library" library="resources/lib" />
     <extension point="kodi.context.item">
         <menu id="kodi.core.main">
-            <item library="context.py">
-                <label>32340</label>
+            <menu>
+                <label>32593</label>
                 <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow) | String.IsEqual(ListItem.DBType,season)</visible>
-            </item>
-            <item library="context_details.py">
-                <label>32584</label>
-                <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow)</visible>
-            </item>
+                <item library="context.py">
+                    <label>32588</label>
+                    <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow) | String.IsEqual(ListItem.DBType,season)</visible>
+                </item>
+                <item library="context_details.py">
+                    <label>32594</label>
+                    <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow)</visible>
+                </item>
+            </menu>
         </menu>
     </extension>
     <extension point="xbmc.addon.metadata">

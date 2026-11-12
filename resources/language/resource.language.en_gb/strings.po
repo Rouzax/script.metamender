@@ -363,10 +363,6 @@ msgctxt "#32332"
 msgid "After a full scan, remove tracker entries for items not seen in the library for this many days (for example, deleted movies or episodes). Set to 0 to never remove them."
 msgstr ""
 
-msgctxt "#32340"
-msgid "MetaMender: Update now"
-msgstr ""
-
 # Notifications
 msgctxt "#32341"
 msgid "Invalid TMDB API key"
@@ -1166,10 +1162,6 @@ msgctxt "#32583"
 msgid "Nightfall"
 msgstr ""
 
-msgctxt "#32584"
-msgid "MetaMender: Details"
-msgstr ""
-
 msgctxt "#32585"
 msgid "{} · Season {}, episode {}"
 msgstr ""
@@ -1200,4 +1192,12 @@ msgstr ""
 
 msgctxt "#32592"
 msgid "Could not read this item's details."
+msgstr ""
+
+msgctxt "#32593"
+msgid "MetaMender"
+msgstr ""
+
+msgctxt "#32594"
+msgid "Details"
 msgstr ""
