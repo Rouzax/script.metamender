@@ -114,6 +114,8 @@ def test_runner_guards_the_library_before_the_first_scene():
     source = RUNNER.read_text(encoding="utf-8")
     main = source[source.index("def main("):]
     guard = main.index("refuse_if_setup_complete(")
+    version = main.index("refuse_if_profile_not_omega(")
+    assert version < main.index("install(")
     loop = main.index("for name, scene in chosen.items()")
     assert guard < loop
     assert "finally:" in main[loop:]

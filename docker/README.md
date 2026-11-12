@@ -80,6 +80,12 @@ JSON-RPC on 8100, so run one at a time. Path substitution from
 | 21.3 Omega | `stable` (system) | `~/.var/app/tv.kodi.Kodi/data` | `testvideo131` |
 | 22.0 RC1 Piers | `beta` (user) | `~/.var/app/tv.kodi.Kodi/data-piers` | `testvideo149` |
 
+Never open a profile with the other Kodi version. Kodi 22 upgrades
+`guisettings.xml` to a format Omega cannot read, and Omega then replaces it
+with default settings (web server off, every GUI setting lost). Start
+Kodi 22 only with the `data-piers` command below; `screenshots.py` refuses
+to start Omega on a profile Kodi 22 has opened.
+
 1. Back up the databases (`scripts/backup-db.sh`).
 2. In the profile: symlink this repo to `addons/script.metamender`, unpack
    `script.module.imdbratings` 1.0.0 into `addons/` (from the Kodi repository,

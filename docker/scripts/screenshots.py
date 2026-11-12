@@ -108,6 +108,22 @@ def refuse_if_setup_complete() -> None:
                          "library. Move that folder aside first.")
 
 
+# Kodi 21 Omega writes guisettings.xml as version 2; Kodi 22 upgrades it, and
+# Omega cannot read the upgraded file: it falls back to default settings,
+# which turns the web server off and loses every other GUI setting.
+OMEGA_SETTINGS_VERSION = "2"
+
+
+def refuse_if_profile_not_omega() -> None:
+    """The Omega profile must only ever be opened by Omega (docker/README.md)."""
+    settings = KODI_DATA / "userdata" / "guisettings.xml"
+    version = ElementTree.parse(settings).getroot().get("version")
+    if version != OMEGA_SETTINGS_VERSION:
+        sys.exit(f"{settings} is version {version}, not Omega's {OMEGA_SETTINGS_VERSION}: "
+                 "another Kodi version has opened this profile. Starting Omega on it "
+                 "would reset Kodi's settings; restore the profile first.")
+
+
 def _install_imdbratings(addons: Path) -> bool:
     """Unpack the IMDb ratings module from the official Kodi mirror; True when
     this run installed it."""
@@ -299,6 +315,8 @@ def main() -> None:
     chosen = {name: scenes[name] for name in names}
 
     refuse_if_setup_complete()
+    if not args.no_restart:
+        refuse_if_profile_not_omega()
     added: dict[str, bool] = {}
     overlay_was_on = False
     try:
