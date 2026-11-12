@@ -31,7 +31,7 @@ def test_window_problem_shown_once():
     a = Attention()
     a.raise_problem(KEY_REJECTED)
     assert a.pending_window() == (Problem(KEY_REJECTED, ""), [])
-    a.mark_window_shown()
+    _show(a)
     assert a.pending_window() is None
     a.raise_problem(KEY_REJECTED)
     assert a.pending_window() is None
@@ -40,7 +40,7 @@ def test_window_problem_shown_once():
 def test_cleared_and_back_shows_again():
     a = Attention()
     a.raise_problem(KEY_REJECTED)
-    a.mark_window_shown()
+    _show(a)
     a.clear(KEY_REJECTED)
     assert a.pending_window() is None
     a.raise_problem(KEY_REJECTED)
@@ -50,7 +50,7 @@ def test_cleared_and_back_shows_again():
 def test_changed_detail_shows_again():
     a = Attention()
     a.raise_problem(FOLDER_OFFLINE, "smb://a/")
-    a.mark_window_shown()
+    _show(a)
     a.raise_problem(FOLDER_OFFLINE, "smb://a/, smb://b/")
     assert a.pending_window() == (Problem(FOLDER_OFFLINE, "smb://a/, smb://b/"), [])
 
@@ -60,7 +60,7 @@ def test_most_important_first_and_others_listed():
     a.raise_problem(FOLDER_OFFLINE, "smb://a/")
     a.raise_problem(SETUP)
     assert a.pending_window() == (Problem(SETUP, ""), [Problem(FOLDER_OFFLINE, "smb://a/")])
-    a.mark_window_shown()
+    _show(a)
     a.raise_problem(NO_KEY)
     assert a.pending_window() == (
         Problem(SETUP, ""), [Problem(NO_KEY, ""), Problem(FOLDER_OFFLINE, "smb://a/")])
@@ -140,7 +140,7 @@ def test_json_round_trip():
     a.mark_toast_shown(TVDB_AUTH)
     a.attempt(failed=True, now=5)
     a.folders_checked({"smb://a/": False}, now=7)
-    a.mark_window_shown()
+    _show(a)
     b = Attention.from_json(a.to_json())
     assert b.to_json() == a.to_json()
     assert b.pending_window() is None and not b.pending_toast(TVDB_AUTH)
@@ -179,3 +179,38 @@ def test_offline_folder_detail_has_no_credentials():
     a.folders_checked({path: False}, now=3 * DAY)
     assert a.pending_window() == (Problem(FOLDER_OFFLINE, "smb://nas/Series/"), [])
     assert "s3cret" not in a.to_json()
+
+
+
+def _show(a):
+    main, others = a.pending_window()
+    a.mark_window_shown([main, *others])
+
+
+def test_only_the_displayed_problems_count_as_shown():
+    a = Attention()
+    a.raise_problem(KEY_REJECTED)
+    main, others = a.pending_window()
+    a.raise_problem(FOLDER_OFFLINE, "smb://a/")  # raised while the window was open
+    a.mark_window_shown([main, *others])
+    assert a.pending_window() == (Problem(KEY_REJECTED, ""), [Problem(FOLDER_OFFLINE, "smb://a/")])
+
+
+def test_a_folder_coming_back_does_not_reopen_the_window():
+    a = Attention()
+    a.raise_problem(FOLDER_OFFLINE, "smb://a/, smb://b/")
+    _show(a)
+    a.raise_problem(FOLDER_OFFLINE, "smb://b/")
+    assert a.pending_window() is None
+    a.raise_problem(FOLDER_OFFLINE, "smb://b/, smb://c/")
+    assert a.pending_window() == (Problem(FOLDER_OFFLINE, "smb://b/, smb://c/"), [])
+
+
+def test_update_does_not_write_over_a_record_it_could_not_read():
+    class ReadFails(FakeTracker):
+        def get_scan_state(self, key):
+            raise RuntimeError("db locked")
+
+    tracker = ReadFails('{"open": {"key_rejected": ""}}')
+    attention.update(tracker, lambda a: a.raise_problem(SETUP))
+    assert tracker.values == {"attention": '{"open": {"key_rejected": ""}}'}

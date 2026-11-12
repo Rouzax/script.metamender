@@ -29,6 +29,7 @@ from resources.lib.service.daemon import (
     _load_settings,
     _prepare_imdb_ratings,
     tvdb_auth_failed,
+    updated_text,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.utils import (
@@ -161,7 +162,7 @@ def run() -> None:
         )
         parts = []
         if total_updated:
-            parts.append(lang(32349).format(total_updated))  # {} updated
+            parts.append(updated_text(total_updated))
         if not parts:
             parts.append(lang(32348))  # No changes
         notify(", ".join(parts))

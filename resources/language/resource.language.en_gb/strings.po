@@ -865,3 +865,7 @@ msgstr ""
 msgctxt "#32503"
 msgid "Later"
 msgstr ""
+
+msgctxt "#32504"
+msgid "1 item updated"
+msgstr ""

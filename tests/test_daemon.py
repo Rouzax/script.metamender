@@ -713,3 +713,50 @@ def test_a_failing_window_does_not_stop_the_service(kodi_stubs):
     svc.window.side_effect = None
     svc.run(ticks=2, scan=scan)
     assert scan.call_count == 1
+
+
+
+def test_window_shown_once_per_session_even_if_saving_fails(kodi_stubs):
+    svc = _Service()
+
+    class WritesFailAfterTheWindow(dict):
+        def __setitem__(self, key, value):
+            # From the window on, set_scan_state swallows an sqlite error.
+            if not svc.window.called:
+                super().__setitem__(key, value)
+
+    svc.store = WritesFailAfterTheWindow()
+    svc.run(ticks=4, setup=False)
+    assert svc.window.call_count == 1
+
+
+def test_no_window_while_kodi_is_quitting(kodi_stubs):
+    calls = {"n": 0}
+
+    def quitting_after_the_loop_check():
+        # The loop's own check passes once; Kodi starts quitting right after.
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    svc = _Service().run(ticks=3, setup=False, aborting=quitting_after_the_loop_check)
+    assert svc.window.call_count == 0
+
+
+def test_query_failure_during_shutdown_does_not_count(kodi_stubs):
+    from resources.lib.data.kodi import KodiQueryError
+    svc = _Service()
+    state = {"down": False}
+
+    def scan(*a, **kw):
+        state["down"] = True
+        raise KodiQueryError("rpc gone")
+
+    svc.run(ticks=1, scan=MagicMock(side_effect=scan), aborting=lambda: state["down"])
+    assert json.loads(svc.store.get("attention", '{"streak": {"count": 0}}'))["streak"]["count"] == 0
+
+
+def test_updated_text_singular_and_plural():
+    with patch.object(daemon, "lang", side_effect=lambda i: {32349: "{} items updated",
+                                                             32504: "1 item updated"}[i]):
+        assert daemon.updated_text(1) == "1 item updated"
+        assert daemon.updated_text(12) == "12 items updated"

@@ -428,31 +428,47 @@ def _record_cycle(
         record.folders_checked(folders, now)
 
 
-def _attention_tick(tracker: TrackerDB) -> None:
+def updated_text(count: int) -> str:
+    """"1 item updated" / "N items updated"."""
+    return lang(32504) if count == 1 else lang(32349).format(count)
+
+
+def _attention_tick(
+    tracker: TrackerDB, monitor: Any, shown: set[tuple[str, str]],
+) -> None:
     """Show what the problem record holds that was not shown yet: the
-    attention window, and the TheTVDB toast. Nothing while anything plays;
-    it waits for the next tick without playback.
+    attention window, and the TheTVDB toast. Nothing while anything plays
+    (it waits for the next tick without playback) or while Kodi quits.
+
+    ``shown`` is what this service run already showed: should saving the
+    record fail, the same window still never comes back within a session.
 
     Never raises: the service loop calls it outside its own error handling,
     and a window that cannot open counts as shown, so it is not retried
     every second."""
     try:
-        if _playing():
+        if monitor.abortRequested() or _playing():
             return
         record = attention.load(tracker)
         pending = record.pending_window()
         if pending is not None:
             main, others = pending
-            log.info("Attention window shown", event="service.attention_shown",
-                     kind=main.kind, others=[p.kind for p in others])
-            answer = "later"
-            try:
-                answer = show_attention_window(main, others)
-            finally:
-                attention.update(tracker, lambda a: a.mark_window_shown())
-            if answer == "setup":
-                xbmc.executebuiltin("RunScript(script.metamender,wizard)")
-        if record.pending_toast(attention.TVDB_AUTH):
+            displayed = [main, *others]
+            seen = {(p.kind, p.detail) for p in displayed}
+            if not seen <= shown:
+                shown |= seen
+                log.info("Attention window shown", event="service.attention_shown",
+                         kind=main.kind, others=[p.kind for p in others])
+                answer = "later"
+                try:
+                    answer = show_attention_window(main, others)
+                finally:
+                    attention.update(tracker, lambda a: a.mark_window_shown(displayed))
+                if answer == "setup":
+                    xbmc.executebuiltin("RunScript(script.metamender,wizard)")
+        toast = (attention.TVDB_AUTH, "")
+        if record.pending_toast(attention.TVDB_AUTH) and toast not in shown:
+            shown.add(toast)
             attention.update(
                 tracker, lambda a: a.mark_toast_shown(attention.TVDB_AUTH))
             notify(lang(32352))  # TheTVDB rejected the credentials
@@ -484,6 +500,8 @@ def run() -> None:
     # What this service last wrote about setup, so the record is written on
     # a change only, not every tick.
     setup_known: bool | None = None
+    # Problems this service run showed (see _attention_tick).
+    shown: set[tuple[str, str]] = set()
 
     try:
         tracker = TrackerDB(_get_db_path())
@@ -508,7 +526,7 @@ def run() -> None:
                     # from now and library events seen meanwhile are dropped.
                     last_scan = now
                     monitor.clear_scan_request()
-                    _attention_tick(tracker)
+                    _attention_tick(tracker, monitor, shown)
                     if monitor.waitForAbort(SERVICE_SLEEP_INTERVAL_SEC):
                         break
                     continue
@@ -603,8 +621,11 @@ def run() -> None:
                             # request, so it retries. Set a short backoff
                             # instead of a full interval so the next loop
                             # re-attempts soon without hammering Kodi.
-                            attention.update(
-                                tracker, lambda a: a.attempt(True, time.time()))
+                            # A query failing because Kodi is shutting down says
+                            # nothing about whether scans work.
+                            if not monitor.abortRequested():
+                                attention.update(
+                                    tracker, lambda a: a.attempt(True, time.time()))
                             log.exception(
                                 "Scan aborted on Kodi query failure",
                                 event="service.scan_failed",
@@ -709,7 +730,7 @@ def run() -> None:
                         )
                         if (settings["show_notifications"] and total_updated
                                 and not _playing()):
-                            notify(lang(32349).format(total_updated))  # {} items updated
+                            notify(updated_text(total_updated))
                     finally:
                         release_scan_lock()
 
@@ -724,7 +745,7 @@ def run() -> None:
                     attention.update(tracker, lambda a: a.attempt(True, time.time()))
 
             if tracker is not None:
-                _attention_tick(tracker)
+                _attention_tick(tracker, monitor, shown)
             if monitor.waitForAbort(SERVICE_SLEEP_INTERVAL_SEC):
                 break
 
