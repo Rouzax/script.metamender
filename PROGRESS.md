@@ -103,6 +103,7 @@ feat/7d-provider-replacement.
 - [x] 9.4 Setup wizard (key, library language, folders in another language, what to fill, certification country, summary) as a pure model plus one WindowXMLDialog; the same window is the Folder languages dialog. Styled after the author's other add-ons (navy panel, amber accent from window properties, step dots, checkbox and radio markers); heartbeat-card add-on icon; art rendered by `docs/art/build_art.py`
 - [x] 9.5 Setup gate: nothing scans until the wizard has been finished once; the first Finish starts the first scan
 - [x] 9.6 Update now on a TV show (the show and all its episodes) or a season (its episodes), with a progress window (Stop, Background to Kodi's background bar, brought back by Update now inside the same show); Update now no longer moves a field's refresh schedule
+- [x] 9.7 Episodes without a usable id of their own (TVmaze-scraped) matched by season and episode number at TMDB and TheTVDB separately, accepted only when the title (folder or original language) or a date no other episode of that season shares agrees; matched ids stay in the tracker; Update now re-asks lookups that answered empty and re-checks number matches
 
 ## Phase 10: Scale, Progress, and Polish
 - [ ] 10.1 Progress notifications (per-scan, summary, resume)
