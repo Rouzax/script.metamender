@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from resources.lib.utils import get_logger
+from resources.lib.utils import display_path, get_logger
 
 log = get_logger('attention')
 
@@ -141,10 +141,12 @@ class Attention:
 
     def folders_checked(self, reachable: dict[str, bool], now: float) -> None:
         """Record which library folders answered; a folder no longer in
-        the library is forgotten."""
+        the library is forgotten. Folders are kept and shown without the
+        credentials a source URL can carry."""
+        answered = {display_path(path): ok for path, ok in reachable.items()}
         self._offline = {
             path: self._offline.get(path, float(now))
-            for path, ok in reachable.items() if not ok
+            for path, ok in answered.items() if not ok
         }
         overdue = sorted(
             path for path, since in self._offline.items()

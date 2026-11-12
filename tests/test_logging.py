@@ -88,3 +88,15 @@ def test_scan_log_cleanup_keeps_the_activity_log(log_dir):
     names = os.listdir(log_dir)
     assert "metamender.log" in names and "metamender.1.log" in names
     assert len([n for n in names if n.startswith("metamender_")]) == 10
+
+
+def test_url_credentials_are_redacted():
+    line = utils._redact("file_path=smb://kodi:s3cret@nas/Series/x.mkv, other=nfs://h/x")
+    assert "s3cret" not in line and "kodi:" not in line
+    assert "smb://***@nas/Series/x.mkv" in line and "nfs://h/x" in line
+
+
+def test_display_path_drops_credentials():
+    assert utils.display_path("smb://kodi:s3cret@nas/Series/") == "smb://nas/Series/"
+    assert utils.display_path("smb://user@nas/Series/") == "smb://nas/Series/"
+    assert utils.display_path("/mnt/media/Series/") == "/mnt/media/Series/"

@@ -170,3 +170,12 @@ def test_store_errors_give_an_empty_record():
     assert attention.load(Broken()).pending_window() is None
     assert attention.update(Broken(), lambda a: a.raise_problem(SETUP)).pending_window() == (
         Problem(SETUP, ""), [])
+
+
+def test_offline_folder_detail_has_no_credentials():
+    a = Attention()
+    path = "smb://kodi:s3cret@nas/Series/"
+    a.folders_checked({path: False}, now=0)
+    a.folders_checked({path: False}, now=3 * DAY)
+    assert a.pending_window() == (Problem(FOLDER_OFFLINE, "smb://nas/Series/"), [])
+    assert "s3cret" not in a.to_json()

@@ -63,8 +63,19 @@ def _escape_control(match: re.Match[str]) -> str:
     return _CONTROL_ESCAPES.get(char, "\\x{:02x}".format(ord(char)))
 
 
+# Credentials in a URL, as Kodi stores them in source paths
+# ("smb://user:password@nas/Series/").
+_URL_CREDENTIALS = re.compile(r"(//)[^/@\s]+@")
+
+
 def _redact(text: str) -> str:
-    return _SECRET_RE.sub(r"\1***", text)
+    return _URL_CREDENTIALS.sub(r"\1***@", _SECRET_RE.sub(r"\1***", text))
+
+
+def display_path(path: str) -> str:
+    """A path as it may be shown or stored for display: without the
+    credentials a source URL can carry."""
+    return _URL_CREDENTIALS.sub(r"\1", path)
 
 
 def is_empty(value: Any) -> bool:
