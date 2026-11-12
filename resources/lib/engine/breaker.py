@@ -43,11 +43,13 @@ class CircuitBreaker:
     def disable(self, provider: str, auth: bool = False) -> bool:
         """Disable a provider outright; ``auth`` marks a credential rejection
         (see auth_rejected). Return True only on the transition, so callers
-        log once."""
+        log once: the first credential rejection counts as one even for a
+        provider failures already disabled, since that is news to log."""
+        new_rejection = auth and provider not in self._auth_rejected
         if auth:
             self._auth_rejected.add(provider)
         if provider in self._disabled:
-            return False
+            return new_rejection
         self._disabled.add(provider)
         return True
 

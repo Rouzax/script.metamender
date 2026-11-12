@@ -102,3 +102,13 @@ def test_answered_records_a_real_answer_per_provider():
     assert not breaker.answered("tmdb")
     breaker.record_success("tmdb")
     assert breaker.answered("tmdb") and not breaker.answered("tvdb")
+
+
+def test_auth_rejection_reported_once_even_after_a_trip():
+    """A provider already disabled by failures still reports its first
+    credential rejection, so it is logged."""
+    breaker = CircuitBreaker(threshold=1)
+    assert breaker.record_failure("tvdb") is True
+    assert breaker.disable("tvdb", auth=True) is True
+    assert breaker.disable("tvdb", auth=True) is False
+    assert breaker.auth_rejected() == ["tvdb"]

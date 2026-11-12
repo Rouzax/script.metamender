@@ -6367,3 +6367,19 @@ class TestProviderAnswers:
                          "k", _make_settings(), items=[])
         tracker.close()
         assert stats["tmdb_answered"] is False
+
+
+class TestEnrichImdbIdLeavesTheItemAlone:
+    def test_the_items_uniqueid_is_not_changed_in_place(self, tmp_path, kodi_stubs):
+        from resources.lib.engine.ids import _enrich_imdb_id
+
+        item = _make_movie_item()
+        item["uniqueid"] = {"tmdb": "12345"}
+        before = compute_identity(item, MOVIE)
+        ctx = MagicMock()
+        ctx.media_type = MOVIE
+        with patch("resources.lib.data.kodi.update_item", return_value=True) as update:
+            _enrich_imdb_id(ctx, item, 7, "Air", before, "tt0000001")
+        assert item["uniqueid"] == {"tmdb": "12345"}
+        assert update.call_args.kwargs["uniqueid"] == {"tmdb": "12345", "imdb": "tt0000001"}
+        assert compute_identity(item, MOVIE) == before
