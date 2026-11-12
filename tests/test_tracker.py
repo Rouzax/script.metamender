@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 
 from resources.lib.constants import SCHEMA_VERSION
 from resources.lib.data.tracker import TrackerDB
@@ -1050,4 +1051,51 @@ def test_set_locked_and_forget_fingerprint_report_a_failed_write(tmp_path):
     db._conn.execute("PRAGMA query_only = ON")
     assert db.set_locked("movie", "Heat (1995)", "plot", False) is False
     assert db.forget_field_fingerprint("movie", "Heat (1995)", "plot") is False
+    db.close()
+
+
+def test_move_keep_replaces_stray_rows_at_the_destination(tmp_path):
+    # A field_keep row can outlive its items row (a pruned or reset item);
+    # the moved rows are the item now at that identity, so they win.
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Heat (1995)", kodi_id=7, imdb_id="tt0113277")
+    db.keep_original("movie", "Heat (1995)", "plot", "old plot")
+    db.set_locked("movie", "imdb:tt0113277", "plot", True)
+    db.keep_original("movie", "imdb:tt0113277", "plot", "stray plot")
+    db.set_locked("movie", "imdb:tt0113277", "tagline", True)
+    assert db.adopt_identity("movie", "imdb:tt0113277", 7) == "Heat (1995)"
+    keep = db.get_keep("movie", "imdb:tt0113277")
+    assert keep["plot"] == {"original": "old plot", "has_original": True,
+                            "locked": False, "written_fp": None}
+    # A stray row for a field the item has no row for is left as it was.
+    assert keep["tagline"]["locked"] is True
+    db.close()
+
+
+class _FailingUpdates:
+    """A connection whose item renames fail, everything else delegated."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, *args):
+        if sql.startswith("UPDATE items SET identity"):
+            raise sqlite3.OperationalError("database is locked")
+        return self._conn.execute(sql, *args)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_rename_show_episodes_reports_a_failure(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("episode", "Old Show S01E01", kodi_id=1)
+    real = db._conn
+    db._conn = _FailingUpdates(real)
+    try:
+        assert db.rename_show_episodes("Old Show", "New Show") is None
+    finally:
+        db._conn = real
+    # Nothing to rename is not a failure.
+    assert db.rename_show_episodes("No Such Show", "Other") == 0
     db.close()

@@ -338,14 +338,16 @@ class TrackerDB:
         )
         return old
 
-    def rename_show_episodes(self, old_title: str, new_title: str) -> int:
+    def rename_show_episodes(self, old_title: str, new_title: str) -> int | None:
         """Re-key a show's episode rows after the show's title changed (a
         scan wrote a new one, or the details window restored the original).
 
         An episode is keyed "<show title> SxxEyy" (with "|<file>" for a
         duplicate), so a new show title would otherwise orphan every episode
         row and restart its clocks. A row whose new key is already taken keeps
-        its old one. Returns the number of rows renamed.
+        its old one. Returns the number of rows renamed, or None when the
+        re-key failed, so the caller can tell the user that the episodes
+        lost their rows.
         """
         prefix = old_title + " "
         rows = self._conn.execute(
@@ -373,7 +375,7 @@ class TrackerDB:
                 "Failed to re-key episode rows", event="tracker.error",
                 old_title=old_title, new_title=new_title,
             )
-            return renamed
+            return None
         log.info(
             "Episode rows re-keyed after a show title change",
             event="tracker.episodes_renamed", old_title=old_title,
@@ -435,9 +437,9 @@ class TrackerDB:
         """Delete items of this type whose last_seen is older than `cutoff`.
 
         Items with a NULL last_seen are kept (never confirmed present yet).
-        Associated field_status and field_keep rows are deleted too. `cutoff` is an ISO date
-        string (callers pass today minus the retention window). Returns the
-        number of items removed.
+        Associated field_status and field_keep rows are deleted too.
+        `cutoff` is an ISO date string (callers pass today minus the
+        retention window). Returns the number of items removed.
         """
         try:
             doomed = self._conn.execute(
@@ -478,6 +480,8 @@ class TrackerDB:
 
     def _move_keep(self, media_type: str, old: str, new: str) -> None:
         """Re-key an item's field_keep rows with its items row (no commit)."""
+        # A row already at ``new`` is a stray of an item that left; the
+        # moved rows belong to the item now at that identity, so they win.
         self._conn.execute(
             "UPDATE OR REPLACE field_keep SET identity = ? "
             "WHERE media_type = ? AND identity = ?",

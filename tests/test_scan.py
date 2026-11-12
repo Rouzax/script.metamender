@@ -2114,7 +2114,7 @@ class TestUpdateNowKeepsCadence:
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")
-    def test_transient_records_nothing(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
+    def test_transient_records_only_the_unchecked_reason(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
         from resources.lib.utils import TransientProviderError
         mock_fetch.side_effect = TransientProviderError("http 503")
         tracker = _make_tracker(tmp_path)
@@ -6090,6 +6090,8 @@ class TestCertifications:
         tracker.close()
         assert _written(upd, "mpaa") is None
         assert (row["fetch_count"], row["last_reason"]) == (0, "unchecked")
+        # No clock started: the next scan asks again as if never asked.
+        assert (row["fetched_at"], row["next_retry"], row["settings_fp"]) == (None, None, None)
 
     def test_tvshow_gets_mpaa(self, tmp_path, kodi_stubs, monkeypatch):
         self._fake_sites(monkeypatch)
@@ -6617,18 +6619,29 @@ class TestFieldReasonsAndKeep:
         assert _written(upd, "plot") is None
         assert reason["last_reason"] == "locked"
 
-    def test_locked_field_beside_a_due_field_is_left_alone(self, tmp_path, kodi_stubs):
+    @pytest.mark.parametrize("path", ["update_now", "settings_changed"])
+    def test_locked_field_beside_a_due_field_is_left_alone(self, path, tmp_path, kodi_stubs):
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        for f in ("plot", "tagline"):
+            tracker.record_field_fetch(
+                "movie", _MOVIE_IDENTITY, f, next_retry="2099-01-01",
+                settings_fp="older settings",
+            )
         tracker.set_locked("movie", _MOVIE_IDENTITY, "plot", True)
         tracker.commit()
-        upd, _f = self._scan(tracker, _make_movie_item(plot="Mine"), ("plot", "tagline"),
-                             tmdb=_tmdb_movie_response(plot="Fresh plot"), reset=True)
+        before = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
+        upd, _f = self._scan(tracker, _young_movie(plot="Mine"),
+                             ("plot", "tagline"),
+                             tmdb=_tmdb_movie_response(plot="Fresh plot"),
+                             reset=path == "update_now")
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
         tracker.close()
 
         assert _written(upd, "plot") is None and _written(upd, "tagline") == "Wow"
-        assert row["last_reason"] == "locked" and row["fetch_count"] == 0
+        assert row["last_reason"] == "locked"
+        for col in ("fetch_count", "fetched_at", "next_retry", "settings_fp"):
+            assert row[col] == before[col], col
 
     def test_locked_after_reset_tracker_stays_locked(self, tmp_path, kodi_stubs):
         tracker = _make_tracker(tmp_path)

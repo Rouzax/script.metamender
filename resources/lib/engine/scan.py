@@ -557,6 +557,9 @@ def _field_reason(
         return REASON_NFO if nfo_managed else REASON_FILL_ONLY
     if f == "mpaa" and cert_kept:
         return REASON_NFO if nfo_managed else REASON_UNCHANGED
+    # build_ratings returns no map both when Kodi's slots already hold the
+    # answer and when there was nothing to write, so slots in Kodi are read
+    # as "unchanged" and none as "nothing".
     if f in _RATING_FIELDS and item.get("ratings"):
         return REASON_UNCHANGED
     return REASON_NOTHING
@@ -575,10 +578,10 @@ def _keep_originals(
     unless that value was metamender's own (its fingerprint is the one
     metamender last wrote: field_keep's written_fp, which survives Reset
     tracker, else field_status's written_value): then the kept original,
-    from before metamender's first write, stays. A scraper's or user's value since then replaces it. A field
-    filled from empty keeps "" or [] by the written value's type, so Restore
-    can clear it. Rating slots get no original: the scraper's slots stay
-    beside metamender's."""
+    from before metamender's first write, stays. A scraper's or user's
+    value since then replaces it. A field filled from empty keeps "" or []
+    by the written value's type, so Restore can clear it. Rating slots get
+    no original: the scraper's slots stay beside metamender's."""
     fields = sorted(written - _RATING_FIELDS)
     keep = tracker.get_keep(media_type, identity) if fields else {}
     for f in fields:
