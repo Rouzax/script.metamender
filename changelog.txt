@@ -1,7 +1,7 @@
 MetaMender Changelog
 ====================
 
-v1.0.1 (unreleased)
+v1.0.1 (2026-11-13)
 -------------------
 Bug Fixes:
   - Fixed: the Update now progress window's refresh thread slept in a
