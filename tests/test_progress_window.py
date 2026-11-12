@@ -56,3 +56,32 @@ def test_minutes_left_and_no_estimate_yet():
 
 def test_empty_scope_has_zero_percent():
     assert progress_properties(_progress(0, 0), "x", now=0.0)["MM.Percent"] == "0"
+
+
+
+def test_close_is_claimed_once_by_racing_closers():
+    """The follower thread and a button press closing together: one claim."""
+    import threading
+
+    for _ in range(50):
+        state = progress_window.CloseOnce()
+        state.opened()
+        barrier = threading.Barrier(8)
+        wins = []
+
+        def close(state=state, barrier=barrier, wins=wins):
+            barrier.wait()
+            wins.append(state.claim())
+
+        threads = [threading.Thread(target=close) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert wins.count(True) == 1
+        assert not state.is_open
+
+
+def test_a_window_never_opened_cannot_be_closed():
+    state = progress_window.CloseOnce()
+    assert state.claim() is False

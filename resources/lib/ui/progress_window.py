@@ -55,6 +55,36 @@ def progress_properties(progress: RefreshProgress, heading: str, now: float) -> 
     return props
 
 
+class CloseOnce:
+    """Whether the window is still open, claimed by exactly one closer.
+
+    The follower thread (the refresh ended) and a button press can close the
+    window at the same moment; Kodi treats a second close() as Back and steps
+    one screen back, so only the first claim may close it.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._open = False
+
+    def opened(self) -> None:
+        with self._lock:
+            self._open = True
+
+    @property
+    def is_open(self) -> bool:
+        with self._lock:
+            return self._open
+
+    def claim(self) -> bool:
+        """True for the one caller that closes the window."""
+        with self._lock:
+            if not self._open:
+                return False
+            self._open = False
+            return True
+
+
 class ProgressWindow(xbmcgui.WindowXMLDialog):
     """Shows a running refresh. ``result`` is "stop", "background", or
     "done" when the refresh finished while the window was open. The
@@ -64,10 +94,10 @@ class ProgressWindow(xbmcgui.WindowXMLDialog):
     heading: str
     done: threading.Event
     result: str = "background"
-    _open: bool = False
+    _state: CloseOnce
 
     def onInit(self) -> None:
-        self._open = True
+        self._state.opened()
         self._render()
         self.setFocusId(BACKGROUND)
         threading.Thread(target=self._follow, daemon=True).start()
@@ -85,7 +115,7 @@ class ProgressWindow(xbmcgui.WindowXMLDialog):
     def _follow(self) -> None:
         # Kodi lets a script thread update an open window; this one keeps the
         # numbers current and closes the window when the refresh ends.
-        while self._open:
+        while self._state.is_open:
             if self.done.is_set():
                 self._close("done")
                 return
@@ -93,8 +123,7 @@ class ProgressWindow(xbmcgui.WindowXMLDialog):
             time.sleep(_REFRESH_SECONDS)
 
     def _close(self, result: str) -> None:
-        if self._open:
-            self._open = False
+        if self._state.claim():
             self.result = result
             self.close()
 
@@ -113,6 +142,7 @@ def show_progress_window(progress: RefreshProgress, heading: str, done: threadin
     """Show the window until Stop, Background or the end of the refresh."""
     window = ProgressWindow(_XML, get_addon().getAddonInfo("path"), "Default", "1080i")
     window.progress, window.heading, window.done = progress, heading, done
+    window._state = CloseOnce()
     window.doModal()
     result = window.result
     del window

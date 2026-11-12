@@ -801,3 +801,11 @@ msgstr ""
 msgctxt "#32485"
 msgid "MetaMender: {}"
 msgstr ""
+
+msgctxt "#32486"
+msgid "Preparing IMDb ratings"
+msgstr ""
+
+msgctxt "#32487"
+msgid "Stopping: the episode in progress finishes first"
+msgstr ""

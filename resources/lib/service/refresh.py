@@ -32,6 +32,7 @@ from resources.lib.service.daemon import (
     _get_sources_config_path,
     _load_settings,
     _prepare_imdb_ratings,
+    tvdb_auth_failed,
 )
 from resources.lib.service.lock import (
     _home_window,
@@ -99,6 +100,10 @@ class RefreshProgress:
         self.updated = 0
         self.unchanged = 0
         self.unchecked = 0
+        # The show's own record (a show refresh only): a step of its own,
+        # not counted among the episodes.
+        self.show_updated = False
+        self.show_unchecked = False
         self.current = ""
         self._started = 0.0
         self._stop = False
@@ -111,12 +116,20 @@ class RefreshProgress:
         with self._lock:
             self.current = label
 
-    def item_finished(self, before: dict[str, Any], after: dict[str, Any]) -> None:
+    def item_finished(
+        self, before: dict[str, Any], after: dict[str, Any], counted: bool = True,
+    ) -> None:
         """Count one item by what changed in the scan stats while it ran: an
-        update wins over a field that could not be checked."""
+        update wins over a field that could not be checked. The show's own
+        record (``counted`` False) is remembered apart from the episodes."""
         def grew(key: str) -> bool:
             return int(after.get(key) or 0) > int(before.get(key) or 0)
         with self._lock:
+            if not counted:
+                self.show_updated = grew("updated")
+                self.show_unchecked = not self.show_updated and (
+                    grew("transient") or grew("unreachable"))
+                return
             self.done += 1
             if grew("updated"):
                 self.updated += 1
@@ -157,7 +170,9 @@ class RefreshProgress:
                 return lang(32484).format(title)
             if self.updated:
                 return lang(32482).format(title, self.updated, self.total)
-            if self.unchecked:
+            if self.show_updated:
+                return lang(32350).format(title)
+            if self.unchecked or self.show_unchecked:
                 return lang(32353).format(title)
             return lang(32351).format(title)
 
@@ -169,6 +184,8 @@ class RefreshOutcome:
     stopped: bool = False
     could_not_finish: bool = False
     aborted: bool = False
+    # TheTVDB rejected the add-on's credentials during the refresh.
+    tvdb_auth_failed: bool = False
 
 
 def _label(media_type: MediaType, item: dict[str, Any]) -> str:
@@ -191,12 +208,14 @@ def _pass(
 ) -> dict[str, Any]:
     """One run_scan pass over ``items``, counting each finished item into
     ``progress``: an item is counted when the next one starts or the pass
-    ends, by what it changed in the stats."""
+    ends, by what it changed in the stats. Only episodes count towards the
+    total; the show's own record is reported apart."""
     pending: list[dict[str, Any]] = []
+    counted = media_type is EPISODE
 
     def on_item(index: int, item: dict[str, Any], stats: dict[str, Any]) -> bool:
         if pending:
-            progress.item_finished(pending.pop(), stats)
+            progress.item_finished(pending.pop(), stats, counted)
         if progress.stop_requested:
             return False
         pending.append(dict(stats))
@@ -209,7 +228,7 @@ def _pass(
         reset=True, breaker=breaker, show_id_map=show_id_map, progress=on_item,
     )
     if pending:
-        progress.item_finished(pending.pop(), stats)
+        progress.item_finished(pending.pop(), stats, counted)
     return stats
 
 
@@ -220,15 +239,31 @@ def run_refresh(
     source_config: dict[str, Any],
     tracker: TrackerDB,
     monitor: Any,
+    prepare: Callable[[], bool] | None = None,
 ) -> RefreshOutcome:
     """Refresh a show (its record, then every episode) or a season (its
     episodes), as Update now does for one item. The episode pass builds its
-    show id map after the show pass, so it uses the ids that pass found."""
+    show id map after the show pass, so it uses the ids that pass found.
+
+    ``prepare`` readies the IMDb ratings store (its first use downloads the
+    dataset, which takes a while) and answers ``settings["imdb_ready"]``;
+    it runs after the episode count is known, so the window shows it, and a
+    Stop pressed meanwhile ends the refresh before the first item."""
     episodes = get_all_items(EPISODE, tvshowid=scope.tvshowid, season=scope.season)
     show = get_item_by_id(TVSHOW, scope.tvshowid) if scope.season is None else None
-    progress.begin(len(episodes) + (1 if show else 0), now=time.monotonic())
+    progress.begin(len(episodes), now=time.monotonic())
     log.info("Refresh starting", event="refresh.start", tvshowid=scope.tvshowid,
              season=scope.season, episodes=len(episodes))
+    if prepare is not None:
+        progress.item_started(lang(32486))  # Preparing IMDb ratings
+        settings["imdb_ready"] = prepare()
+        if progress.stop_requested:
+            log.info("Refresh stopped before the first item", event="refresh.finish",
+                     tvshowid=scope.tvshowid, season=scope.season, done=0,
+                     total=progress.total, stopped=True)
+            return RefreshOutcome(stopped=True)
+        # Progress counts from the first item, not from the download.
+        progress.begin(len(episodes), now=time.monotonic())
     breaker = CircuitBreaker()
     passes: list[dict[str, Any]] = []
     if show:
@@ -242,6 +277,7 @@ def run_refresh(
         stopped=any(s.get("stopped") for s in passes),
         could_not_finish=not shutdown and any(s.get("aborted") for s in passes),
         aborted=shutdown,
+        tvdb_auth_failed=tvdb_auth_failed(passes),
     )
     log.info("Refresh finished", event="refresh.finish", tvshowid=scope.tvshowid,
              season=scope.season, done=progress.done, total=progress.total,
@@ -255,6 +291,8 @@ def run_refresh(
 # the running refresh's show, and its request to show the window again.
 _RUNNING_SHOW = "metamender_refresh_show"
 _REOPEN = "metamender_refresh_reopen"
+# Set once Stop was pressed: the refresh is finishing its item in progress.
+_STOPPING = "metamender_refresh_stopping"
 # How often the background bar is updated and the reopen request checked.
 _POLL_SECONDS = 0.5
 
@@ -262,6 +300,10 @@ _POLL_SECONDS = 0.5
 def refresh_running_show() -> int | None:
     value = _home_window().getProperty(_RUNNING_SHOW)
     return int(value) if value.isdigit() else None
+
+
+def _refresh_stopping() -> bool:
+    return _home_window().getProperty(_STOPPING) == "1"
 
 
 def request_reopen() -> None:
@@ -278,10 +320,12 @@ def _take_reopen() -> bool:
 
 def bring_back_or_busy(clicked_show: int | None) -> str:
     """What a second Update now does while a scan holds the lock: "reopen"
-    when it points into the running refresh's show, else "busy"."""
+    when it points into the running refresh's show, "stopping" when that
+    refresh was stopped and only finishes its item in progress, else
+    "busy"."""
     running = refresh_running_show()
     if running is not None and clicked_show == running:
-        return "reopen"
+        return "stopping" if _refresh_stopping() else "reopen"
     return "busy"
 
 
@@ -322,14 +366,18 @@ def open_refresh(dbtype: str, dbid: int) -> None:
         notify(lang(32345))  # Item not found
         return
     if not acquire_scan_lock():
-        if bring_back_or_busy(scope.tvshowid) == "reopen":
+        answer = bring_back_or_busy(scope.tvshowid)
+        if answer == "reopen":
             request_reopen()
+        elif answer == "stopping":
+            notify(lang(32487))  # Stopping: the episode in progress finishes first
         else:
             notify(lang(32344))  # A scan is already running
         return
     home = _home_window()
     home.setProperty(_RUNNING_SHOW, str(scope.tvshowid))
     home.clearProperty(_REOPEN)
+    home.clearProperty(_STOPPING)
     StructuredLogger.start_scan_log()
     try:
         settings = _load_settings()
@@ -348,9 +396,9 @@ def open_refresh(dbtype: str, dbid: int) -> None:
             try:
                 tracker = TrackerDB(_get_db_path())
                 source_config = load_source_config(_get_sources_config_path())
-                settings["imdb_ready"] = _prepare_imdb_ratings(settings, monitor)
                 result["outcome"] = run_refresh(
-                    scope, progress, settings, source_config, tracker, monitor)
+                    scope, progress, settings, source_config, tracker, monitor,
+                    prepare=lambda: _prepare_imdb_ratings(settings, monitor))
             except ApiKeyError:
                 log.exception("Refresh stopped: invalid API key", event="refresh.apikey")
                 result["error"] = 32341
@@ -366,10 +414,15 @@ def open_refresh(dbtype: str, dbid: int) -> None:
         worker.start()
         heading = (lang(32470).format(scope.title) if scope.season is None
                    else lang(32471).format(scope.title, scope.season))
+        def window() -> str:
+            choice = show_progress_window(progress, heading, done)
+            if choice == "stop":
+                home.setProperty(_STOPPING, "1")
+            return choice
+
         try:
             drive_views(progress, done, lang(32485).format(scope.title),
-                        lambda: show_progress_window(progress, heading, done),
-                        xbmcgui.DialogProgressBG, _take_reopen)
+                        window, xbmcgui.DialogProgressBG, _take_reopen)
         except Exception:
             # Without its window the refresh cannot be followed or stopped,
             # so it stops; it must also end before the lock is released.
@@ -380,13 +433,18 @@ def open_refresh(dbtype: str, dbid: int) -> None:
                 progress.request_stop()
             worker.join()
         if "error" in result:
-            notify(lang(result["error"]))
+            # A failure while Kodi shuts down is the shutdown, not news.
+            if not monitor.abortRequested():
+                notify(lang(result["error"]))
         else:
             outcome: RefreshOutcome = result["outcome"]
             if not outcome.aborted:
                 notify(progress.toast(scope.title, outcome.stopped, outcome.could_not_finish))
+                if outcome.tvdb_auth_failed:
+                    notify(lang(32352))  # TheTVDB rejected the credentials
     finally:
         home.clearProperty(_RUNNING_SHOW)
         home.clearProperty(_REOPEN)
+        home.clearProperty(_STOPPING)
         StructuredLogger.stop_scan_log()
         release_scan_lock()

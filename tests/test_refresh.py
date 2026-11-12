@@ -52,6 +52,7 @@ def test_show_id_of():
 # --- progress model --------------------------------------------------------
 
 _LANG = {
+    32350: "Updated: {}",
     32351: "No changes: {}",
     32353: "Could not check now: {}",
     32474: "{} of {} episodes",
@@ -203,7 +204,9 @@ def test_show_refresh_runs_the_show_then_its_episodes():
     assert scan.calls[1][2] == {"after_passes": 1}  # map built after the show pass
     assert all(c[3] is True for c in scan.calls)
     assert listing.call_args.kwargs == {"tvshowid": 7, "season": None}
-    assert (progress.total, progress.done, progress.updated) == (3, 3, 3)
+    # The show's own record is a step of its own, not an episode.
+    assert (progress.total, progress.done, progress.updated) == (2, 2, 2)
+    assert progress.show_updated is True
     assert not (outcome.stopped or outcome.could_not_finish or outcome.aborted)
 
 
@@ -234,7 +237,7 @@ def test_stop_ends_the_refresh_between_items():
     outcome, progress, _ = _run(Scope(7, None, "Lost"), stopping,
                                 [_episode(1), _episode(2), _episode(3)], progress=progress)
     assert outcome.stopped is True
-    assert progress.done == 2  # the show record and episode 1
+    assert progress.done == 1  # episode 1; the show record is not counted
 
 
 def test_providers_down_means_could_not_finish():
@@ -252,7 +255,8 @@ def test_show_without_episodes_runs_one_pass():
     scan = FakeScan()
     _, progress, _ = _run(Scope(7, None, "Lost"), scan, [])
     assert [c[0] for c in scan.calls] == [TVSHOW]
-    assert (progress.total, progress.done) == (1, 1)
+    assert (progress.total, progress.done) == (0, 0)
+    assert progress.show_updated is True
 
 
 # --- views, signals and the whole flow ---------------------------------------
@@ -375,7 +379,7 @@ def flow(monkeypatch):
     monkeypatch.setattr(refresh.StructuredLogger, "start_scan_log", lambda: None)
     monkeypatch.setattr(refresh.StructuredLogger, "stop_scan_log", lambda: None)
 
-    def fake_run(scope, progress, settings, source_config, tracker, monitor):
+    def fake_run(scope, progress, settings, source_config, tracker, monitor, prepare=None):
         state["running_seen"] = home.getProperty(refresh._RUNNING_SHOW)
         if state["raise"]:
             raise state["raise"]
@@ -428,7 +432,7 @@ def test_flow_window_failure_stops_the_worker_before_releasing_the_lock(flow, mo
     home, notes, released, state = flow
     events = []
 
-    def slow_run(scope, progress, settings, source_config, tracker, monitor):
+    def slow_run(scope, progress, settings, source_config, tracker, monitor, prepare=None):
         for _ in range(200):
             if progress.stop_requested:
                 break
@@ -445,3 +449,112 @@ def test_flow_window_failure_stops_the_worker_before_releasing_the_lock(flow, mo
     refresh.open_refresh("tvshow", 7)
     assert events == [("worker done", True), ("released",)]
     assert home.props == {} and notes == ["#32347 {}"]
+
+
+
+# --- smaller cases -------------------------------------------------------------
+
+def test_toast_when_only_the_show_record_changed(strings):
+    p = RefreshProgress()
+    p.begin(2, now=0.0)
+    p.item_finished(_stats(), _stats(updated=1), counted=False)
+    p.item_finished(_stats(updated=1), _stats(updated=1))
+    p.item_finished(_stats(updated=1), _stats(updated=1))
+    assert (p.done, p.updated) == (2, 0)
+    assert p.toast("Lost", stopped=False, could_not_finish=False) == "Updated: Lost"
+
+
+def test_tvdb_rejection_is_part_of_the_outcome():
+    class AuthScan(FakeScan):
+        def __call__(self, *a, **kw):
+            stats = super().__call__(*a, **kw)
+            stats["tvdb_auth_failed"] = True
+            return stats
+    outcome, _, _ = _run(Scope(7, None, "Lost"), AuthScan(), [_episode(1)])
+    assert outcome.tvdb_auth_failed is True
+    outcome, _, _ = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)])
+    assert outcome.tvdb_auth_failed is False
+
+
+def test_preparation_shows_the_real_count_and_honours_stop():
+    progress = RefreshProgress()
+    seen = {}
+
+    def prepare():
+        seen["total"], seen["current"] = progress.total, progress.current
+        progress.request_stop()
+        return True
+
+    scan = FakeScan()
+    with patch.object(refresh, "run_scan", scan), \
+            patch.object(refresh, "get_all_items", return_value=[_episode(1), _episode(2)]), \
+            patch.object(refresh, "get_item_by_id", return_value={"tvshowid": 7, "title": "Lost"}), \
+            patch.object(refresh, "lang", lambda i: {32486: "Preparing IMDb ratings"}.get(i, "")):
+        settings = dict(_SETTINGS)
+        outcome = run_refresh(Scope(7, None, "Lost"), progress, settings, {"sources": []},
+                              FakeTracker(scan), Monitor(), prepare=prepare)
+    assert seen == {"total": 2, "current": "Preparing IMDb ratings"}
+    assert settings["imdb_ready"] is True
+    assert outcome.stopped is True and scan.calls == []
+
+
+def test_flow_reports_a_tvdb_rejection(flow):
+    home, notes, released, state = flow
+    state["outcome"] = refresh.RefreshOutcome(tvdb_auth_failed=True)
+    refresh.open_refresh("tvshow", 7)
+    assert notes == ["#32351 Lost", "#32352 {}"]
+
+
+def test_flow_failure_during_shutdown_shows_no_toast(flow, monkeypatch):
+    home, notes, released, state = flow
+    state["raise"] = RuntimeError("Kodi is going away")
+    monkeypatch.setattr(refresh.xbmc, "Monitor", lambda: Monitor(abort=True))
+    refresh.open_refresh("tvshow", 7)
+    assert notes == [] and released == [True]
+
+
+def test_flow_after_stop_says_it_is_stopping(flow, monkeypatch):
+    """Stop was pressed: a second Update now in the show says the refresh
+    is stopping instead of saying nothing."""
+    home, notes, released, state = flow
+    gate = threading.Event()
+
+    def slow_run(scope, progress, settings, source_config, tracker, monitor, prepare=None):
+        gate.wait(2)
+        return refresh.RefreshOutcome(stopped=True)
+
+    def stopping_window(progress, heading, done):
+        return "stop"
+
+    class Bar:
+        def create(self, *a): pass
+        def update(self, *a): pass
+        def close(self):
+            pass
+
+    monkeypatch.setattr(refresh, "run_refresh", slow_run)
+    monkeypatch.setattr(refresh, "show_progress_window", stopping_window)
+    monkeypatch.setattr(refresh.xbmcgui, "DialogProgressBG", Bar)
+    runner = threading.Thread(target=refresh.open_refresh, args=("tvshow", 7))
+    runner.start()
+    for _ in range(200):
+        if home.getProperty(refresh._STOPPING):
+            break
+        threading.Event().wait(0.01)
+    state["lock"] = False
+    second: list = []
+    monkeypatch.setattr(refresh, "notify", second.append)
+    refresh.open_refresh("episode", 101)
+    gate.set()
+    runner.join()
+    assert second[0] == "#32487 {}"
+    assert home.getProperty(refresh._REOPEN) == ""
+
+
+@pytest.mark.parametrize("running,clicked,stopping,expected", [
+    (7, 7, True, "stopping"), (7, 7, False, "reopen"), (7, 8, True, "busy"),
+])
+def test_bring_back_or_busy_while_stopping(running, clicked, stopping, expected):
+    with patch.object(refresh, "refresh_running_show", return_value=running), \
+            patch.object(refresh, "_refresh_stopping", return_value=stopping):
+        assert refresh.bring_back_or_busy(clicked) == expected
