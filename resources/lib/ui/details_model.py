@@ -86,6 +86,8 @@ _WHY = {
     REASON_LOCKED: 32545,
 }
 _NEVER_CHECKED = 32546
+_CHANGED_SINCE = 32576
+_UNLOCKED = 32577
 
 
 @dataclass
@@ -211,13 +213,28 @@ def _field_row(
     source = fs.get("source")
     age = _content_age_days(item, media_type, today)
     mine = _is_mine(field, item, fs, entry)
+    # MetaMender wrote this field once, but Kodi now holds something else.
+    changed = not rating and not mine and bool(
+        entry.get("written_fp") or fs.get("written_value")
+    )
     settled = _settled(field, fs, age, today, threshold)
     checked = count > 0 or reason in (REASON_NOTHING, REASON_UNCHECKED)
+    # An unlock leaves the "locked" reason until the next scan records one;
+    # the field is then grouped by its clock alone.
+    unlocked = reason == REASON_LOCKED and not locked
 
     if locked:
         group, hint, why = GROUP_LEFT, lang(32548), _WHY[REASON_LOCKED]
     elif not checked:
         group, hint, why = GROUP_WAITING, lang(32551), _NEVER_CHECKED
+    elif changed:
+        group, hint, why = GROUP_LEFT, lang(32575), _CHANGED_SINCE
+    elif unlocked:
+        if settled:
+            group, hint = GROUP_LEFT, lang(32547)
+        else:
+            group, hint = GROUP_WAITING, ""
+        why = _UNLOCKED
     elif reason == REASON_UPDATED or (
         source and source != _SCRAPER_SOURCE and mine
     ):
@@ -239,11 +256,11 @@ def _field_row(
         hint = "MetaMender"
 
     lines: list[tuple[str, str]] = [("", _value_text(field, item))]
-    # The provider is named only while Kodi holds its value; a value changed
-    # since (a hand edit, a rescrape) is told apart like the scraper's.
+    # The provider is named only while Kodi holds its value. A value changed
+    # since MetaMender's write has no known origin; its Why line says so.
     if mine:
         lines.append((lang(32527), _from_text(field, source, fs, language)))
-    elif checked and not is_empty(item.get(field)):
+    elif checked and not changed and not is_empty(item.get(field)):
         lines.append((lang(32527), lang(32534)))
     if group == GROUP_UPDATED and not rating:
         lines.append((lang(32528), _replaced_text(entry)))
@@ -345,7 +362,9 @@ def _ids_row(media_type: MediaType, item: dict[str, Any],
                     note.get("site_title") or "", long_date(note.get("site_aired")))))
                 lines.append((lang(32564), lang(32563).format(
                     note.get("kodi_title") or "", long_date(note.get("kodi_aired")))))
-                lines.append((lang(32531), lang(32565)))
+                # Only this site's candidate was rejected: on a partial match
+                # the other site's values were used.
+                lines.append((lang(32531), lang(32565).format(_SOURCE_NAMES[site])))
                 rejected = True
     if not lines:
         lines.append(("", lang(32558)))

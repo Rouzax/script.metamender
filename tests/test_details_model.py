@@ -173,13 +173,6 @@ def test_locked_field_offers_unlock_and_restorable_offers_restore():
     assert rows["ids"].action == ""
 
 
-def test_restore_not_offered_when_the_value_is_no_longer_metamenders():
-    rows = _by_key(_rows(item={"plot": "Edited by hand"}))
-    assert rows["plot"].action == ""
-    assert rows["plot"].group == "updated"  # the last scan did update it
-    assert dict(rows["plot"].lines)["From"] == "your scraper"
-
-
 def test_ratings_never_offer_restore():
     rows = _rows(
         keep={"rating": {"original": 6.0, "has_original": True, "locked": True,
@@ -200,7 +193,7 @@ def test_ids_lines_for_a_number_match():
         ("TMDB", "4104123, matched by season and episode number"),
         ("TheTVDB", "9297341, matched by season and episode number"),
         ("IMDb", "tt23020114, from TMDB's id list"),
-        ("", "Ids MetaMender found stay in its own records; Kodi's ids are not changed."),
+        ("", "Ids MetaMender found stay in its own records."),
     ]
 
 
@@ -225,7 +218,7 @@ def test_rejected_match_lines():
     assert ("TMDB", '"Traveling Salesmen", aired 11 Jan 2007') in ids.lines
     assert ("Yours", '"Back from Vacation", aired 4 Jan 2007') in ids.lines
     why = [text for label, text in ids.lines if label == "Why"]
-    assert why and "nothing was written" in why[0]
+    assert why == ["The title and date did not agree, so nothing from TMDB was used."]
     assert any("different episodes" in text for _, text in ids.lines)
 
 
@@ -269,3 +262,52 @@ def test_header_line():
     assert header_line({"last_seen": None}, fs_map, "") == (
         "No folder language · last looked at 12 Nov 2026"
     )
+
+
+def test_unlocked_field_is_not_reported_as_locked_or_empty():
+    """After an unlock the last reason stays "locked" until the next scan."""
+    unlocked = {"original": "Amsterdam Centraal", "has_original": True,
+                "locked": False, "written_fp": None}
+    rows = _by_key(_rows(
+        fs_map={"title": _fs("locked", count=2, next_retry="2026-11-19")},
+        keep={"title": unlocked},
+    ))
+    title = rows["title"]
+    assert title.group == "waiting"
+    assert title.hint == "19 Nov"
+    assert title.action == ""
+    why = dict(title.lines)["Why"]
+    assert "unlocked" in why
+    assert "nothing" not in why and "You locked" not in why
+    settled = _by_key(_rows(
+        fs_map={"title": _fs("locked", count=2)}, keep={"title": unlocked},
+    ))["title"]
+    assert settled.group == "left" and settled.hint == "settled"
+    assert "unlocked" in dict(settled.lines)["Why"]
+
+
+def test_partial_number_match_names_the_rejected_site():
+    note = [{"site": "tmdb", "site_title": "Traveling Salesmen", "site_aired": "2007-01-11",
+             "kodi_title": "Back from Vacation", "kodi_aired": "2007-01-04"}]
+    ids = _rows(item_row={"tmdb_id": None, "tvdb_id": "9297341", "imdb_id": None,
+                          "number_matched": 1, "match_note": json.dumps(note)})[0]
+    assert ("TheTVDB", "9297341, matched by season and episode number") in ids.lines
+    why = [text for label, text in ids.lines if label == "Why"]
+    assert why == ["The title and date did not agree, so nothing from TMDB was used."]
+
+
+def test_found_ids_line_does_not_promise_kodi_is_unchanged():
+    ids = _rows()[0]
+    assert ("", "Ids MetaMender found stay in its own records.") in ids.lines
+    assert not any("not changed" in text for _, text in ids.lines)
+
+
+def test_value_changed_since_metamenders_update_is_left_as_it_is():
+    rows = _by_key(_rows(item={"plot": "Edited by hand"}))
+    plot = rows["plot"]
+    assert plot.group == "left"
+    assert plot.hint == "changed"
+    lines = dict(plot.lines)
+    assert lines["Why"] == "Changed since MetaMender's update (your edit or a re-scrape)."
+    assert "From" not in lines and "Replaced" not in lines
+    assert plot.action == ""

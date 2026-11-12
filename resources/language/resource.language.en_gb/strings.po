@@ -1059,7 +1059,7 @@ msgid "{}, found by MetaMender"
 msgstr ""
 
 msgctxt "#32557"
-msgid "Ids MetaMender found stay in its own records; Kodi's ids are not changed."
+msgid "Ids MetaMender found stay in its own records."
 msgstr ""
 
 msgctxt "#32558"
@@ -1091,7 +1091,7 @@ msgid "Yours"
 msgstr ""
 
 msgctxt "#32565"
-msgid "The episode did not pass the title and date check, so nothing was written."
+msgid "The title and date did not agree, so nothing from {} was used."
 msgstr ""
 
 msgctxt "#32566"
@@ -1128,4 +1128,16 @@ msgstr ""
 
 msgctxt "#32574"
 msgid "Empty"
+msgstr ""
+
+msgctxt "#32575"
+msgid "changed"
+msgstr ""
+
+msgctxt "#32576"
+msgid "Changed since MetaMender's update (your edit or a re-scrape)."
+msgstr ""
+
+msgctxt "#32577"
+msgid "You unlocked this field, so MetaMender checks it again as usual."
 msgstr ""
