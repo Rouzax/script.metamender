@@ -176,7 +176,7 @@ def test_feature_rows_toggle():
     assert c.state.features["enable_details"] is (not before)
 
 
-@pytest.mark.parametrize("certifications,expected", [(True, 6), (False, 5)])
+@pytest.mark.parametrize("certifications,expected", [(True, 7), (False, 6)])
 def test_step_count_follows_certifications(certifications, expected):
     c, _ = _controller(key="abc", certifications=certifications)
     assert c.flow.total(c.state) == expected
@@ -221,43 +221,180 @@ def test_window_properties_always_carry_every_key():
     c, _ = _controller(key="abc")
     props = window_properties(c)
     assert set(props) == {"MM.Heading", "MM.Text", "MM.Next", "MM.Back", "MM.Cancel",
-                          "MM.StepIndex", "MM.StepTotal", "MM.Marker", *GOLDEN_HOUR}
-    assert props["MM.StepIndex"] == "1" and props["MM.StepTotal"] == "6"
-    assert props["MM.Back"] == "" and props["MM.Marker"] == ""
+                          "MM.StepIndex", "MM.StepTotal", *GOLDEN_HOUR}
+    assert props["MM.StepIndex"] == "1" and props["MM.StepTotal"] == "7"
+    assert props["MM.Back"] == "" and c.marker_kind() == ""
 
 
 def test_dot_count_follows_certifications_live():
     c, _ = _controller(key="abc")
     while c.step != "features":
         c.on_next()
-    assert window_properties(c)["MM.StepTotal"] == "6"
+    assert window_properties(c)["MM.StepTotal"] == "7"
     c.activate(FEATURES.index("enable_certifications"))
-    assert window_properties(c)["MM.StepTotal"] == "5"
+    assert window_properties(c)["MM.StepTotal"] == "6"
 
 
 def test_marker_kind_per_step():
     c, _ = _controller(key="abc")
     seen = {}
     while True:  # ui language nl-NL: Automatic resolves, so Next passes country
-        seen[c.step] = window_properties(c)["MM.Marker"]
+        seen[c.step] = c.marker_kind()
         if c.step == "summary":
             break
         c.on_next()
     assert seen == {"key": "", "language": "", "folders": "check", "features": "check",
-                    "country": "radio", "summary": ""}
+                    "ratings": "radio", "country": "radio", "summary": ""}
 
 
 def test_folders_dialog_has_no_dots():
     c, _ = _controller(mode="folders")
     props = window_properties(c)
     assert props["MM.StepIndex"] == "" and props["MM.StepTotal"] == ""
-    assert props["MM.Marker"] == "check"
+    assert c.marker_kind() == "check"
 
 
 def test_country_step_lists_australia(monkeypatch):
     from resources.lib.ui import setup_window
     monkeypatch.setattr(setup_window, "lang", lambda i: "#%d" % i)
     c, _ = _controller(key="abc")
-    labels = [row.label for row in c._rows_country()]
+    labels = [row.label for row in c._rows_country()[1:]]
     assert len(labels) == 11
     assert labels[5] == "#32264" and labels[10] == "#32628"
+
+
+def _walk_to(c, step):
+    while c.step != step:
+        assert c.on_next() is False
+
+
+@pytest.fixture
+def ids(monkeypatch):
+    from resources.lib.ui import setup_window
+    monkeypatch.setattr(setup_window, "lang", lambda i: "#%d" % i)
+
+
+def test_rating_step_rows(ids):
+    c, _ = _controller(key="abc")
+    _walk_to(c, "ratings")
+    rows = c.rows()
+    assert [r.label for r in rows] == ["#32632", "#32030", "#32031", "#32032", "#32033"]
+    assert [r.detail for r in rows] == ["#32633", "#32634", "#32635", "#32636", "#32637"]
+    assert [r.chosen for r in rows] == [True, False, False, False, False]
+    props = window_properties(c)
+    assert c.marker_kind() == "radio"
+    assert props["MM.Heading"] == "#32630" and props["MM.Text"] == "#32631"
+
+
+def test_rating_step_activate_sets_value(ids):
+    c, _ = _controller(key="abc")
+    _walk_to(c, "ratings")
+    c.activate(2)
+    assert c.state.rating_source == 1
+    assert [r.chosen for r in c.rows()] == [False, False, True, False, False]
+    c.activate(9)
+    assert c.state.rating_source == 1
+
+
+def test_text_step_rows_and_activate(ids):
+    c, _ = _controller(key="abc")
+    c.state.features["enable_plots"] = True
+    _walk_to(c, "text")
+    rows = c.rows()
+    assert [r.label for r in rows] == ["#32632", "#32392", "#32393"]
+    assert [r.detail for r in rows] == ["#32640", "#32641", "#32642"]
+    assert [r.chosen for r in rows] == [True, False, False]
+    assert window_properties(c)["MM.Heading"] == "#32638"
+    c.activate(2)
+    assert c.state.text_source_order == 1
+    assert [r.chosen for r in c.rows()] == [False, False, True]
+
+
+def test_finish_writes_source_choices():
+    c, rec = _controller(key="abc")
+    _walk_to(c, "ratings")
+    c.activate(1)
+    _to_summary(c)
+    assert c.on_next() is True
+    assert rec.written[-1]["rating_source"] == 0
+    assert rec.written[-1]["text_source_order"] == 2
+    assert rec.written[-1]["replace_incorrect"] is True
+
+
+_SKIN = "resources/skins/Default/1080i/script-metamender-setup.xml"
+
+
+def test_country_toggle_is_row_zero(ids):
+    c, _ = _controller(key="abc")
+    _walk_to(c, "country")
+    toggle = c.rows()[0]
+    assert toggle.marker == "check" and toggle.label == "#32643"
+    assert toggle.detail == "#32644" and toggle.chosen is True
+    c.activate(0)
+    assert c.state.replace_incorrect is False and c.state.country == 0
+    assert c.rows()[0].chosen is False
+    c.activate(0)
+    assert c.state.replace_incorrect is True
+
+
+def test_country_rows_after_toggle_map_to_options(ids):
+    from resources.lib.ui.setup_window import _COUNTRY_OPTIONS
+    c, _ = _controller(key="abc")
+    _walk_to(c, "country")
+    rows = c.rows()
+    assert len(rows) == 1 + 1 + _COUNTRY_OPTIONS
+    assert rows[2].label == "#32260"
+    assert all(r.marker == "" for r in rows[1:])
+    c.activate(2)
+    assert c.state.country == 1
+    assert [r.chosen for r in c.rows()[1:]].index(True) == 1
+    c.activate(1 + _COUNTRY_OPTIONS)
+    assert c.state.country == _COUNTRY_OPTIONS
+    c.activate(2 + _COUNTRY_OPTIONS)
+    assert c.state.country == _COUNTRY_OPTIONS
+
+
+def test_country_window_marker_stays_radio():
+    c, _ = _controller(key="abc")
+    _walk_to(c, "country")
+    assert c.marker_kind() == "radio"
+
+
+def test_skin_has_a_dot_slot_per_possible_step():
+    xml = open(_SKIN, encoding="utf-8").read()
+    for n in range(1, 9):
+        assert "Integer.IsGreaterOrEqual(Window.Property(MM.StepTotal),%d)" % n in xml
+        assert "Integer.IsGreaterOrEqual(Window.Property(MM.StepIndex),%d)" % n in xml
+    assert "Integer.IsGreaterOrEqual(Window.Property(MM.StepTotal),9)" not in xml
+
+
+def test_skin_markers_follow_row_property():
+    xml = open(_SKIN, encoding="utf-8").read()
+    assert "Window.Property(MM.Marker)" not in xml
+    for kind in ("check", "radio"):
+        assert xml.count("String.IsEqual(ListItem.Property(marker),%s)" % kind) == 4
+    assert xml.count("!String.IsEmpty(ListItem.Property(marker))") == 2
+
+
+def test_summary_shows_source_choices(ids):
+    c, _ = _controller(key="abc")
+    c.state.features["enable_plots"] = True
+    c.state.rating_source = 0
+    c.state.replace_incorrect = False
+    _to_summary(c)
+    rows = [(r.label, r.detail) for r in c.rows()]
+    labels = [label for label, _ in rows]
+    what = labels.index("#32462")
+    assert rows[what + 1] == ("#32648", "#32030")
+    assert rows[what + 2] == ("#32649", "#32632")
+    country = labels.index("#32450")
+    assert country == what + 3
+    assert rows[country + 1] == ("#32645", "#32647")
+
+
+def test_summary_hides_source_choices_when_unticked(ids):
+    c, _ = _controller(key="abc", certifications=False)
+    c.state.features["enable_ratings"] = False
+    _to_summary(c)
+    labels = {r.label for r in c.rows()}
+    assert not labels & {"#32648", "#32649", "#32645"}

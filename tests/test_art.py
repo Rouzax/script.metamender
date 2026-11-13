@@ -40,9 +40,10 @@ def test_xml_reads_only_properties_the_window_sets():
         text = handle.read()
     used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))
     produced = {"MM.Heading", "MM.Text", "MM.Next", "MM.Back", "MM.Cancel",
-                "MM.StepIndex", "MM.StepTotal", "MM.Marker", *GOLDEN_HOUR}
+                "MM.StepIndex", "MM.StepTotal", *GOLDEN_HOUR}
     assert used <= produced, used - produced
-    assert {"MM.Accent", "MM.StepTotal", "MM.Marker"} <= used
+    assert {"MM.Accent", "MM.StepTotal"} <= used
+    assert "ListItem.Property(marker)" in text
 
 
 def test_addon_xml_declares_the_icon():

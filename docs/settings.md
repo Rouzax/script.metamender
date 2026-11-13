@@ -21,9 +21,10 @@ bottom left of the settings screen) to **Advanced**; they are marked
 
 **Rating source**
 :   Which audience ratings MetaMender keeps up to date, and which one Kodi
-    shows. Default: **Follow the scraper**.
+    shows. Default: **Follow your scraper**. Setup asks this too, as
+    [Which rating to show](setup.md#5-which-rating-to-show).
 
-    - **Follow the scraper** keeps the rating your scraper chose to show for
+    - **Follow your scraper** keeps the rating your scraper chose to show for
       each item and refreshes it when it comes from TMDB or IMDb. MetaMender
       keeps both the TMDB and the IMDb rating up to date beside it, but the
       rating Kodi shows never changes source.
@@ -38,10 +39,11 @@ bottom left of the settings screen) to **Advanced**; they are marked
 **Text source order**
 :   Which site MetaMender asks first for TV show plots and episode titles and
     plots in the folder's language; when the first has nothing, it asks the
-    other. Default: **Follow the scraper**, which asks first the site whose
+    other. Default: **Follow your scraper**, which asks first the site whose
     scraper added the show (TheTVDB or TMDB), so the wording stays the same as
     the rest of the show; TMDB first when that cannot be told. Movies always
-    use TMDB.
+    use TMDB. Setup asks this too, as
+    [Where plots and titles come from](setup.md#6-where-plots-and-titles-come-from).
 
 **Fallback language order** *(Advanced)*
 :   The same choice for text in a folder's
@@ -153,7 +155,9 @@ setup.
 :   Replace a rating from another country's system, such as "Rated PG-13" in a
     Dutch library. Ratings already in your country's system are kept, and
     ratings from an NFO file are never replaced. Off: only empty ratings are
-    filled. Default: on.
+    filled. Default: on. Setup asks this too, as the
+    [Replace other countries' ratings](setup.md#7-certification-country) tick
+    box.
 
 ### Fallback
 

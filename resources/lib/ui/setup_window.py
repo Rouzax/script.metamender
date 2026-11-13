@@ -43,6 +43,8 @@ from resources.lib.providers.tmdb import (
 from resources.lib.ui.setup_model import (
     FEATURES,
     FOLDERS,
+    RATING_OPTIONS,
+    TEXT_OPTIONS,
     WIZARD,
     SetupFlow,
     SetupState,
@@ -95,7 +97,13 @@ _STEP_TEXT = {
     FOLDERS: (32425, 32426),
     "features": (32430, 32431),
     "country": (32450, 32451),
+    "ratings": (32630, 32631),
+    "text": (32638, 32639),
 }
+# (label, sub-line) per row, in RATING_OPTIONS and TEXT_OPTIONS order.
+_RATING_TEXT = ((32632, 32633), (32030, 32634), (32031, 32635), (32032, 32636),
+                (32033, 32637))
+_TEXT_ORDER_TEXT = ((32632, 32640), (32392, 32641), (32393, 32642))
 
 
 @dataclass(frozen=True)
@@ -104,6 +112,25 @@ class Row:
     detail: str = ""
     # True shows the tick; False shows none.
     chosen: bool = False
+    # The row's marker when it differs from the step's (marker_kind): the
+    # country step's replace toggle is a checkbox above radio rows.
+    marker: str = ""
+
+
+def _option_rows(
+    text: tuple[tuple[int, int], ...], values: tuple[int, ...], current: int,
+) -> list[Row]:
+    return [Row(lang(label), lang(detail), value == current)
+            for (label, detail), value in zip(text, values)]
+
+
+def _option_label(
+    text: tuple[tuple[int, int], ...], values: tuple[int, ...], current: int,
+) -> str:
+    """The label of the chosen option; the first (the default) when the
+    stored value is not one of the options."""
+    index = values.index(current) if current in values else 0
+    return lang(text[index][0])
 
 
 class Dialogs:
@@ -196,11 +223,12 @@ class SetupController:
         return lang(_STEP_TEXT[self.step][1])
 
     def marker_kind(self) -> str:
-        """The row marker the step shows: checkboxes where several rows can
-        be ticked, a radio marker where exactly one is chosen."""
+        """The marker the step's rows show unless a row sets its own:
+        checkboxes where several rows can be ticked, a radio marker where
+        exactly one is chosen."""
         if self.step in (FOLDERS, "features"):
             return "check"
-        if self.step == "country":
+        if self.step in ("ratings", "text", "country"):
             return "radio"
         return ""
 
@@ -243,8 +271,15 @@ class SetupController:
             for f in FEATURES
         ]
 
+    def _rows_ratings(self) -> list[Row]:
+        return _option_rows(_RATING_TEXT, RATING_OPTIONS, self.state.rating_source)
+
+    def _rows_text(self) -> list[Row]:
+        return _option_rows(_TEXT_ORDER_TEXT, TEXT_OPTIONS, self.state.text_source_order)
+
     def _rows_country(self) -> list[Row]:
-        return [
+        toggle = Row(lang(32643), lang(32644), self.state.replace_incorrect, "check")
+        return [toggle] + [
             Row(self._country_label(i), "", self.state.country == i)
             for i in range(_COUNTRY_OPTIONS + 1)
         ]
@@ -264,8 +299,16 @@ class SetupController:
                 rows.append(Row(lang(32461).format(source.get("label", "")), self._pair(*langs)))
         ticked = [lang(_FEATURE_TEXT[f][0]) for f in FEATURES if s.features.get(f)]
         rows.append(Row(lang(32462), ", ".join(ticked) or lang(32463)))
-        if s.features.get("enable_certifications"):
+        steps = self.flow.steps(s)
+        if "ratings" in steps:
+            rows.append(Row(lang(32648), _option_label(_RATING_TEXT, RATING_OPTIONS,
+                                                       s.rating_source)))
+        if "text" in steps:
+            rows.append(Row(lang(32649), _option_label(_TEXT_ORDER_TEXT, TEXT_OPTIONS,
+                                                       s.text_source_order)))
+        if "country" in steps:
             rows.append(Row(lang(32450), self._country_label(s.country)))
+            rows.append(Row(lang(32645), lang(32646 if s.replace_incorrect else 32647)))
         return rows
 
     # -- what the user does ------------------------------------------------
@@ -312,9 +355,20 @@ class SetupController:
             feature = FEATURES[index]
             self.state.features[feature] = not self.state.features.get(feature)
 
+    def _activate_ratings(self, index: int) -> None:
+        if 0 <= index < len(RATING_OPTIONS):
+            self.state.rating_source = RATING_OPTIONS[index]
+
+    def _activate_text(self, index: int) -> None:
+        if 0 <= index < len(TEXT_OPTIONS):
+            self.state.text_source_order = TEXT_OPTIONS[index]
+
     def _activate_country(self, index: int) -> None:
-        if 0 <= index <= _COUNTRY_OPTIONS:
-            self.state.country = index
+        # Row 0 is the replace toggle; row i + 1 is country option i.
+        if index == 0:
+            self.state.replace_incorrect = not self.state.replace_incorrect
+        elif 1 <= index <= _COUNTRY_OPTIONS + 1:
+            self.state.country = index - 1
 
     def on_next(self) -> bool:
         """Next, Finish or Save. True once everything is saved and the
@@ -416,7 +470,6 @@ def window_properties(c: SetupController) -> dict[str, str]:
         "MM.Cancel": lang(32408),
         "MM.StepIndex": str(c.flow.index(c.state)) if wizard else "",
         "MM.StepTotal": str(c.flow.total(c.state)) if wizard else "",
-        "MM.Marker": c.marker_kind(),
     }
     props.update(theme_colours())
     return props
@@ -479,6 +532,7 @@ class SetupWindow(xbmcgui.WindowXMLDialog):
             item = xbmcgui.ListItem(row.label, offscreen=True)
             item.setProperty("detail", row.detail)
             item.setProperty("chosen", "true" if row.chosen else "")
+            item.setProperty("marker", row.marker or c.marker_kind())
             items.append(item)
         control.addItems(items)
         if items:
@@ -498,6 +552,9 @@ def run_setup(mode: str, config_path: str) -> bool:
     settings: dict[str, Any] = {f: get_bool_setting(f) for f in FEATURES}
     settings["tmdb_api_key"] = get_setting("tmdb_api_key")
     settings["country"] = get_int_setting("country", 0)
+    settings["rating_source"] = get_int_setting("rating_source", RATING_OPTIONS[0])
+    settings["text_source_order"] = get_int_setting("text_source_order", TEXT_OPTIONS[0])
+    settings["replace_incorrect"] = get_bool_setting("replace_incorrect")
     first_run = not get_bool_setting("setup_complete")
     state = initial_state(settings, config, discovered, ui_language)
     controller = SetupController(

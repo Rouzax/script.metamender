@@ -23,6 +23,18 @@
     "kind": "setup",
     "step": "features"
   },
+  "setup-ratings": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "ratings"
+  },
+  "setup-text": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "text"
+  },
   "setup-country": {
     "group": "setup",
     "window": "script-metamender-setup.xml",

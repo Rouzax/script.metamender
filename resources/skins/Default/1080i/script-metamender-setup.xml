@@ -80,6 +80,18 @@
                     <control type="image"><width>16</width><height>16</height><texture colordiffuse="33FFFFFF">metamender/dot.png</texture></control>
                     <control type="image"><width>16</width><height>16</height><texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/dot.png</texture><visible>Integer.IsGreaterOrEqual(Window.Property(MM.StepIndex),6)</visible></control>
                 </control>
+                <control type="group">
+                    <width>16</width><height>16</height>
+                    <visible>Integer.IsGreaterOrEqual(Window.Property(MM.StepTotal),7)</visible>
+                    <control type="image"><width>16</width><height>16</height><texture colordiffuse="33FFFFFF">metamender/dot.png</texture></control>
+                    <control type="image"><width>16</width><height>16</height><texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/dot.png</texture><visible>Integer.IsGreaterOrEqual(Window.Property(MM.StepIndex),7)</visible></control>
+                </control>
+                <control type="group">
+                    <width>16</width><height>16</height>
+                    <visible>Integer.IsGreaterOrEqual(Window.Property(MM.StepTotal),8)</visible>
+                    <control type="image"><width>16</width><height>16</height><texture colordiffuse="33FFFFFF">metamender/dot.png</texture></control>
+                    <control type="image"><width>16</width><height>16</height><texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/dot.png</texture><visible>Integer.IsGreaterOrEqual(Window.Property(MM.StepIndex),8)</visible></control>
+                </control>
             </control>
 
             <!-- Heading: the heartbeat badge and the title, centred together. -->
@@ -133,26 +145,26 @@
                     <control type="image">
                         <left>26</left><top>22</top><width>30</width><height>30</height>
                         <texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/check_on.png</texture>
-                        <visible>String.IsEqual(Window.Property(MM.Marker),check) + String.IsEqual(ListItem.Property(chosen),true)</visible>
+                        <visible>String.IsEqual(ListItem.Property(marker),check) + String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                     <control type="image">
                         <left>26</left><top>22</top><width>30</width><height>30</height>
                         <texture colordiffuse="44FFFFFF">metamender/check_off.png</texture>
-                        <visible>String.IsEqual(Window.Property(MM.Marker),check) + !String.IsEqual(ListItem.Property(chosen),true)</visible>
+                        <visible>String.IsEqual(ListItem.Property(marker),check) + !String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                     <control type="image">
                         <left>26</left><top>22</top><width>30</width><height>30</height>
                         <texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/radio_on.png</texture>
-                        <visible>String.IsEqual(Window.Property(MM.Marker),radio) + String.IsEqual(ListItem.Property(chosen),true)</visible>
+                        <visible>String.IsEqual(ListItem.Property(marker),radio) + String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                     <control type="image">
                         <left>26</left><top>22</top><width>30</width><height>30</height>
                         <texture colordiffuse="44FFFFFF">metamender/radio_off.png</texture>
-                        <visible>String.IsEqual(Window.Property(MM.Marker),radio) + !String.IsEqual(ListItem.Property(chosen),true)</visible>
+                        <visible>String.IsEqual(ListItem.Property(marker),radio) + !String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                     <!-- The labels move right of the marker when the step shows one. -->
                     <control type="group">
-                        <animation effect="slide" start="48,0" end="48,0" time="0" condition="!String.IsEmpty(Window.Property(MM.Marker))">Conditional</animation>
+                        <animation effect="slide" start="48,0" end="48,0" time="0" condition="!String.IsEmpty(ListItem.Property(marker))">Conditional</animation>
                         <!-- A row without a detail line centres its label. -->
                         <control type="label">
                             <left>28</left><top>0</top><width>1040</width><height>74</height>
@@ -197,25 +209,25 @@
                     <control type="image">
                         <left>26</left><top>22</top><width>30</width><height>30</height>
                         <texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/check_on.png</texture>
-                        <visible>String.IsEqual(Window.Property(MM.Marker),check) + String.IsEqual(ListItem.Property(chosen),true)</visible>
+                        <visible>String.IsEqual(ListItem.Property(marker),check) + String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                     <control type="image">
                         <left>26</left><top>22</top><width>30</width><height>30</height>
                         <texture colordiffuse="66FFFFFF">metamender/check_off.png</texture>
-                        <visible>String.IsEqual(Window.Property(MM.Marker),check) + !String.IsEqual(ListItem.Property(chosen),true)</visible>
+                        <visible>String.IsEqual(ListItem.Property(marker),check) + !String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                     <control type="image">
                         <left>26</left><top>22</top><width>30</width><height>30</height>
                         <texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/radio_on.png</texture>
-                        <visible>String.IsEqual(Window.Property(MM.Marker),radio) + String.IsEqual(ListItem.Property(chosen),true)</visible>
+                        <visible>String.IsEqual(ListItem.Property(marker),radio) + String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                     <control type="image">
                         <left>26</left><top>22</top><width>30</width><height>30</height>
                         <texture colordiffuse="66FFFFFF">metamender/radio_off.png</texture>
-                        <visible>String.IsEqual(Window.Property(MM.Marker),radio) + !String.IsEqual(ListItem.Property(chosen),true)</visible>
+                        <visible>String.IsEqual(ListItem.Property(marker),radio) + !String.IsEqual(ListItem.Property(chosen),true)</visible>
                     </control>
                     <control type="group">
-                        <animation effect="slide" start="48,0" end="48,0" time="0" condition="!String.IsEmpty(Window.Property(MM.Marker))">Conditional</animation>
+                        <animation effect="slide" start="48,0" end="48,0" time="0" condition="!String.IsEmpty(ListItem.Property(marker))">Conditional</animation>
                         <control type="label">
                             <left>28</left><top>0</top><width>1040</width><height>74</height>
                             <aligny>center</aligny>

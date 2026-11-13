@@ -1,9 +1,9 @@
 # Setup
 
 MetaMender asks a few questions before it touches your library: your TMDB
-key, the languages your library is in, and what it may fill in. Everything
-else has sensible defaults that you can change later in the
-[settings](settings.md).
+key, the languages your library is in, what it may fill in, and for ratings,
+text and age ratings, where the values come from. Everything else has
+sensible defaults that you can change later in the [settings](settings.md).
 
 Setup opens when you choose **Open setup** in the "MetaMender needs you"
 window, or when you open MetaMender from **Add-ons > Program add-ons**.
@@ -11,7 +11,9 @@ Nothing is scanned or changed until you choose **Finish** on the last step;
 **Cancel** on any step leaves everything as it was.
 
 Use the remote as usual: up and down to move, OK to choose, and Back for the
-previous step. The dots in the top corner show how far along you are.
+previous step. The dots in the top corner show how far along you are. Steps 5
+to 7 only appear when you tick what they are about, so setup has between five
+and eight steps.
 
 ## 1. TMDB API key
 
@@ -100,7 +102,49 @@ scraper set, so it is off at first. Turn it on when a folder was scraped in
 one language and you want its titles in another. It only uses a title TMDB or
 TheTVDB really has in that language; there is no fallback language for titles.
 
-## 5. Certification country
+## 5. Which rating to show
+
+![The which rating to show step](screenshots/setup/setup-ratings.png)
+
+This step only appears when **Ratings** is ticked. Kodi shows one audience
+rating per movie or episode; MetaMender keeps it up to date while new votes
+come in. Here you choose which one Kodi shows.
+
+The first choice, **Follow your scraper**, is right for most libraries: Kodi
+keeps showing the rating your scraper picked (TMDB or IMDb), and MetaMender
+keeps both up to date. The others:
+
+| Choice | Kodi shows | Kept up to date |
+|---|---|---|
+| Follow your scraper | The rating your scraper chose | TMDB and IMDb |
+| Prefer TMDB | TMDB's, or IMDb's when TMDB has none | TMDB and IMDb |
+| Prefer IMDb | IMDb's, or TMDB's when IMDb has none | TMDB and IMDb |
+| TMDB only | TMDB's | TMDB only |
+| IMDb only | IMDb's | IMDb only |
+
+An item with an NFO file keeps the rating its NFO file chose, whatever you
+pick. You can change this later as
+[Rating source](settings.md#source-priority) in the settings.
+
+## 6. Where plots and titles come from
+
+![The where plots and titles come from step](screenshots/setup/setup-text.png)
+
+This step only appears when **Plots**, **Episode titles** or **Show and movie
+titles** is ticked. For TV shows and episodes MetaMender asks TMDB and
+TheTVDB, one after the other, until one has the text in the folder's
+language. Movies always come from TMDB.
+
+- **Follow your scraper** (the first choice) asks the site your scraper used
+  first, so the wording matches the rest of the show. When MetaMender cannot
+  tell which scraper added a show, it asks TMDB first.
+- **TMDB, then TheTVDB** and **TheTVDB, then TMDB** use that order for every
+  show.
+
+You can change this later as [Text source order](settings.md#source-priority)
+in the settings.
+
+## 7. Certification country
 
 ![The certification country step](screenshots/setup/setup-country.png)
 
@@ -125,11 +169,21 @@ Kingdom) gives the BBFC. When that country has no rating system in the list,
 Automatic says so and you choose a country yourself; setup does not continue
 until you do. See [Age ratings](age-ratings.md) for what MetaMender writes.
 
-## 6. Summary
+The tick box above the list, **Replace other countries' ratings**, decides what
+happens to a rating from another country's system, such as "Rated PG-13" in a
+Dutch library. Ticked (the first choice), MetaMender replaces it with your
+country's rating. Unticked, it only fills items that have no rating. Ratings
+already in your country's system are kept either way, and ratings from an NFO
+file are never replaced. In the settings this is
+[Replace incorrect certifications](settings.md#correction).
+
+## 8. Summary
 
 ![The summary step](screenshots/setup/setup-summary.png)
 
-The summary shows your choices. Choose **Back** to change one, or **Finish**.
+The summary shows your choices, including the rating Kodi shows, where plots
+and titles come from and whether other countries' ratings are replaced, when
+those steps were part of setup. Choose **Back** to change one, or **Finish**.
 
 **Finish** saves the settings and starts the first scan straight away. The
 first scan goes through your whole library, so on a large library it takes a

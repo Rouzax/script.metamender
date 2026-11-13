@@ -56,7 +56,7 @@ New here? [Install](install.md) MetaMender, then walk through the
 | Page | What it covers |
 |---|---|
 | [Install](install.md) | What you need, the Rouzax repository, a zip file |
-| [Setup](setup.md) | The TMDB key, languages, what to fill, the age rating country |
+| [Setup](setup.md) | The TMDB key, languages, what to fill, which rating to show, where plots and titles come from, the age rating country |
 | [Scans](scans.md) | When MetaMender scans, how often a field is checked, what you see |
 | [Update now](update-now.md) | Refreshing one item, show or season right away |
 | [The Details window](details.md) | Why a field looks the way it does; Restore original and the lock |

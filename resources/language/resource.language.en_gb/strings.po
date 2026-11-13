@@ -40,7 +40,7 @@ msgid "Rating source"
 msgstr ""
 
 msgctxt "#32027"
-msgid "Which audience ratings to keep up to date, and which one Kodi shows. \"Follow the scraper\" keeps the rating Kodi's scraper chose to show for each item and refreshes it when it comes from TMDB or IMDb; both are kept up to date, and the shown rating never changes source. The other options prefer or use only TMDB or IMDb, and make that rating the one Kodi shows (except for items with an NFO file, which decides that itself)."
+msgid "Which audience ratings to keep up to date, and which one Kodi shows. \"Follow your scraper\" keeps the rating Kodi's scraper chose to show for each item and refreshes it when it comes from TMDB or IMDb; both are kept up to date, and the shown rating never changes source. The other options prefer or use only TMDB or IMDb, and make that rating the one Kodi shows (except for items with an NFO file, which decides that itself)."
 msgstr ""
 
 msgctxt "#32030"
@@ -455,7 +455,7 @@ msgid "Text source order"
 msgstr ""
 
 msgctxt "#32391"
-msgid "Which provider to ask first for TV show plots and episode titles and plots in the source folder's language. If the first has nothing, the second is asked. \"Follow the scraper\" asks first the provider whose Kodi scraper added the show or episode, so its wording stays; TMDB first when that cannot be told. Movies always use TMDB."
+msgid "Which provider to ask first for TV show plots and episode titles and plots in the source folder's language. If the first has nothing, the second is asked. \"Follow your scraper\" asks first the provider whose Kodi scraper added the show or episode, so its wording stays; TMDB first when that cannot be told. Movies always use TMDB."
 msgstr ""
 
 msgctxt "#32392"
@@ -467,7 +467,7 @@ msgid "TheTVDB, then TMDB"
 msgstr ""
 
 msgctxt "#32398"
-msgid "Follow the scraper"
+msgid "Follow your scraper"
 msgstr ""
 
 msgctxt "#32399"
@@ -479,7 +479,7 @@ msgid "Replace show and movie titles with the title in the source folder's langu
 msgstr ""
 
 msgctxt "#32401"
-msgid "Follow the scraper"
+msgid "Follow your scraper"
 msgstr ""
 
 msgctxt "#32396"
@@ -1333,4 +1333,84 @@ msgstr ""
 
 msgctxt "#32629"
 msgid "{}, converted"
+msgstr ""
+
+msgctxt "#32630"
+msgid "Which rating to show"
+msgstr ""
+
+msgctxt "#32631"
+msgid "Kodi shows one audience rating per movie or episode. MetaMender keeps it up to date while new votes come in. Items with an NFO file keep the rating the NFO chose."
+msgstr ""
+
+msgctxt "#32632"
+msgid "Follow your scraper"
+msgstr ""
+
+msgctxt "#32633"
+msgid "Show the rating your scraper chose (TMDB or IMDb). Both are kept up to date."
+msgstr ""
+
+msgctxt "#32634"
+msgid "Show TMDB's rating, or IMDb's when TMDB has none. Both are kept up to date."
+msgstr ""
+
+msgctxt "#32635"
+msgid "Show IMDb's rating, or TMDB's when IMDb has none. Both are kept up to date."
+msgstr ""
+
+msgctxt "#32636"
+msgid "Show and update only TMDB's rating. IMDb is never asked."
+msgstr ""
+
+msgctxt "#32637"
+msgid "Show and update only IMDb's rating. TMDB is never asked for ratings."
+msgstr ""
+
+msgctxt "#32638"
+msgid "Where plots and titles come from"
+msgstr ""
+
+msgctxt "#32639"
+msgid "For TV shows and episodes, MetaMender asks TMDB and TheTVDB, one after the other, until one has the text in the folder's language. Movies always come from TMDB."
+msgstr ""
+
+msgctxt "#32640"
+msgid "Ask the site your scraper used first, so its wording stays. TMDB first when that cannot be told."
+msgstr ""
+
+msgctxt "#32641"
+msgid "TMDB first, for every show."
+msgstr ""
+
+msgctxt "#32642"
+msgid "TheTVDB first, for every show."
+msgstr ""
+
+msgctxt "#32643"
+msgid "Replace other countries' ratings"
+msgstr ""
+
+msgctxt "#32644"
+msgid "Swap a rating like \"Rated PG-13\" for this country's. Off: only fill empty ones."
+msgstr ""
+
+msgctxt "#32645"
+msgid "Other countries' ratings"
+msgstr ""
+
+msgctxt "#32646"
+msgid "Replace"
+msgstr ""
+
+msgctxt "#32647"
+msgid "Keep"
+msgstr ""
+
+msgctxt "#32648"
+msgid "Rating shown"
+msgstr ""
+
+msgctxt "#32649"
+msgid "Plots and titles"
 msgstr ""
