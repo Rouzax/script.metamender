@@ -1,24 +1,33 @@
 MetaMender Changelog
 ====================
 
-v1.1.0 (unreleased)
+v1.1.0 (2026-11-13)
 -------------------
 New Features:
   - Setup asks which rating Kodi shows (Rating source): a new step after
     What to fill, shown while ratings are ticked, with Follow your
-    scraper preselected and a line on what each choice does.
+    scraper preselected and one line on what each choice does.
   - Setup asks where TV show plots and titles come from first (Text
     source order): a new step shown while plots, episode titles or show
     and movie titles are ticked.
   - The certification country step has a Replace other countries'
-    ratings tick box (Replace incorrect certifications), and the summary
-    lists all three choices. They stay in the add-on settings too.
+    ratings tick box (Replace incorrect certifications) above the
+    country list, and the summary lists all three choices. All three
+    stay in the add-on settings too.
 
-Changes:
+Improvements:
   - The settings call the default rating and text choice "Follow your
-    scraper", like setup.
-  - Setup shows up to eight step dots; a list row can carry its own
-    marker, so the country step shows a checkbox above radio rows.
+    scraper", the same words as setup.
+
+Internal:
+  - SetupFlow adds the ratings and text steps from the ticked features;
+    settings_to_write always writes rating_source, text_source_order and
+    replace_incorrect (a skipped step rewrites the stored value).
+  - Setup list rows carry their own marker (ListItem property marker,
+    the step's kind unless a row sets its own), so one list mixes a
+    checkbox with radio rows; the unread MM.Marker window property and
+    the unused setup_model.summary_lines are removed. The step dots go
+    up to eight.
 
 v1.0.1 (2026-11-13)
 -------------------

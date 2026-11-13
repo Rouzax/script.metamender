@@ -36,7 +36,7 @@
         <website>https://rouzax.github.io/script.metamender/</website>
         <source>https://github.com/Rouzax/script.metamender</source>
         <forum>https://forum.kodi.tv/showthread.php?tid=389809</forum>
-        <news>v1.1.0 (unreleased)
+        <news>v1.1.0 (2026-11-13)
 - Setup now asks which rating Kodi shows: your scraper's, TMDB's or IMDb's
 - Setup now asks where TV show plots and titles come from first
 - Setup asks whether to replace other countries' age ratings
