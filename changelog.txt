@@ -1,6 +1,25 @@
 MetaMender Changelog
 ====================
 
+v1.1.0 (unreleased)
+-------------------
+New Features:
+  - Setup asks which rating Kodi shows (Rating source): a new step after
+    What to fill, shown while ratings are ticked, with Follow your
+    scraper preselected and a line on what each choice does.
+  - Setup asks where TV show plots and titles come from first (Text
+    source order): a new step shown while plots, episode titles or show
+    and movie titles are ticked.
+  - The certification country step has a Replace other countries'
+    ratings tick box (Replace incorrect certifications), and the summary
+    lists all three choices. They stay in the add-on settings too.
+
+Changes:
+  - The settings call the default rating and text choice "Follow your
+    scraper", like setup.
+  - Setup shows up to eight step dots; a list row can carry its own
+    marker, so the country step shows a checkbox above radio rows.
+
 v1.0.1 (2026-11-13)
 -------------------
 Bug Fixes:
