@@ -10,13 +10,15 @@ up to date as well. The fixer will not get new features.
    add-ons** and choose **Uninstall**. Do this before MetaMender's first
    scan; with both installed, two add-ons would write the same field.
 2. **Install MetaMender** and run its [setup](setup.md). Tick **Age
-   certifications** and choose the same country you used in the fixer.
-   MetaMender does not read the fixer's settings; it asks for what it needs.
+   certifications** and choose the same country you used in the fixer. If you
+   had turned off the fixer's replacing of other countries' ratings, untick
+   **Replace other countries' ratings** on that
+   [country step](setup.md#7-certification-country). MetaMender does not read
+   the fixer's settings; it asks for what it needs.
 3. If you changed the fixer's prefix, scanner or not-found settings, set the
    matching options in MetaMender's [settings](settings.md) on the
    **Certifications** tab: **Override certification prefix**, **Enable FSK /
-   BBFC / Medieraadet lookup**, **Replace incorrect certifications** and
-   **Apply certification when not found**.
+   BBFC / Medieraadet lookup** and **Apply certification when not found**.
 
 ## What happens to the ratings the fixer wrote
 
