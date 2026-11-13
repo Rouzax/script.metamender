@@ -124,6 +124,15 @@ def _option_rows(
             for (label, detail), value in zip(text, values)]
 
 
+def _option_label(
+    text: tuple[tuple[int, int], ...], values: tuple[int, ...], current: int,
+) -> str:
+    """The label of the chosen option; the first (the default) when the
+    stored value is not one of the options."""
+    index = values.index(current) if current in values else 0
+    return lang(text[index][0])
+
+
 class Dialogs:
     """The stock Kodi dialogs the steps open on top of the window."""
 
@@ -290,8 +299,16 @@ class SetupController:
                 rows.append(Row(lang(32461).format(source.get("label", "")), self._pair(*langs)))
         ticked = [lang(_FEATURE_TEXT[f][0]) for f in FEATURES if s.features.get(f)]
         rows.append(Row(lang(32462), ", ".join(ticked) or lang(32463)))
-        if s.features.get("enable_certifications"):
+        steps = self.flow.steps(s)
+        if "ratings" in steps:
+            rows.append(Row(lang(32648), _option_label(_RATING_TEXT, RATING_OPTIONS,
+                                                       s.rating_source)))
+        if "text" in steps:
+            rows.append(Row(lang(32649), _option_label(_TEXT_ORDER_TEXT, TEXT_OPTIONS,
+                                                       s.text_source_order)))
+        if "country" in steps:
             rows.append(Row(lang(32450), self._country_label(s.country)))
+            rows.append(Row(lang(32645), lang(32646 if s.replace_incorrect else 32647)))
         return rows
 
     # -- what the user does ------------------------------------------------

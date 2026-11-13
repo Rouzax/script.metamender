@@ -374,3 +374,27 @@ def test_skin_markers_follow_row_property():
     for kind in ("check", "radio"):
         assert xml.count("String.IsEqual(ListItem.Property(marker),%s)" % kind) == 4
     assert xml.count("!String.IsEmpty(ListItem.Property(marker))") == 2
+
+
+def test_summary_shows_source_choices(ids):
+    c, _ = _controller(key="abc")
+    c.state.features["enable_plots"] = True
+    c.state.rating_source = 0
+    c.state.replace_incorrect = False
+    _to_summary(c)
+    rows = [(r.label, r.detail) for r in c.rows()]
+    labels = [label for label, _ in rows]
+    what = labels.index("#32462")
+    assert rows[what + 1] == ("#32648", "#32030")
+    assert rows[what + 2] == ("#32649", "#32632")
+    country = labels.index("#32450")
+    assert country == what + 3
+    assert rows[country + 1] == ("#32645", "#32647")
+
+
+def test_summary_hides_source_choices_when_unticked(ids):
+    c, _ = _controller(key="abc", certifications=False)
+    c.state.features["enable_ratings"] = False
+    _to_summary(c)
+    labels = {r.label for r in c.rows()}
+    assert not labels & {"#32648", "#32649", "#32645"}

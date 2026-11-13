@@ -1406,3 +1406,11 @@ msgstr ""
 msgctxt "#32647"
 msgid "Keep"
 msgstr ""
+
+msgctxt "#32648"
+msgid "Rating shown"
+msgstr ""
+
+msgctxt "#32649"
+msgid "Plots and titles"
+msgstr ""
