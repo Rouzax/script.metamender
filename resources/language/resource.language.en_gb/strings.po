@@ -1386,3 +1386,23 @@ msgstr ""
 msgctxt "#32642"
 msgid "TheTVDB first, for every show."
 msgstr ""
+
+msgctxt "#32643"
+msgid "Replace other countries' ratings"
+msgstr ""
+
+msgctxt "#32644"
+msgid "Swap a rating like \"Rated PG-13\" for this country's. Off: only fill empty ones. NFO ratings are never replaced."
+msgstr ""
+
+msgctxt "#32645"
+msgid "Other countries' ratings"
+msgstr ""
+
+msgctxt "#32646"
+msgid "Replace"
+msgstr ""
+
+msgctxt "#32647"
+msgid "Keep"
+msgstr ""

@@ -112,6 +112,9 @@ class Row:
     detail: str = ""
     # True shows the tick; False shows none.
     chosen: bool = False
+    # The row's marker when it differs from the step's (marker_kind): the
+    # country step's replace toggle is a checkbox above radio rows.
+    marker: str = ""
 
 
 def _option_rows(
@@ -211,8 +214,9 @@ class SetupController:
         return lang(_STEP_TEXT[self.step][1])
 
     def marker_kind(self) -> str:
-        """The row marker the step shows: checkboxes where several rows can
-        be ticked, a radio marker where exactly one is chosen."""
+        """The marker the step's rows show unless a row sets its own:
+        checkboxes where several rows can be ticked, a radio marker where
+        exactly one is chosen."""
         if self.step in (FOLDERS, "features"):
             return "check"
         if self.step in ("ratings", "text", "country"):
@@ -265,7 +269,8 @@ class SetupController:
         return _option_rows(_TEXT_ORDER_TEXT, TEXT_OPTIONS, self.state.text_source_order)
 
     def _rows_country(self) -> list[Row]:
-        return [
+        toggle = Row(lang(32643), lang(32644), self.state.replace_incorrect, "check")
+        return [toggle] + [
             Row(self._country_label(i), "", self.state.country == i)
             for i in range(_COUNTRY_OPTIONS + 1)
         ]
@@ -342,8 +347,11 @@ class SetupController:
             self.state.text_source_order = TEXT_OPTIONS[index]
 
     def _activate_country(self, index: int) -> None:
-        if 0 <= index <= _COUNTRY_OPTIONS:
-            self.state.country = index
+        # Row 0 is the replace toggle; row i + 1 is country option i.
+        if index == 0:
+            self.state.replace_incorrect = not self.state.replace_incorrect
+        elif 1 <= index <= _COUNTRY_OPTIONS + 1:
+            self.state.country = index - 1
 
     def on_next(self) -> bool:
         """Next, Finish or Save. True once everything is saved and the
@@ -445,7 +453,6 @@ def window_properties(c: SetupController) -> dict[str, str]:
         "MM.Cancel": lang(32408),
         "MM.StepIndex": str(c.flow.index(c.state)) if wizard else "",
         "MM.StepTotal": str(c.flow.total(c.state)) if wizard else "",
-        "MM.Marker": c.marker_kind(),
     }
     props.update(theme_colours())
     return props
@@ -508,6 +515,7 @@ class SetupWindow(xbmcgui.WindowXMLDialog):
             item = xbmcgui.ListItem(row.label, offscreen=True)
             item.setProperty("detail", row.detail)
             item.setProperty("chosen", "true" if row.chosen else "")
+            item.setProperty("marker", row.marker or c.marker_kind())
             items.append(item)
         control.addItems(items)
         if items:
