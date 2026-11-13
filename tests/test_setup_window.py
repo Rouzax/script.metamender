@@ -176,7 +176,7 @@ def test_feature_rows_toggle():
     assert c.state.features["enable_details"] is (not before)
 
 
-@pytest.mark.parametrize("certifications,expected", [(True, 6), (False, 5)])
+@pytest.mark.parametrize("certifications,expected", [(True, 7), (False, 6)])
 def test_step_count_follows_certifications(certifications, expected):
     c, _ = _controller(key="abc", certifications=certifications)
     assert c.flow.total(c.state) == expected
@@ -222,7 +222,7 @@ def test_window_properties_always_carry_every_key():
     props = window_properties(c)
     assert set(props) == {"MM.Heading", "MM.Text", "MM.Next", "MM.Back", "MM.Cancel",
                           "MM.StepIndex", "MM.StepTotal", "MM.Marker", *GOLDEN_HOUR}
-    assert props["MM.StepIndex"] == "1" and props["MM.StepTotal"] == "6"
+    assert props["MM.StepIndex"] == "1" and props["MM.StepTotal"] == "7"
     assert props["MM.Back"] == "" and props["MM.Marker"] == ""
 
 
@@ -230,9 +230,9 @@ def test_dot_count_follows_certifications_live():
     c, _ = _controller(key="abc")
     while c.step != "features":
         c.on_next()
-    assert window_properties(c)["MM.StepTotal"] == "6"
+    assert window_properties(c)["MM.StepTotal"] == "7"
     c.activate(FEATURES.index("enable_certifications"))
-    assert window_properties(c)["MM.StepTotal"] == "5"
+    assert window_properties(c)["MM.StepTotal"] == "6"
 
 
 def test_marker_kind_per_step():
@@ -244,7 +244,7 @@ def test_marker_kind_per_step():
             break
         c.on_next()
     assert seen == {"key": "", "language": "", "folders": "check", "features": "check",
-                    "country": "radio", "summary": ""}
+                    "ratings": "radio", "country": "radio", "summary": ""}
 
 
 def test_folders_dialog_has_no_dots():
@@ -261,3 +261,61 @@ def test_country_step_lists_australia(monkeypatch):
     labels = [row.label for row in c._rows_country()]
     assert len(labels) == 11
     assert labels[5] == "#32264" and labels[10] == "#32628"
+
+
+def _walk_to(c, step):
+    while c.step != step:
+        assert c.on_next() is False
+
+
+@pytest.fixture
+def ids(monkeypatch):
+    from resources.lib.ui import setup_window
+    monkeypatch.setattr(setup_window, "lang", lambda i: "#%d" % i)
+
+
+def test_rating_step_rows(ids):
+    c, _ = _controller(key="abc")
+    _walk_to(c, "ratings")
+    rows = c.rows()
+    assert [r.label for r in rows] == ["#32632", "#32030", "#32031", "#32032", "#32033"]
+    assert [r.detail for r in rows] == ["#32633", "#32634", "#32635", "#32636", "#32637"]
+    assert [r.chosen for r in rows] == [True, False, False, False, False]
+    props = window_properties(c)
+    assert props["MM.Marker"] == "radio"
+    assert props["MM.Heading"] == "#32630" and props["MM.Text"] == "#32631"
+
+
+def test_rating_step_activate_sets_value(ids):
+    c, _ = _controller(key="abc")
+    _walk_to(c, "ratings")
+    c.activate(2)
+    assert c.state.rating_source == 1
+    assert [r.chosen for r in c.rows()] == [False, False, True, False, False]
+    c.activate(9)
+    assert c.state.rating_source == 1
+
+
+def test_text_step_rows_and_activate(ids):
+    c, _ = _controller(key="abc")
+    c.state.features["enable_plots"] = True
+    _walk_to(c, "text")
+    rows = c.rows()
+    assert [r.label for r in rows] == ["#32632", "#32392", "#32393"]
+    assert [r.detail for r in rows] == ["#32640", "#32641", "#32642"]
+    assert [r.chosen for r in rows] == [True, False, False]
+    assert window_properties(c)["MM.Heading"] == "#32638"
+    c.activate(2)
+    assert c.state.text_source_order == 1
+    assert [r.chosen for r in c.rows()] == [False, False, True]
+
+
+def test_finish_writes_source_choices():
+    c, rec = _controller(key="abc")
+    _walk_to(c, "ratings")
+    c.activate(1)
+    _to_summary(c)
+    assert c.on_next() is True
+    assert rec.written[-1]["rating_source"] == 0
+    assert rec.written[-1]["text_source_order"] == 2
+    assert rec.written[-1]["replace_incorrect"] is True

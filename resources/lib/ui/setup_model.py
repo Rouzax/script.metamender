@@ -3,9 +3,12 @@ before Next, and what Finish writes. The window in setup_window is a thin
 view over this module; nothing here talks to Kodi's GUI, so the whole flow
 is unit tested.
 
-The wizard asks only what metamender cannot guess (the TMDB key and the
-library's languages) plus the feature toggles; every other setting keeps
-its default and stays in Kodi's add-on settings.
+The wizard asks what metamender cannot guess (the TMDB key and the
+library's languages), the feature toggles, and the choices whose default
+shapes every item the first scan writes: which rating to show, where show
+and episode text comes from, and whether other countries' certifications
+are replaced. Those three stay in Kodi's add-on settings too; every other
+setting keeps its default and lives only there.
 """
 from __future__ import annotations
 
@@ -21,6 +24,16 @@ FEATURES: tuple[str, ...] = (
     "enable_ratings", "enable_plots", "enable_episode_titles",
     "enable_main_titles", "enable_certifications", "enable_credits",
     "enable_trailers", "enable_taglines", "enable_details",
+)
+
+# rating_source values in the order the ratings step lists them, the
+# default first (settings.xml).
+RATING_OPTIONS: tuple[int, ...] = (4, 0, 1, 2, 3)
+# text_source_order values in the order the text step lists them.
+TEXT_OPTIONS: tuple[int, ...] = (2, 0, 1)
+# The fields text_source_order decides (engine/text.py _text_chain).
+TEXT_FEATURES: tuple[str, ...] = (
+    "enable_plots", "enable_episode_titles", "enable_main_titles",
 )
 
 WIZARD = "wizard"
@@ -41,6 +54,9 @@ class SetupState:
     features: dict[str, bool] = field(default_factory=dict)
     # The `country` setting's index: 0 is Automatic.
     country: int = 0
+    rating_source: int = RATING_OPTIONS[0]
+    text_source_order: int = TEXT_OPTIONS[0]
+    replace_incorrect: bool = True
 
 
 def initial_state(
@@ -51,7 +67,9 @@ def initial_state(
 ) -> SetupState:
     """The state every step opens with: the current values, so a re-run
     starts where the last setup left off. ``settings`` holds tmdb_api_key,
-    the FEATURES and country as Kodi reports them (defaults when never set).
+    the FEATURES, country, rating_source, text_source_order and
+    replace_incorrect as Kodi reports them; a missing one takes its
+    settings.xml default.
     A stored key was accepted when it was saved."""
     key = str(settings.get("tmdb_api_key") or "").strip()
     return SetupState(
@@ -62,13 +80,17 @@ def initial_state(
         exceptions=folder_exceptions(config, discovered),
         features={f: bool(settings.get(f)) for f in FEATURES},
         country=int(settings.get("country") or 0),
+        rating_source=int(settings.get("rating_source", RATING_OPTIONS[0])),
+        text_source_order=int(settings.get("text_source_order", TEXT_OPTIONS[0])),
+        replace_incorrect=bool(settings.get("replace_incorrect", True)),
     )
 
 
 class SetupFlow:
-    """Step order and position. The country step exists only while
-    certifications are ticked, so the step list is recomputed from the
-    state on every move and the position is kept by step name."""
+    """Step order and position. The ratings, text and country steps exist
+    only while the features they configure are ticked, so the step list is
+    recomputed from the state on every move and the position is kept by
+    step name."""
 
     def __init__(self, mode: str, ui_language: str) -> None:
         self.mode = mode
@@ -79,6 +101,10 @@ class SetupFlow:
         if self.mode == FOLDERS:
             return [FOLDERS]
         steps = ["key", "language", FOLDERS, "features"]
+        if state.features.get("enable_ratings"):
+            steps.append("ratings")
+        if any(state.features.get(f) for f in TEXT_FEATURES):
+            steps.append("text")
         if state.features.get("enable_certifications"):
             steps.append("country")
         steps.append("summary")
@@ -117,8 +143,9 @@ class SetupFlow:
         steps = self.steps(state)
         if self.current in steps:
             return steps.index(self.current)
-        # The current step left the list (country after unticking
-        # certifications): it stood just before the summary.
+        # The current step left the list (its features were unticked): all
+        # conditional steps stand after features, so the summary is the
+        # nearest step that still exists.
         self.current = steps[-1]
         return len(steps) - 1
 
@@ -128,6 +155,11 @@ def settings_to_write(state: SetupState) -> dict[str, Any]:
     out: dict[str, Any] = {"tmdb_api_key": state.api_key.strip()}
     out.update({f: bool(state.features.get(f)) for f in FEATURES})
     out["country"] = state.country
+    # Written even when their step was skipped: the state holds the stored
+    # value then, so nothing changes.
+    out["rating_source"] = state.rating_source
+    out["text_source_order"] = state.text_source_order
+    out["replace_incorrect"] = state.replace_incorrect
     out["setup_complete"] = True
     return out
 
@@ -150,27 +182,3 @@ def mask_key(key: str) -> str:
     if len(key) <= 4:
         return "****"
     return "****" + key[-4:]
-
-
-def summary_lines(
-    state: SetupState, discovered: list[dict[str, str]],
-) -> list[tuple[str, str]]:
-    """The summary as (what, raw value) pairs, for the window to label and
-    translate: "key", "key_status", "language", "fallback", one
-    "folder:<label>" per exception ("language,fallback"), "features" (the
-    ticked toggles, comma-separated) and, with certifications on,
-    "country" (the setting index)."""
-    lines = [
-        ("key", mask_key(state.api_key)),
-        ("key_status", state.key_status),
-        ("language", state.default_language),
-        ("fallback", state.fallback_language),
-    ]
-    for source in discovered:
-        langs = state.exceptions.get(source.get("path", ""))
-        if langs is not None:
-            lines.append(("folder:" + source.get("label", ""), ",".join(langs)))
-    lines.append(("features", ",".join(f for f in FEATURES if state.features.get(f))))
-    if state.features.get("enable_certifications"):
-        lines.append(("country", str(state.country)))
-    return lines

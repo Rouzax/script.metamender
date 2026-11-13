@@ -1334,3 +1334,55 @@ msgstr ""
 msgctxt "#32629"
 msgid "{}, converted"
 msgstr ""
+
+msgctxt "#32630"
+msgid "Which rating to show"
+msgstr ""
+
+msgctxt "#32631"
+msgid "Kodi shows one audience rating per movie or episode. MetaMender keeps it up to date while new votes come in. Items with an NFO file keep the rating the NFO chose."
+msgstr ""
+
+msgctxt "#32632"
+msgid "Follow your scraper"
+msgstr ""
+
+msgctxt "#32633"
+msgid "Show the rating your scraper chose (TMDB or IMDb). Both are kept up to date."
+msgstr ""
+
+msgctxt "#32634"
+msgid "Show TMDB's rating, or IMDb's when TMDB has none. Both are kept up to date."
+msgstr ""
+
+msgctxt "#32635"
+msgid "Show IMDb's rating, or TMDB's when IMDb has none. Both are kept up to date."
+msgstr ""
+
+msgctxt "#32636"
+msgid "Show and update only TMDB's rating. IMDb is never asked."
+msgstr ""
+
+msgctxt "#32637"
+msgid "Show and update only IMDb's rating. TMDB is never asked for ratings."
+msgstr ""
+
+msgctxt "#32638"
+msgid "Where plots and titles come from"
+msgstr ""
+
+msgctxt "#32639"
+msgid "For TV shows and episodes, MetaMender asks TMDB and TheTVDB, one after the other, until one has the text in the folder's language. Movies always come from TMDB."
+msgstr ""
+
+msgctxt "#32640"
+msgid "Ask the site your scraper used first, so its wording stays. TMDB first when that cannot be told."
+msgstr ""
+
+msgctxt "#32641"
+msgid "TMDB first, for every show."
+msgstr ""
+
+msgctxt "#32642"
+msgid "TheTVDB first, for every show."
+msgstr ""

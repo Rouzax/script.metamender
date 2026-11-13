@@ -43,6 +43,8 @@ from resources.lib.providers.tmdb import (
 from resources.lib.ui.setup_model import (
     FEATURES,
     FOLDERS,
+    RATING_OPTIONS,
+    TEXT_OPTIONS,
     WIZARD,
     SetupFlow,
     SetupState,
@@ -95,7 +97,13 @@ _STEP_TEXT = {
     FOLDERS: (32425, 32426),
     "features": (32430, 32431),
     "country": (32450, 32451),
+    "ratings": (32630, 32631),
+    "text": (32638, 32639),
 }
+# (label, sub-line) per row, in RATING_OPTIONS and TEXT_OPTIONS order.
+_RATING_TEXT = ((32632, 32633), (32030, 32634), (32031, 32635), (32032, 32636),
+                (32033, 32637))
+_TEXT_ORDER_TEXT = ((32632, 32640), (32392, 32641), (32393, 32642))
 
 
 @dataclass(frozen=True)
@@ -104,6 +112,13 @@ class Row:
     detail: str = ""
     # True shows the tick; False shows none.
     chosen: bool = False
+
+
+def _option_rows(
+    text: tuple[tuple[int, int], ...], values: tuple[int, ...], current: int,
+) -> list[Row]:
+    return [Row(lang(label), lang(detail), value == current)
+            for (label, detail), value in zip(text, values)]
 
 
 class Dialogs:
@@ -200,7 +215,7 @@ class SetupController:
         be ticked, a radio marker where exactly one is chosen."""
         if self.step in (FOLDERS, "features"):
             return "check"
-        if self.step == "country":
+        if self.step in ("ratings", "text", "country"):
             return "radio"
         return ""
 
@@ -242,6 +257,12 @@ class SetupController:
                 bool(self.state.features.get(f)))
             for f in FEATURES
         ]
+
+    def _rows_ratings(self) -> list[Row]:
+        return _option_rows(_RATING_TEXT, RATING_OPTIONS, self.state.rating_source)
+
+    def _rows_text(self) -> list[Row]:
+        return _option_rows(_TEXT_ORDER_TEXT, TEXT_OPTIONS, self.state.text_source_order)
 
     def _rows_country(self) -> list[Row]:
         return [
@@ -311,6 +332,14 @@ class SetupController:
         if 0 <= index < len(FEATURES):
             feature = FEATURES[index]
             self.state.features[feature] = not self.state.features.get(feature)
+
+    def _activate_ratings(self, index: int) -> None:
+        if 0 <= index < len(RATING_OPTIONS):
+            self.state.rating_source = RATING_OPTIONS[index]
+
+    def _activate_text(self, index: int) -> None:
+        if 0 <= index < len(TEXT_OPTIONS):
+            self.state.text_source_order = TEXT_OPTIONS[index]
 
     def _activate_country(self, index: int) -> None:
         if 0 <= index <= _COUNTRY_OPTIONS:
@@ -498,6 +527,9 @@ def run_setup(mode: str, config_path: str) -> bool:
     settings: dict[str, Any] = {f: get_bool_setting(f) for f in FEATURES}
     settings["tmdb_api_key"] = get_setting("tmdb_api_key")
     settings["country"] = get_int_setting("country", 0)
+    settings["rating_source"] = get_int_setting("rating_source", RATING_OPTIONS[0])
+    settings["text_source_order"] = get_int_setting("text_source_order", TEXT_OPTIONS[0])
+    settings["replace_incorrect"] = get_bool_setting("replace_incorrect")
     first_run = not get_bool_setting("setup_complete")
     state = initial_state(settings, config, discovered, ui_language)
     controller = SetupController(
