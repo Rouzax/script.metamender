@@ -62,8 +62,8 @@ def test_no_screenshot_is_left_outside_a_group_folder():
 
 
 def test_setup_scenes_name_real_steps():
-    from resources.lib.ui.setup_model import SetupFlow, SetupState
-    state = SetupState(features={"enable_certifications": True})
+    from resources.lib.ui.setup_model import FEATURES, SetupFlow, SetupState
+    state = SetupState(features={f: True for f in FEATURES})
     steps = set(SetupFlow("wizard", "en-US").steps(state))
     for name, scene in SCENES.items():
         if scene["kind"] == "setup":
