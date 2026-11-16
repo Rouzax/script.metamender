@@ -38,6 +38,8 @@
         <forum>https://forum.kodi.tv/showthread.php?tid=389809</forum>
         <news>v1.1.1 (unreleased)
 - Fixed: on OSMC and other Kodi builds with Python 3.9 the add-on did not start
+- IMDb ratings no longer start a download in the middle of a scan that Kodi cannot stop (with the IMDb ratings module 1.1.0)
+- Trailer links only take valid YouTube video ids from TMDB
 
 v1.1.0 (2026-11-13)
 - Setup now asks which rating Kodi shows: your scraper's, TMDB's or IMDb's

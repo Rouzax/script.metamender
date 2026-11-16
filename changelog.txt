@@ -9,8 +9,21 @@ Bug Fixes:
     operand type(s) for |). The certification module's Candidate type
     alias used an X | None union, which Python evaluates at import and
     only supports from 3.10.
+  - With script.module.imdbratings 1.1.0, IMDb rating lookups no longer
+    check for a new IMDb dataset and can no longer start its download in
+    the middle of a scan, where Kodi could not stop it at shutdown or
+    when playback starts. The dataset is still refreshed once before each
+    scan, which Kodi can abort. Module 1.0.0 still works as before.
+  - Trailer links only take a TMDB video key that is a YouTube video id;
+    any other key is skipped, so it cannot add parameters to the
+    YouTube add-on call stored in the library.
 
 Internal:
+  - The IMDb adapter uses the module's lookup() and StoreError when the
+    installed module has them (1.1.0), which also tells a failing store
+    apart from "no rating" in one query instead of two; with 1.0.0 it
+    keeps get_rating() plus the dataset_date() check. addon.xml still
+    accepts 1.0.0 until 1.1.0 is in Kodi's official repository.
   - The Python floor is 3.9: ruff and pyright target it, and
     tests/test_python_floor.py parses every shipped file with the 3.9
     grammar and rejects X | Y type unions outside annotations.

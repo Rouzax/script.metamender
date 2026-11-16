@@ -98,9 +98,18 @@ sys.modules.setdefault("xbmcvfs", MagicMock())
 # script.module.imdbratings is a Kodi add-on module, not installed under pytest.
 # The default stand-in reads as a store that is not loaded and has no ratings,
 # so a test that needs a loaded store must say so (see imdbratings_stub).
+# StoreError must be a real exception class: a MagicMock attribute cannot be
+# named in an except clause.
+
+
+class _StoreError(Exception):
+    """Stand-in for imdbratings.StoreError."""
+
+
 _imdbratings = MagicMock()
+_imdbratings.StoreError = _StoreError
 _imdbratings.dataset_date.return_value = None
-_imdbratings.get_rating.return_value = None
+_imdbratings.lookup.side_effect = _StoreError("no dataset loaded yet")
 sys.modules.setdefault("imdbratings", _imdbratings)
 
 # Add project root to path so `resources.lib` resolves
@@ -136,6 +145,7 @@ def settings_mock() -> Generator[MagicMock, None, None]:
 def imdbratings_stub() -> Generator[MagicMock, None, None]:
     """A fresh stand-in for script.module.imdbratings, restored on teardown."""
     stub = MagicMock()
+    stub.StoreError = _StoreError
     previous = sys.modules.get("imdbratings")
     sys.modules["imdbratings"] = stub
     yield stub

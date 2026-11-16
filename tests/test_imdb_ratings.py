@@ -46,22 +46,58 @@ def test_prepare_refresh_error_falls_back_to_dataset(imdbratings_stub: MagicMock
 
 
 def test_lookup_absent_is_none(imdbratings_stub: MagicMock) -> None:
-    imdbratings_stub.get_rating.return_value = None
-    imdbratings_stub.dataset_date.return_value = "loaded"
+    imdbratings_stub.lookup.return_value = None
     assert imdb_ratings.lookup("tt0000001") is None
+    imdbratings_stub.lookup.assert_called_once_with("tt0000001")
+    imdbratings_stub.dataset_date.assert_not_called()
 
 
-def test_lookup_store_failing_is_transient(imdbratings_stub: MagicMock) -> None:
-    imdbratings_stub.get_rating.return_value = None
-    imdbratings_stub.dataset_date.return_value = None
+def test_lookup_store_error_is_transient(imdbratings_stub: MagicMock) -> None:
+    imdbratings_stub.lookup.side_effect = imdbratings_stub.StoreError("no dataset loaded yet")
     with pytest.raises(TransientProviderError):
         imdb_ratings.lookup("tt0000001")
 
 
 def test_lookup_returns_rating_and_votes(imdbratings_stub: MagicMock) -> None:
-    imdbratings_stub.get_rating.return_value = (7.4, 1234)
+    imdbratings_stub.lookup.return_value = (7.4, 1234)
     assert imdb_ratings.lookup("tt0000001") == (7.4, 1234)
     imdbratings_stub.dataset_date.assert_not_called()
+
+
+def test_lookup_never_updates_the_store(imdbratings_stub: MagicMock) -> None:
+    """A lookup inside a scan must not start a download it cannot abort."""
+    imdbratings_stub.lookup.return_value = (7.4, 1234)
+    imdb_ratings.lookup("tt0000001")
+    imdbratings_stub.get_rating.assert_not_called()
+    imdbratings_stub.refresh.assert_not_called()
+
+
+@pytest.fixture
+def module_1_0(imdbratings_stub: MagicMock) -> MagicMock:
+    """The module before 1.1.0: no lookup() and no StoreError."""
+    del imdbratings_stub.lookup
+    del imdbratings_stub.StoreError
+    return imdbratings_stub
+
+
+def test_module_1_0_returns_rating_and_votes(module_1_0: MagicMock) -> None:
+    module_1_0.get_rating.return_value = (7.4, 1234)
+    assert imdb_ratings.lookup("tt0000001") == (7.4, 1234)
+    module_1_0.dataset_date.assert_not_called()
+
+
+def test_module_1_0_absent_is_none_while_loaded(module_1_0: MagicMock) -> None:
+    module_1_0.get_rating.return_value = None
+    module_1_0.dataset_date.return_value = "loaded"
+    assert imdb_ratings.lookup("tt0000001") is None
+
+
+def test_module_1_0_unloaded_store_is_transient(module_1_0: MagicMock) -> None:
+    """1.0.0 answers None for a store error too; an unloaded store must not read as 'no rating'."""
+    module_1_0.get_rating.return_value = None
+    module_1_0.dataset_date.return_value = None
+    with pytest.raises(TransientProviderError):
+        imdb_ratings.lookup("tt0000001")
 
 
 def test_module_missing_is_unavailable_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
