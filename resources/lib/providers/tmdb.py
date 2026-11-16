@@ -16,6 +16,7 @@ Logging:
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from resources.lib.constants import TMDB_BASE_URL
@@ -28,6 +29,11 @@ from resources.lib.utils import (
 )
 
 log = get_logger('tmdb')
+
+# YouTube video ids are 11 characters from this alphabet. TMDB's video list is
+# community-edited, and the key ends up inside a plugin:// URL, so anything else
+# could add parameters to the YouTube add-on's call.
+_YOUTUBE_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 
 # TMDB uses different certification strings for SE TV vs SE movies.
 # Normalize TV format ("Fran 7 ar") to movie format ("7") so the rest
@@ -79,7 +85,7 @@ def _parse_trailer(videos: dict) -> str | None:
     for video in videos.get("results", []):
         if video.get("type") == "Trailer" and video.get("site") == "YouTube":
             key = video.get("key")
-            if key:
+            if isinstance(key, str) and _YOUTUBE_ID.fullmatch(key):
                 return "plugin://plugin.video.youtube/?action=play_video&videoid={}".format(key)
     return None
 
