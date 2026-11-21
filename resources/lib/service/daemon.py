@@ -23,6 +23,8 @@ Logging:
         - libraries.damaged (ERROR): sources.json is not a readable v2 file;
           the cycle is skipped and the file left alone
         - service.libraries_converted (INFO): 1.1 settings became libraries
+        - service.convert_skipped (INFO): the libraries were converted
+          meanwhile (by the setup dialog or the service), nothing written
         - service.convert_deferred (INFO): conversion waits, Kodi listed no
           libraries
         - service.convert_failed (ERROR): the converted libraries could not
@@ -54,6 +56,8 @@ from resources.lib.constants import (
 )
 from resources.lib.data.libraries import (
     FILE_DAMAGED,
+    FILE_LEGACY,
+    FILE_MISSING,
     FILE_OK,
     Library,
     LibraryConfig,
@@ -193,13 +197,43 @@ def _get_sources_config_path() -> str:
     return _addon_data_file(SOURCES_CONFIG_FILENAME)
 
 
+def _converted_meanwhile(path: str) -> tuple[bool, Optional[LibraryConfig]]:
+    """(True, its config) when path is no longer a file to convert: version
+    2 was written, or it is damaged (config None; never converted over).
+    (False, None) while it is still missing or in the 1.1 shape."""
+    config, state = read_libraries(path)
+    if state in (FILE_MISSING, FILE_LEGACY):
+        return False, None
+    log.info("Libraries already converted, conversion skipped",
+             event="service.convert_skipped", path=path, state=state)
+    return True, config
+
+
+def _remove_copy(copy_path: str) -> None:
+    try:
+        os.remove(copy_path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        log.exception("Settings copy could not be deleted", event="service.convert_failed",
+                      path=copy_path)
+
+
 def _convert_libraries(tracker: TrackerDB, path: str) -> Optional[LibraryConfig]:
     """Turn the 1.1 settings into libraries, once. The moved settings are
     read from a copy of their own, which is deleted only after the new
     file is written, so a failure at any step converts again next time.
-    None when the conversion waits or failed."""
+    None when the conversion waits or failed.
+
+    The service and the setup dialog (a separate process) can both
+    convert. The file is checked again before the copy is made and before
+    the result is saved: once the other one has written version 2, its
+    result stands, and the copy, which it may already have deleted, goes."""
     copy_path = _addon_data_file(COPY_FILE_NAME)
     user_path = _addon_data_file("settings.xml")
+    done, existing = _converted_meanwhile(path)
+    if done:
+        return existing
     legacy = ensure_copy(user_path, copy_path)
     if legacy is None:
         if any(key in read_user_settings(user_path) for key in MOVED_IDS):
@@ -219,17 +253,15 @@ def _convert_libraries(tracker: TrackerDB, path: str) -> Optional[LibraryConfig]
     # The 1.1 sources.json, or an empty one when there is none.
     old_sources = load_source_config(path)
     config = convert(legacy, old_sources, discovered, kodi_ui_language())
+    done, existing = _converted_meanwhile(path)
+    if done:
+        _remove_copy(copy_path)
+        return existing
     if not save_libraries(path, config):
         log.error("Converted libraries could not be saved", event="service.convert_failed",
                   path=path)
         return None
-    try:
-        os.remove(copy_path)
-    except FileNotFoundError:
-        pass
-    except OSError:
-        log.exception("Settings copy could not be deleted", event="service.convert_failed",
-                      path=copy_path)
+    _remove_copy(copy_path)
     log.info("Settings converted to libraries", event="service.libraries_converted",
              library_count=len(config.libraries),
              included=sum(1 for lib in config.libraries if lib.included))

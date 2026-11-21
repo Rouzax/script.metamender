@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -49,10 +49,12 @@ class FakeDialogs:
         self.defaults.append(default)
         return self.inputs.pop(0) if self.inputs else ""
 
-    def select(self, heading: str, options: list[str], preselect: int) -> int:
+    def select(self, heading: str, options: list[str], preselect: int,
+               details: list[str] | None = None) -> int:
         self.headings.append(heading)
         self.options = options
         self.preselect = preselect
+        self.details = details
         return self.selects.pop(0) if self.selects else -1
 
     def ok(self, heading: str, message: str) -> None:
@@ -365,8 +367,43 @@ def test_rating_picker_lists_the_five_options(ids):
     _open_page(c, included=True, toggles=frozenset({"ratings"}), rating_source=0)
     c.activate(_row(c, "rating"))
     assert dialogs.options == ["#32632", "#32030", "#32031", "#32032", "#32033"]
+    assert dialogs.details == ["#32633", "#32634", "#32635", "#32636", "#32637"]
     assert dialogs.preselect == 1
     assert c.rows()[_row(c, "rating")].detail == "#32030"
+
+
+def test_text_order_picker_lists_the_options_with_their_sub_lines(ids):
+    dialogs = FakeDialogs()
+    c, _ = _controller(key="abc", dialogs=dialogs)
+    _open_page(c, included=True, toggles=frozenset({"plots"}))
+    c.activate(_row(c, "text"))
+    assert dialogs.options == ["#32632", "#32392", "#32393"]
+    assert dialogs.details == ["#32640", "#32641", "#32642"]
+    c.activate(_row(c, "fallback_order"))
+    assert dialogs.details is None
+
+
+def test_select_with_sub_lines_uses_detail_items(monkeypatch):
+    calls = []
+
+    class Dialog:
+        def select(self, heading, items, preselect=-1, useDetails=False):
+            calls.append((items, preselect, useDetails))
+            return 1
+
+    class Item:
+        def __init__(self, label, label2="", offscreen=False):
+            self.label, self.label2 = label, label2
+
+    monkeypatch.setattr(setup_window.xbmcgui, "Dialog", Dialog)
+    monkeypatch.setattr(setup_window.xbmcgui, "ListItem", Item)
+    dialogs = setup_window.Dialogs()
+    assert dialogs.select("h", ["a", "b"], 0, ["sub a", "sub b"]) == 1
+    items, preselect, details = calls[0]
+    assert [(i.label, i.label2) for i in items] == [("a", "sub a"), ("b", "sub b")]
+    assert details is True and preselect == 0
+    dialogs.select("h", ["a"], 0)
+    assert calls[1] == (["a"], 0, False)
 
 
 def test_title_mode_rows(ids):
@@ -623,3 +660,102 @@ def test_skin_draws_header_rows_in_both_layouts():
             r"<control type=\"label\">(?:(?!</control>).)*MM\.Accent(?:(?!</control>).)*"
             r"String\.IsEqual\(ListItem\.Property\(marker\),header\)", body, re.DOTALL)
         assert accent_label, layout
+
+
+# -- run_setup ------------------------------------------------------------------
+
+
+class _RunDialogs:
+    instances: ClassVar[list[_RunDialogs]] = []
+    answer = True
+
+    def __init__(self):
+        self.oks: list[str] = []
+        self.questions: list[str] = []
+        _RunDialogs.instances.append(self)
+
+    def ok(self, heading, message):
+        self.oks.append(message)
+
+    def yesno(self, heading, message):
+        self.questions.append(message)
+        return _RunDialogs.answer
+
+
+class _Window:
+    opened: ClassVar[list[SetupController]] = []
+
+    def __init__(self, *args):
+        pass
+
+    def doModal(self):
+        _Window.opened.append(self.controller)
+
+
+@pytest.fixture
+def run(monkeypatch, ids):
+    """run_setup with Kodi replaced: ``run(found, complete)`` gives the
+    file state read_libraries reports and whether setup was finished."""
+    _RunDialogs.instances, _Window.opened = [], []
+    monkeypatch.setattr(setup_window, "Dialogs", _RunDialogs)
+    monkeypatch.setattr(setup_window, "SetupWindow", _Window)
+    monkeypatch.setattr(setup_window, "kodi_ui_language", lambda: "nl-NL")
+    monkeypatch.setattr(setup_window, "discover_folders", lambda: _DISCOVERED)
+    monkeypatch.setattr(setup_window, "get_setting", lambda key: "abc")
+
+    class _Addon:
+        def getAddonInfo(self, key):
+            return ""
+
+    monkeypatch.setattr(setup_window, "get_addon", _Addon)
+
+    def go(found, complete, mode="libraries", answer=True):
+        _RunDialogs.answer = answer
+        monkeypatch.setattr(setup_window, "read_libraries", lambda path: (None, found))
+        monkeypatch.setattr(setup_window, "get_bool_setting", lambda key: complete)
+        return setup_window.run_setup(mode, "/x/sources.json")
+
+    return go
+
+
+def _messages():
+    return [m for d in _RunDialogs.instances for m in d.oks + d.questions]
+
+
+@pytest.mark.parametrize("mode", ["wizard", "libraries"])
+def test_unconverted_1_1_file_after_setup_refuses_to_open(run, mode):
+    from resources.lib.data.libraries import FILE_LEGACY
+    assert run(FILE_LEGACY, True, mode) is False
+    assert _messages() == ["#32696"] and _Window.opened == []
+
+
+def test_first_run_with_a_1_1_file_starts_from_kodi_sources(run):
+    """Before the first setup the service never converts (and open_setup
+    has already converted a file with folder languages): the wizard opens
+    on the discovered libraries, none included."""
+    from resources.lib.data.libraries import FILE_LEGACY
+    assert run(FILE_LEGACY, False, "wizard") is False
+    assert _messages() == []
+    (c,) = _Window.opened
+    assert [lib.path for lib in c.state.libraries.libraries] == [_MP, "/c/"]
+    assert not any(lib.included for lib in c.state.libraries.libraries)
+
+
+@pytest.mark.parametrize("mode", ["wizard", "libraries"])
+def test_damaged_file_opens_only_when_the_user_starts_afresh(run, mode):
+    from resources.lib.data.libraries import FILE_DAMAGED
+    assert run(FILE_DAMAGED, True, mode, answer=False) is False
+    assert _messages() == ["#32702"] and _Window.opened == []
+
+    _RunDialogs.instances = []
+    run(FILE_DAMAGED, True, mode, answer=True)
+    assert _messages() == ["#32702"]
+    (c,) = _Window.opened
+    assert len(c.state.libraries.libraries) == 2
+
+
+def test_readable_file_opens_without_asking(run):
+    from resources.lib.data.libraries import FILE_MISSING, FILE_OK
+    run(FILE_OK, True)
+    run(FILE_MISSING, False, "wizard")
+    assert _messages() == [] and len(_Window.opened) == 2

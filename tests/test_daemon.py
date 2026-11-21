@@ -1093,3 +1093,38 @@ def test_unwritable_copy_leaves_the_old_settings_and_waits(kodi_stubs, addon_dat
         assert daemon._load_libraries(MagicMock()) is None
     conv.assert_not_called()
     assert "version" not in json.loads((addon_data / "sources.json").read_text())
+
+
+def test_conversion_does_not_overwrite_one_saved_meanwhile(kodi_stubs, addon_data):
+    """The other process writes version 2 while this one converts: its
+    result stands and the copy this one made is removed."""
+    _write_v11(addon_data)
+    path = _libraries_file(addon_data)
+    theirs = LibraryConfig([_lib("smb://nas/Movies/", label="Theirs")])
+    real_convert = daemon.convert
+
+    def convert_while_they_save(*args, **kwargs):
+        result = real_convert(*args, **kwargs)
+        save_libraries(path, theirs)
+        return result
+
+    with patch.object(daemon, "discover_folders", return_value=[MOVIES]), \
+            patch.object(daemon, "convert", side_effect=convert_while_they_save), \
+            patch.object(daemon, "save_libraries", wraps=daemon.save_libraries) as save:
+        tracker = MagicMock()
+        assert daemon._convert_libraries(tracker, path) == theirs
+    save.assert_not_called()
+    assert load_libraries(path) == theirs
+    assert not (addon_data / COPY_FILE_NAME).exists()
+    tracker.set_scan_state.assert_not_called()
+
+
+def test_conversion_skipped_when_already_converted(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    path = _libraries_file(addon_data)
+    theirs = LibraryConfig([_lib("smb://nas/Movies/", label="Theirs")])
+    save_libraries(path, theirs)
+    with patch.object(daemon, "convert") as conv:
+        assert daemon._convert_libraries(MagicMock(), path) == theirs
+    conv.assert_not_called()
+    assert not (addon_data / COPY_FILE_NAME).exists()

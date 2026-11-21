@@ -1622,3 +1622,7 @@ msgstr ""
 msgctxt "#32701"
 msgid "No prefix"
 msgstr ""
+
+msgctxt "#32702"
+msgid "MetaMender could not read the stored library settings. If you continue and save, every library starts afresh: not included, nothing switched on. Continue?"
+msgstr ""

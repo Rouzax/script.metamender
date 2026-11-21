@@ -21,6 +21,8 @@ Logging:
         - setup.save_fail (WARNING): sources.json could not be written
         - setup.not_converted (WARNING): the 1.1 settings are not converted
           yet, so the libraries cannot be edited
+        - setup.damaged_kept (INFO): the user kept an unreadable
+          sources.json rather than start the libraries afresh
 """
 from __future__ import annotations
 
@@ -32,6 +34,7 @@ import xbmcgui
 
 from resources.lib.constants import COUNTRY_CODES
 from resources.lib.data.libraries import (
+    FILE_DAMAGED,
     FILE_LEGACY,
     TITLE_LANGUAGE,
     TITLE_ORIGINAL,
@@ -162,12 +165,22 @@ class Dialogs:
     def input(self, heading: str, default: str) -> str:
         return xbmcgui.Dialog().input(heading, default)
 
-    def select(self, heading: str, options: list[str], preselect: int) -> int:
-        items: list[Any] = list(options)
-        return xbmcgui.Dialog().select(heading, items, preselect=preselect)
+    def select(self, heading: str, options: list[str], preselect: int,
+               details: Optional[list[str]] = None) -> int:
+        """The picked index, -1 when cancelled. ``details`` puts a sub-line
+        under each option."""
+        if details is None:
+            items: list[Any] = list(options)
+            return xbmcgui.Dialog().select(heading, items, preselect=preselect)
+        items = [xbmcgui.ListItem(label, detail, offscreen=True)
+                 for label, detail in zip(options, details)]
+        return xbmcgui.Dialog().select(heading, items, preselect=preselect, useDetails=True)
 
     def ok(self, heading: str, message: str) -> None:
         xbmcgui.Dialog().ok(heading, message)
+
+    def yesno(self, heading: str, message: str) -> bool:
+        return bool(xbmcgui.Dialog().yesno(heading, message))
 
 
 def language_name(code: str) -> str:
@@ -420,20 +433,22 @@ class SetupController:
         return None if picked is None else replace(lib, fallback_language=picked)
 
     def _pick_option(self, heading: int, labels: tuple[int, ...], values: tuple[Any, ...],
-                     current: Any) -> Any:
+                     current: Any, details: Optional[tuple[int, ...]] = None) -> Any:
         """The value picked from a list of options; None when cancelled."""
         preselect = values.index(current) if current in values else 0
-        picked = self._dialogs.select(lang(heading), [lang(i) for i in labels], preselect)
+        lines = None if details is None else [lang(i) for i in details]
+        picked = self._dialogs.select(lang(heading), [lang(i) for i in labels], preselect,
+                                      lines)
         return values[picked] if 0 <= picked < len(values) else None
 
     def _pick_rating(self, lib: Library) -> Optional[Library]:
         value = self._pick_option(32630, tuple(t[0] for t in _RATING_TEXT), RATING_OPTIONS,
-                                  lib.rating_source)
+                                  lib.rating_source, tuple(t[1] for t in _RATING_TEXT))
         return None if value is None else replace(lib, rating_source=value)
 
     def _pick_text(self, lib: Library) -> Optional[Library]:
         value = self._pick_option(32638, tuple(t[0] for t in _TEXT_ORDER_TEXT), TEXT_OPTIONS,
-                                  lib.text_source_order)
+                                  lib.text_source_order, tuple(t[1] for t in _TEXT_ORDER_TEXT))
         return None if value is None else replace(lib, text_source_order=value)
 
     def _pick_fallback_order(self, lib: Library) -> Optional[Library]:
@@ -719,16 +734,27 @@ def run_setup(mode: str, config_path: str,
               libraries_seen: Optional[Callable[[], None]] = None) -> bool:
     """Open the wizard (WIZARD) or the Libraries dialog (LIBRARIES). True
     when the user finished and everything was saved. ``libraries_seen``
-    runs once, when the library list first shows."""
+    runs once, when the library list first shows.
+
+    An unreadable sources.json opens only when the user agrees to start
+    the libraries afresh: Save then replaces it with every library not
+    included."""
     ui_language = kodi_ui_language()
     first_run = not get_bool_setting("setup_complete")
     stored, found = read_libraries(config_path)
     if found == FILE_LEGACY and not first_run:
         # Saving now would write libraries without the 1.1 settings the
         # service has yet to convert, and the conversion would never run.
+        # Before the first setup the service never converts, so the
+        # wizard starts from what Kodi lists (wizard.open_setup converts
+        # first when the file holds folder settings).
         log.warning("Libraries not converted yet, setup not opened",
                     event="setup.not_converted", mode=mode)
         Dialogs().ok(lang(32658), lang(32696))
+        return False
+    if found == FILE_DAMAGED and not Dialogs().yesno(lang(32658), lang(32702)):
+        log.info("Unreadable library settings kept, setup not opened",
+                 event="setup.damaged_kept", mode=mode)
         return False
     discovered = discover_folders()
     settings = {"tmdb_api_key": get_setting("tmdb_api_key")}
