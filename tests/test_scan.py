@@ -3267,14 +3267,25 @@ class TestIdResolutionOrder:
         self, mock_tvdb, mock_resolve, mock_ids, mock_tmdb, mock_update,
         tmp_path, kodi_stubs
     ):
+        from resources.lib.engine.scan import settings_fingerprint
+
         unknown = _nl_show()
         tmdb_only = _make_tvshow_item(title="Other", tmdb_id="12")
         tmdb_only["tvshowid"] = 11
         mock_tvdb.return_value = {"name": "", "overview": "", "names": _BUURMAN_NAMES}
         mock_ids.return_value = None
         tracker = _make_tracker(tmp_path)
+        # The plot of each show is final: old content sampled once under
+        # the current settings, so nothing is due.
+        fp = settings_fingerprint("plot", {}, "nl-NL", "tvshow", "en-US")
+        for show in (unknown, tmdb_only):
+            show["premiered"] = "2000-01-01"
+            identity = compute_identity(show, TVSHOW)
+            tracker.upsert_item("tvshow", identity, kodi_id=show["tvshowid"])
+            tracker.record_field_fetch("tvshow", identity, "plot", None, settings_fp=fp)
+        tracker.commit()
         run_scan(
-            TVSHOW, tracker, _libs(frozenset(), _nl_source_config()),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), _nl_source_config()),
             "k", _make_settings(), items=[unknown, tmdb_only],
         )
         unknown_row = _row(tracker, TVSHOW, unknown)
@@ -6797,13 +6808,65 @@ class TestPerLibrarySettings:
     @patch("resources.lib.providers.tmdb.fetch_movie")
     def test_library_with_no_fields_writes_nothing(self, mock_fetch, tmp_path, kodi_stubs):
         tracker = _make_tracker(tmp_path)
-        run_scan(MOVIE, tracker, one_library(set()),
-                 "key", _make_settings(),
-                 items=[_make_movie_item()])
+        stats = run_scan(MOVIE, tracker, one_library(set()),
+                         "key", _make_settings(),
+                         items=[_make_movie_item()])
         fs = tracker.get_field_status_map("movie", _MOVIE_IDENTITY)
         tracker.close()
         assert not mock_fetch.called
         assert fs == {}
+        assert stats["skipped"] == 1
+
+    @patch("resources.lib.providers.tvdb.fetch_series")
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    @patch("resources.lib.providers.tmdb.resolve_id", return_value=None)
+    def test_show_in_library_with_no_fields_is_not_looked_up(
+        self, mock_resolve, mock_tmdb, mock_tvdb, tmp_path, kodi_stubs
+    ):
+        # An unchecked show is normally resolved even with nothing due; with
+        # no fields switched on there is nothing to resolve it for.
+        item = _make_tvshow_item()
+        item["uniqueid"] = {"tvdb": "777"}
+        identity = compute_identity(item, TVSHOW)
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(TVSHOW, tracker, one_library(set()),
+                         "key", _make_settings(), items=[item])
+        row = tracker.get_item("tvshow", identity)
+        tracker.close()
+        assert not (mock_resolve.called or mock_tmdb.called or mock_tvdb.called)
+        assert row is None
+        assert stats["skipped"] == 1
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tvdb.fetch_series")
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_library_whose_providers_are_down_does_not_stop_the_pass(
+        self, mock_tmdb, mock_tvdb, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.data.libraries import Library, LibraryConfig
+        a = Library(path="smb://server/a/", label="A", included=True, language="en-US",
+                    fallback_language="", toggles=frozenset({"ratings"}))
+        b = Library(path="smb://server/b/", label="B", included=True, language="en-US",
+                    fallback_language="", toggles=frozenset({"plots"}), text_source_order=1)
+        show_a = _make_tvshow_item(tmdb_id="1")
+        show_a.update(tvshowid=1, file="smb://server/a/show/")
+        show_a["uniqueid"] = {"tmdb": "1", "tvdb": "11"}
+        show_b = _make_tvshow_item(tmdb_id="2")
+        show_b.update(tvshowid=2, file="smb://server/b/show/")
+        show_b["uniqueid"] = {"tmdb": "2", "tvdb": "22"}
+        mock_tvdb.return_value = {"name": "Show", "overview": "TVDB plot", "names": []}
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(TVSHOW, tracker, LibraryConfig([a, b]), "k", _make_settings(),
+                         items=[show_a, show_b], breaker=_tripped_breaker("tmdb"))
+        fs_a = _fs(tracker, TVSHOW, show_a)
+        fs_b = _fs(tracker, TVSHOW, show_b)
+        tracker.close()
+        assert stats["aborted"] is False
+        assert stats["transient"] == 1 and stats["processed"] == 1
+        assert fs_a == {}
+        assert _count(fs_b, "plot") == 1
+        assert mock_update.call_args.args[0] == 2
+        assert _written(mock_update, "plot") == "TVDB plot"
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")

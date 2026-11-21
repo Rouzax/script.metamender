@@ -22,7 +22,10 @@ Logging:
           reason="excluded": its library or subfolder is not included;
           reason="unmatched": its file is in no library; reason="unreachable":
           the media could not be found, so NFO state is unknown;
-          scan.complete counts these)
+          reason="no_fields": its library has nothing switched on;
+          reason="providers_down": every provider its library needs is
+          disabled while another library's still work; scan.complete
+          counts these)
         - scan.fields_disabled (DEBUG): An item's fields its library no
           longer manages lost their fingerprint, so they are checked again
           once switched back on
@@ -875,6 +878,28 @@ def _library_pass(
                         _needed_providers(base.media_type, candidates))
 
 
+def _pass_providers(
+    media_type: MediaType,
+    libraries: LibraryConfig,
+    items: list[dict[str, Any]],
+    reset: bool,
+) -> list[str]:
+    """Providers the pass as a whole can still make progress with: those of
+    every library with items to scan (included, or any on Update now) and
+    fields switched on. The pass stops only when all of them are down."""
+    seen: dict[str, Library] = {}
+    for item in items:
+        lib = libraries.for_file(item.get("file", ""))
+        if lib is not None and (lib.included or reset):
+            seen[lib.path] = lib
+    needed: set[str] = set()
+    for lib in seen.values():
+        candidates = candidate_fields(media_type, lib.fields())
+        if candidates or "mpaa" in lib.fields():
+            needed.update(_needed_providers(media_type, candidates))
+    return sorted(needed)
+
+
 def run_scan(
     media_type: MediaType,
     tracker: TrackerDB,
@@ -999,6 +1024,7 @@ def run_scan(
 
     if items is None:
         items = _new_items(tracker, media_type) if new_only else kodi.get_all_items(media_type)
+    needed = _pass_providers(media_type, libraries, items, reset)
 
     for index, item in enumerate(items):
         # Check for Kodi shutdown
@@ -1078,6 +1104,20 @@ def run_scan(
             passes[lib.path] = lib_pass
         ctx = lib_pass.ctx
         candidates = lib_pass.candidates
+
+        # A library with nothing switched on has nothing to fetch: no id
+        # lookups, no new tracker row. A row it already has stays present
+        # for orphan pruning and drops the fingerprints of its old fields.
+        if not candidates:
+            log.debug(
+                "Skipping item in a library with no fields",
+                event="scan.skip", reason="no_fields", title=title,
+                media_type=media_type.name, library=lib.path,
+            )
+            tracker.forget_item_fields(media_type.name, identity, candidates)
+            tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
+            stats["skipped"] += 1
+            continue
 
         # A folder without a configured language is fetched in Kodi's
         # interface language, a guess, so its text only fills empty fields.
@@ -1264,14 +1304,25 @@ def run_scan(
             refills=sorted(refills),
         )
 
-        if breaker.all_disabled(lib_pass.needed):
+        if breaker.all_disabled(needed):
             log.warning(
                 "Every provider the enabled fields need is disabled, stopping scan",
-                event="scan.breaker", scope="all", providers=lib_pass.needed,
+                event="scan.breaker", scope="all", providers=needed,
                 media_type=media_type.name, processed=stats["processed"],
             )
             stats["aborted"] = True
             break
+        # Another library of the pass can still make progress: this item
+        # waits for its providers, with nothing recorded.
+        if breaker.all_disabled(lib_pass.needed):
+            log.debug(
+                "Providers of this library are disabled, skipping item",
+                event="scan.skip", reason="providers_down", title=title,
+                media_type=media_type.name, providers=lib_pass.needed,
+            )
+            stats["skipped"] += 1
+            stats["transient"] += 1
+            continue
 
         tmdb_lang = tmdb_language(language)
         fetch_primary = (
