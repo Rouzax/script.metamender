@@ -28,7 +28,7 @@ def test_site_toggles_stay_general_and_stand_alone():
     settings = _settings()
     assert GENERAL_SITE_TOGGLES <= set(settings)
     for site in GENERAL_SITE_TOGGLES:
-        # They once depended on a per-library toggle that no longer exists.
+        # The site toggles apply to every library, so they must not depend on a per-library toggle.
         assert settings[site].find("dependencies") is None
 
 
