@@ -26,11 +26,15 @@ Logging:
         - service.convert_skipped (INFO): the libraries were converted
           meanwhile (by the setup dialog or the service), nothing written
         - service.convert_deferred (INFO): conversion waits, Kodi listed no
-          libraries
+          libraries or the query failed
         - service.convert_failed (ERROR): the converted libraries could not
           be saved; the old settings stay and conversion retries
         - service.libraries_added (INFO): libraries new to Kodi were added,
           not included
+        - service.libraries_restarted (INFO): sources.json was gone after
+          the conversion; the libraries were found again, none included
+        - service.copy_failed (ERROR): the settings copy at service start
+          raised; the conversion makes it later
 """
 from __future__ import annotations
 
@@ -106,6 +110,7 @@ from resources.lib.utils import (
     is_setup_complete,
     lang,
     notify,
+    set_bool_setting,
 )
 
 log = get_logger('service')
@@ -197,6 +202,26 @@ def _get_sources_config_path() -> str:
     return _addon_data_file(SOURCES_CONFIG_FILENAME)
 
 
+# Hidden setting: the 1.1 settings were converted to libraries once.
+_CONVERTED = "libraries_converted"
+
+
+def _libraries_converted() -> bool:
+    return get_bool_setting(_CONVERTED)
+
+
+def _copy_old_settings() -> None:
+    """Save the 1.1 values aside at service start. Kodi drops ids that
+    left resources/settings.xml whenever it next saves the add-on settings
+    (the user opening them is enough), which can come long before the
+    first scan cycle gets past playback, the key and the scan lock."""
+    if not is_setup_complete() or _libraries_converted():
+        return
+    if read_libraries(_get_sources_config_path())[1] not in (FILE_MISSING, FILE_LEGACY):
+        return
+    ensure_copy(_addon_data_file("settings.xml"), _addon_data_file(COPY_FILE_NAME))
+
+
 def _converted_meanwhile(path: str) -> tuple[bool, Optional[LibraryConfig]]:
     """(True, its config) when path is no longer a file to convert: version
     2 was written, or it is damaged (config None; never converted over).
@@ -235,18 +260,18 @@ def _convert_libraries(tracker: TrackerDB, path: str) -> Optional[LibraryConfig]
     if done:
         return existing
     legacy = ensure_copy(user_path, copy_path)
-    if legacy is None:
-        if any(key in read_user_settings(user_path) for key in MOVED_IDS):
-            # The copy could not be written (ensure_copy logged it); the
-            # old settings stay where they are until it can.
-            return None
-        # Nothing was ever changed from the 1.1 defaults.
-        legacy = {}
+    if legacy is None and any(key in read_user_settings(user_path) for key in MOVED_IDS):
+        # The copy could not be written (ensure_copy logged it); the old
+        # settings stay where they are until it can.
+        return None
+    # legacy None from here: Kodi writes every setting, defaults included,
+    # so no moved id at all means Kodi dropped them before a copy was
+    # made. convert then switches nothing on rather than guess.
     discovered = discover_folders()
     if not discovered:
-        # Kodi listed no sources and the library no folders (an error, or
-        # a shared database without sources): converting now would lose
-        # every per-folder language.
+        # A failed query, or Kodi listed no sources and the library no
+        # folders (a shared database without sources): converting now
+        # would lose every per-folder language.
         log.info("Library conversion deferred, no libraries found",
                  event="service.convert_deferred")
         return None
@@ -262,10 +287,48 @@ def _convert_libraries(tracker: TrackerDB, path: str) -> Optional[LibraryConfig]
                   path=path)
         return None
     _remove_copy(copy_path)
+    set_bool_setting(_CONVERTED, True)
     log.info("Settings converted to libraries", event="service.libraries_converted",
              library_count=len(config.libraries),
-             included=sum(1 for lib in config.libraries if lib.included))
-    attention.update(tracker, lambda a: a.raise_problem(attention.LIBRARIES_CONVERTED))
+             included=sum(1 for lib in config.libraries if lib.included),
+             settings_read=legacy is not None)
+    detail = "" if legacy is not None else attention.SETTINGS_UNREAD
+    attention.update(
+        tracker, lambda a: a.raise_problem(attention.LIBRARIES_CONVERTED, detail))
+    return config
+
+
+def _add_found(tracker: TrackerDB, libraries: LibraryConfig,
+               found: list[dict[str, str]], ui_language: str) -> bool:
+    """Add the found sources libraries does not hold yet, not included,
+    save and raise the new-library notice. False when they could not be
+    saved."""
+    added = add_new_libraries(libraries, found, ui_language)
+    if not added:
+        return True
+    if not save_libraries(_get_sources_config_path(), libraries):
+        return False
+    labels = [lib.label or display_path(lib.path) for lib in added]
+    log.info("New libraries added, not included", event="service.libraries_added",
+             libraries=labels)
+    attention.update(tracker, lambda a: a.add_new_libraries(labels))
+    return True
+
+
+def _start_afresh(tracker: TrackerDB) -> Optional[LibraryConfig]:
+    """sources.json is gone after the libraries were converted: the 1.1
+    values still in Kodi's file are stale, so every library is found again
+    as on a fresh install, not included. None when discovery failed."""
+    found = discover_folders()
+    if found is None:
+        log.info("Libraries not found again yet, discovery failed",
+                 event="service.convert_deferred")
+        return None
+    config = LibraryConfig()
+    if not _add_found(tracker, config, found, kodi_ui_language()):
+        return None
+    log.info("Libraries found again, none included", event="service.libraries_restarted",
+             library_count=len(config.libraries))
     return config
 
 
@@ -287,21 +350,21 @@ def _load_libraries(tracker: TrackerDB) -> Optional[LibraryConfig]:
         return None
     if not is_setup_complete():
         return None
+    if state == FILE_MISSING and _libraries_converted():
+        return _start_afresh(tracker)
     return _convert_libraries(tracker, path)
 
 
 def _sync_libraries(tracker: TrackerDB, ui_language: str) -> Optional[LibraryConfig]:
     """_load_libraries, plus the sources Kodi gained since: added as not
-    included, with the new-library notice."""
+    included, with the new-library notice. A failed discovery adds
+    nothing (what it found is incomplete)."""
     libraries = _load_libraries(tracker)
     if libraries is None:
         return None
-    added = add_new_libraries(libraries, discover_folders(), ui_language)
-    if added and save_libraries(_get_sources_config_path(), libraries):
-        labels = [lib.label or display_path(lib.path) for lib in added]
-        log.info("New libraries added, not included", event="service.libraries_added",
-                 libraries=labels)
-        attention.update(tracker, lambda a: a.add_new_libraries(labels))
+    found = discover_folders()
+    if found is not None:
+        _add_found(tracker, libraries, found, ui_language)
     return libraries
 
 
@@ -613,6 +676,11 @@ def run() -> None:
 
     try:
         tracker = TrackerDB(_get_db_path())
+        try:
+            _copy_old_settings()
+        except Exception:
+            log.exception("Saving the old settings aside failed",
+                          event="service.copy_failed")
 
         while not monitor.abortRequested():
             try:

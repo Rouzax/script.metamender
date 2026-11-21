@@ -35,6 +35,9 @@ FOLDER_OFFLINE = "folder_offline"
 NEW_LIBRARY = "new_library"
 UNMATCHED = "unmatched"
 LIBRARIES_CONVERTED = "libraries_converted"
+# LIBRARIES_CONVERTED's detail when the 1.1 values could not be read, so
+# the libraries were converted with nothing switched on.
+SETTINGS_UNREAD = "unread"
 WINDOW_KINDS: tuple[str, ...] = (
     SETUP, NO_KEY, KEY_REJECTED, SCANS_FAILING, FOLDER_OFFLINE,
     NEW_LIBRARY, UNMATCHED, LIBRARIES_CONVERTED,

@@ -756,7 +756,9 @@ def run_setup(mode: str, config_path: str,
         log.info("Unreadable library settings kept, setup not opened",
                  event="setup.damaged_kept", mode=mode)
         return False
-    discovered = discover_folders()
+    # A failed discovery shows the stored libraries only; saving then
+    # keeps them, and the service adds the others once Kodi lists them.
+    discovered = discover_folders() or []
     settings = {"tmdb_api_key": get_setting("tmdb_api_key")}
     state = initial_state(settings, stored, discovered, ui_language)
     controller = SetupController(

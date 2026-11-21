@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from resources.lib.constants import COUNTRY_CODES
 from resources.lib.data import upgrade
@@ -183,3 +184,87 @@ def test_ensure_copy_write_failure_is_none(tmp_path):
 def test_moved_ids_have_defaults():
     covered = set(upgrade._DEFAULT_TEXT) | set(upgrade._DEFAULT_INT) | set(upgrade._DEFAULT_BOOL)
     assert covered == set(MOVED_IDS)
+
+
+def test_convert_without_old_settings_switches_nothing_on():
+    """Kodi dropped the moved ids and no copy was made: the 1.1 values are
+    unknown, so nothing is switched on, but the folders 1.1 scanned stay
+    included with their 1.1 languages."""
+    old = {"default_language": "en-GB", "fallback_language": "fr-FR", "sources": [
+        {"path": "/m/movies/", "language": "de-DE"},
+        {"path": "/m/shows/", "enabled": False},
+        {"path": "/m/movies/kids/", "language": "nl-NL"}]}
+    config = convert(None, old, DISCOVERED, "nl-NL")
+    movies, shows = config.libraries
+    assert movies.included and not shows.included
+    for lib in (movies, shows):
+        assert lib.toggles == frozenset() and lib.cert_country == 0
+    assert (movies.language, movies.fallback_language) == ("de-DE", "fr-FR")
+    assert (shows.language, shows.fallback_language) == ("en-GB", "fr-FR")
+    assert config.folder_settings("/m/movies/kids/a.mkv", movies)[1] == "nl-NL"
+
+
+def test_convert_parent_entry_gives_its_language():
+    # 1.1 matched a file to the longest configured prefix, so an entry for
+    # a folder above a library set that library's language.
+    old = {"sources": [{"path": "/m/", "language": "de-DE", "fallback_language": "en-US"}]}
+    with patch.object(upgrade, "log") as log:
+        movies, shows = convert(_legacy(), old, DISCOVERED, "nl-NL").libraries
+    for lib in (movies, shows):
+        assert lib.included
+        assert (lib.language, lib.fallback_language) == ("de-DE", "en-US")
+    log.warning.assert_not_called()
+
+
+def test_convert_parent_entry_disabled_leaves_library_out():
+    old = {"sources": [{"path": "/m", "enabled": False}]}
+    movies, shows = convert(_legacy(), old, DISCOVERED, "nl-NL").libraries
+    assert not movies.included and not shows.included
+    assert "plots" in movies.toggles
+
+
+def test_convert_exact_entry_wins_over_parent_and_longest_parent_wins():
+    old = {"sources": [{"path": "/", "language": "fr-FR"},
+                       {"path": "/m/", "language": "de-DE"},
+                       {"path": "/m/shows/", "language": "en-GB"}]}
+    movies, shows = convert(_legacy(), old, DISCOVERED, "nl-NL").libraries
+    assert movies.language == "de-DE"
+    assert shows.language == "en-GB"
+
+
+def test_convert_parent_entry_reaches_each_multipath_folder():
+    old = {"sources": [{"path": "/a/", "enabled": False},
+                       {"path": "/b/two/", "language": "de-DE"}]}
+    config = convert(_legacy(), old, MULTI, "nl-NL")
+    lib = config.libraries[0]
+    assert lib.included
+    assert config.folder_settings("/a/one/x.mkv", lib)[0] is False
+    assert config.folder_settings("/b/two/x.mkv", lib)[:2] == (True, "de-DE")
+
+
+def test_ensure_copy_is_written_atomically(tmp_path):
+    user, copy = tmp_path / "settings.xml", tmp_path / "c.json"
+    _write_settings(user, rating_source="2")
+    with patch.object(upgrade.os, "replace", side_effect=OSError("disk full")):
+        assert ensure_copy(str(user), str(copy)) is None
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["settings.xml"]
+    assert ensure_copy(str(user), str(copy)) == {"rating_source": "2"}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["c.json", "settings.xml"]
+
+
+def test_unreadable_copy_is_logged_and_treated_as_absent(tmp_path):
+    user, copy = tmp_path / "settings.xml", tmp_path / "c.json"
+    copy.write_text("{broken")
+    _write_settings(user, rating_source="2")
+    with patch.object(upgrade, "log") as log:
+        assert ensure_copy(str(user), str(copy)) == {"rating_source": "2"}
+    assert [c.kwargs["event"] for c in log.warning.call_args_list] == [
+        "upgrade.copy_unreadable"]
+    assert json.loads(copy.read_text()) == {"rating_source": "2"}
+
+    copy.write_text("[1, 2]")
+    _write_settings(user)
+    with patch.object(upgrade, "log") as log:
+        assert ensure_copy(str(user), str(copy)) is None
+    assert [c.kwargs["event"] for c in log.warning.call_args_list] == [
+        "upgrade.copy_unreadable"]

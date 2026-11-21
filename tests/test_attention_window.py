@@ -12,6 +12,7 @@ from resources.lib.service.attention import (
     LIBRARIES_CONVERTED,
     NEW_LIBRARY,
     NO_KEY,
+    SETTINGS_UNREAD,
     SETUP,
     UNMATCHED,
     WINDOW_KINDS,
@@ -101,6 +102,13 @@ def test_new_kinds_offer_open_libraries():
     (Problem(UNMATCHED, "12"),
      "12 items are in no MetaMender library, so they are not being updated.",
      "12 items are in no MetaMender library"),
+    (Problem(LIBRARIES_CONVERTED, ""),
+     "MetaMender now has settings per library. Your settings were copied to each library.",
+     "Settings are now per library"),
+    (Problem(LIBRARIES_CONVERTED, SETTINGS_UNREAD),
+     "MetaMender now has settings per library. Your earlier choices could not be read, "
+     "so nothing is switched on yet: open Libraries to choose.",
+     "Settings are now per library, nothing switched on"),
 ])
 def test_library_notices_read_for_one_or_several(problem, full, short):
     assert attention_window.problem_text(problem, short=False) == full

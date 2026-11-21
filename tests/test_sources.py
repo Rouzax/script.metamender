@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from resources.lib.data.sources import (
     discover_folders,
+    discover_sources,
     kodi_ui_language,
     library_folders,
     load_source_config,
@@ -128,10 +129,38 @@ def test_discover_folders_empty_library():
     rpc = _rpc({
         "Files.GetSources": {"result": {"sources": []}},
         "VideoLibrary.GetMovies": {"result": {"limits": {"total": 0}}},
-        "VideoLibrary.GetTVShows": {"error": {"code": -32100}},
+        "VideoLibrary.GetTVShows": {"result": {"limits": {"total": 0}}},
     })
     with patch("resources.lib.data.sources.xbmc.executeJSONRPC", side_effect=rpc):
         assert discover_folders() == []
+
+
+def test_discover_sources_error_is_none_not_empty():
+    # An error is not "Kodi has no sources": the library-derived folders
+    # must not stand in for sources Kodi failed to list.
+    rpc = _rpc({"Files.GetSources": {"error": {"code": -32100}}})
+    with patch("resources.lib.data.sources.xbmc.executeJSONRPC", side_effect=rpc):
+        assert discover_sources() is None
+        assert discover_folders() is None
+    with patch("resources.lib.data.sources.xbmc.executeJSONRPC",
+               side_effect=RuntimeError("rpc down")):
+        assert discover_sources() is None
+        assert discover_folders() is None
+    with patch("resources.lib.data.sources.xbmc.executeJSONRPC", return_value="not json"):
+        assert discover_sources() is None
+
+
+def test_discover_folders_library_query_error_is_none():
+    # Folders derived from half the library would freeze the other half
+    # out of every library.
+    rpc = _rpc({
+        "Files.GetSources": {"result": {"sources": []}},
+        "VideoLibrary.GetMovies": {"result": {"movies": [
+            {"file": "/data/Movies/A (1)/a.mkv"}, {"file": "/data/Movies/B (2)/b.mkv"}]}},
+        "VideoLibrary.GetTVShows": {"error": {"code": -32100}},
+    })
+    with patch("resources.lib.data.sources.xbmc.executeJSONRPC", side_effect=rpc):
+        assert discover_folders() is None
 
 
 def test_offline_check_uses_included_libraries(monkeypatch):

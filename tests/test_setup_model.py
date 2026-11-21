@@ -157,7 +157,10 @@ def test_changes_nothing_needs_an_included_library_with_a_field():
 
 def test_settings_to_write_ends_with_setup_complete():
     out = settings_to_write(_state(key=" abc "))
-    assert out == {"tmdb_api_key": "abc", "setup_complete": True}
+    # Finish has written a v2 sources.json, so a missing one later is
+    # never converted from the 1.1 values.
+    assert out == {"tmdb_api_key": "abc", "libraries_converted": True,
+                   "setup_complete": True}
     assert list(out)[-1] == "setup_complete"
 
 

@@ -18,6 +18,7 @@ from resources.lib.service.attention import (
     NEW_LIBRARY,
     NO_KEY,
     SCANS_FAILING,
+    SETTINGS_UNREAD,
     SETUP,
     UNMATCHED,
     Problem,
@@ -50,6 +51,9 @@ _FIX_LABEL = {"setup": 32502, "libraries": 32651}
 # other than one item; the tables above hold the other form.
 _SEVERAL_TEXT = {NEW_LIBRARY: (32697, 32698)}
 _ONE_TEXT = {UNMATCHED: (32699, 32700)}
+# (full, short) forms of the conversion notice when the old settings could
+# not be read.
+_UNREAD_TEXT = (32705, 32706)
 
 
 def problem_text(problem: Problem, short: bool) -> str:
@@ -61,6 +65,8 @@ def problem_text(problem: Problem, short: bool) -> str:
         text = _SEVERAL_TEXT[problem.kind][form]
     if problem.kind in _ONE_TEXT and problem.detail.strip() == "1":
         text = _ONE_TEXT[problem.kind][form]
+    if problem.kind == LIBRARIES_CONVERTED and problem.detail == SETTINGS_UNREAD:
+        text = _UNREAD_TEXT[form]
     return lang(text).format(problem.detail)
 
 

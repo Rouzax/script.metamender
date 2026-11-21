@@ -9,6 +9,8 @@ Logging:
     Key events:
         - upgrade.copy_written (INFO): the moved settings were saved aside
         - upgrade.copy_fail (ERROR): the safe copy could not be written
+        - upgrade.copy_unreadable (WARNING): the safe copy is damaged and is
+          treated as absent
         - upgrade.dropped_entry (WARNING): an old source entry matches no library
 """
 from __future__ import annotations
@@ -20,6 +22,7 @@ from typing import Any, Optional
 
 from resources.lib.data.libraries import (
     FIELD_TOGGLES,
+    Library,
     LibraryConfig,
     library_from_legacy_settings,
 )
@@ -66,12 +69,21 @@ def read_user_settings(path: str) -> dict[str, str]:
 
 
 def _read_copy(copy_path: str) -> Optional[dict[str, str]]:
+    """The saved copy; None when there is none or it cannot be read (a
+    damaged copy is then replaced from Kodi's file, if that still has the
+    ids)."""
     try:
         with open(copy_path, encoding="utf-8") as fh:
             raw = json.load(fh)
+    except FileNotFoundError:
+        return None
     except (OSError, ValueError):
+        log.warning("Settings copy unreadable", event="upgrade.copy_unreadable",
+                    path=copy_path)
         return None
     if not isinstance(raw, dict):
+        log.warning("Settings copy unreadable", event="upgrade.copy_unreadable",
+                    path=copy_path)
         return None
     return {str(k): str(v) for k, v in raw.items()}
 
@@ -79,8 +91,12 @@ def _read_copy(copy_path: str) -> Optional[dict[str, str]]:
 def ensure_copy(user_settings_path: str, copy_path: str) -> Optional[dict[str, str]]:
     """The moved settings, kept in a file of our own. An existing copy wins:
     after a partial run Kodi's file may already lack the ids. None when
-    neither source has any moved id (a fresh install) or the copy cannot be
-    written (the old settings then stay where they are)."""
+    neither source has any moved id (a fresh install, or Kodi dropped the
+    ids before a copy was made) or the copy cannot be written (the old
+    settings then stay where they are).
+
+    The copy is written beside its place and swapped in, so a copy that
+    exists is always whole."""
     existing = _read_copy(copy_path)
     if existing is not None:
         return existing
@@ -88,15 +104,21 @@ def ensure_copy(user_settings_path: str, copy_path: str) -> Optional[dict[str, s
     moved = {key: user[key] for key in MOVED_IDS if key in user}
     if not moved:
         return None
+    temp = copy_path + ".tmp"
     try:
         parent = os.path.dirname(copy_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(copy_path, "w", encoding="utf-8") as fh:
+        with open(temp, "w", encoding="utf-8") as fh:
             json.dump(moved, fh, indent=2)
+        os.replace(temp, copy_path)
     except OSError:
         log.exception("Failed to write the settings copy", event="upgrade.copy_fail",
                       path=copy_path)
+        try:
+            os.remove(temp)
+        except OSError:
+            pass
         return None
     log.info("Settings copy written", event="upgrade.copy_written", path=copy_path,
              setting_count=len(moved))
@@ -169,26 +191,61 @@ def _owner(entry_path: str, discovered: list[dict[str, str]]) -> tuple[Optional[
     return best, False
 
 
-def convert(legacy: dict[str, str], old_sources: dict[str, Any],
+def _inherited_entries(entries: list[dict[str, Any]],
+                       discovered: list[dict[str, str]]) -> tuple[list[dict[str, Any]], set[int]]:
+    """An entry of its own for every library folder that has none but lies
+    inside a 1.1 entry, taken from the longest such entry, as 1.1 matched a
+    file to the longest configured prefix. Also the ids of the entries used
+    that way."""
+    exact = {_norm(str(e["path"])) for e in entries}
+    inherited: list[dict[str, Any]] = []
+    used: set[int] = set()
+    for src in discovered:
+        for folder in source_paths(src["path"]):
+            target = _norm(folder)
+            if target in exact:
+                continue
+            parent: Optional[dict[str, Any]] = None
+            for entry in entries:
+                path = _norm(str(entry["path"]))
+                if (_path_matches(target, path)
+                        and (parent is None or len(path) > len(_norm(str(parent["path"]))))):
+                    parent = entry
+            if parent is not None:
+                inherited.append({**parent, "path": folder})
+                used.add(id(parent))
+    return inherited, used
+
+
+def convert(legacy: Optional[dict[str, str]], old_sources: dict[str, Any],
             discovered: list[dict[str, str]], ui_language: str) -> LibraryConfig:
     """One library per discovered source, each carrying the 1.1 global
     settings. A library the old config disabled is left out but keeps them.
-    Hand-written entries inside a library's folder survive as subfolders."""
-    settings = _scan_shaped(legacy, ui_language)
+    Hand-written entries inside a library's folder survive as subfolders,
+    and an entry above a library's folder gives it that entry's language
+    and enabled state.
+
+    ``legacy`` None means the 1.1 values are lost (Kodi dropped the ids
+    before a copy was made): the libraries are then set up as 1.1 scanned
+    them, with their languages, but with nothing switched on, since
+    guessing the 1.1 defaults could start writing what the user had off."""
+    settings = None if legacy is None else _scan_shaped(legacy, ui_language)
     default_language = str(old_sources.get("default_language") or ui_language)
     default_fallback = str(old_sources.get("fallback_language") or "")
+
+    entries = [e for e in old_sources.get("sources") or [] if str(e.get("path") or "")]
+    inherited, used = _inherited_entries(entries, discovered)
 
     own: dict[int, dict[str, Any]] = {}
     subs: dict[int, list[dict[str, Any]]] = {i: [] for i in range(len(discovered))}
     folder_entries: dict[int, list[dict[str, Any]]] = {}
-    for entry in old_sources.get("sources") or []:
-        path = str(entry.get("path") or "")
-        if not path:
-            continue
+    for entry in entries + inherited:
+        path = str(entry["path"])
         idx, is_own = _owner(path, discovered)
         if idx is None:
-            log.warning("Old source entry matches no library",
-                        event="upgrade.dropped_entry", path=path)
+            if id(entry) not in used:
+                log.warning("Old source entry matches no library",
+                            event="upgrade.dropped_entry", path=path)
         elif is_own and len(_folders(discovered[idx]["path"])) == 1:
             own.setdefault(idx, entry)
         else:
@@ -211,13 +268,22 @@ def convert(legacy: dict[str, str], old_sources: dict[str, Any],
         multi = folder_entries.get(i, [])
         all_off = (len(multi) == len(_folders(src["path"]))
                    and all(e.get("enabled", True) is False for e in multi))
+        included = entry.get("enabled", True) is not False and not all_off
+        language = str(entry.get("language") or default_language)
+        fallback = str(entry.get("fallback_language", default_fallback) or "")
+        if settings is None:
+            libraries.append(Library(
+                path=src["path"], label=src.get("label", ""), included=included,
+                language=language, fallback_language=fallback, toggles=frozenset(),
+                subfolders=tuple(subs[i])))
+            continue
         libraries.append(library_from_legacy_settings(
             settings,
             path=src["path"],
             label=src.get("label", ""),
-            included=entry.get("enabled", True) is not False and not all_off,
-            language=str(entry.get("language") or default_language),
-            fallback_language=str(entry.get("fallback_language", default_fallback) or ""),
+            included=included,
+            language=language,
+            fallback_language=fallback,
             subfolders=tuple(subs[i]),
         ))
     return LibraryConfig(libraries)

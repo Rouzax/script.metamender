@@ -543,7 +543,8 @@ def test_nothing_written_until_finish():
     assert c.on_next() is True
     assert _lib(c, "/c/").toggles == {"plots"}
     assert rec.saved[0].libraries == c.state.libraries.libraries
-    assert rec.written == [{"tmdb_api_key": "abc", "setup_complete": True}]
+    assert rec.written == [{"tmdb_api_key": "abc", "libraries_converted": True,
+                            "setup_complete": True}]
     assert c.finished
 
 
@@ -759,6 +760,17 @@ def test_readable_file_opens_without_asking(run):
     run(FILE_OK, True)
     run(FILE_MISSING, False, "wizard")
     assert _messages() == [] and len(_Window.opened) == 2
+
+
+def test_failed_discovery_opens_on_the_stored_libraries(run, monkeypatch):
+    from resources.lib.data.libraries import FILE_OK
+    stored = LibraryConfig([_films(included=True)])
+    monkeypatch.setattr(setup_window, "discover_folders", lambda: None)
+    monkeypatch.setattr(setup_window, "read_libraries", lambda path: (stored, FILE_OK))
+    monkeypatch.setattr(setup_window, "get_bool_setting", lambda key: True)
+    setup_window.run_setup("libraries", "/x/sources.json")
+    (c,) = _Window.opened
+    assert c.state.libraries == stored
 
 
 def test_country_labels_follow_country_codes():

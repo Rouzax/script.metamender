@@ -1414,3 +1414,15 @@ msgstr ""
 msgctxt "#32704"
 msgid "Open the library list: choose which libraries MetaMender updates and what it fills, which ratings it shows and where plots and titles come from, for each library."
 msgstr ""
+
+msgctxt "#32705"
+msgid "MetaMender now has settings per library. Your earlier choices could not be read, so nothing is switched on yet: open Libraries to choose."
+msgstr ""
+
+msgctxt "#32706"
+msgid "Settings are now per library, nothing switched on"
+msgstr ""
+
+msgctxt "#32707"
+msgid "Libraries converted"
+msgstr ""

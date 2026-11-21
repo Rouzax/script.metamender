@@ -512,6 +512,8 @@ class _Service:
         self.builtin = MagicMock()
         self.check_folders = MagicMock(return_value={})
         self.window_ticks = []
+        # The hidden boolean settings the service reads and writes.
+        self.settings: dict = {}
         # None: no sources.json at all, the libraries are an empty config.
         # A list: the real sources.json in addon_data, with these sources
         # discovered in Kodi.
@@ -553,6 +555,10 @@ class _Service:
                 patch.object(daemon, "release_scan_lock"), \
                 patch.object(daemon, "get_int_setting", return_value=24), \
                 patch.object(daemon, "is_setup_complete", return_value=setup), \
+                patch.object(daemon, "get_bool_setting",
+                             side_effect=lambda k: self.settings.get(k) is True), \
+                patch.object(daemon, "set_bool_setting",
+                             side_effect=self.settings.__setitem__), \
                 patch.object(daemon, "notify", self.notify), \
                 patch.object(daemon, "lang", side_effect=lambda i: "s{}".format(i)), \
                 patch.object(daemon, "show_attention_window", side_effect=window), \
@@ -902,14 +908,109 @@ def test_fresh_install_without_setup_does_not_convert(kodi_stubs, addon_data):
     assert svc.window.call_args.args[0].kind == attention.SETUP
 
 
-def test_setup_finished_without_changed_settings_converts_with_defaults(
-        kodi_stubs, addon_data):
+def test_lost_settings_switch_nothing_on(kodi_stubs, addon_data):
+    """Kodi writes every setting, defaults included, so a settings file
+    without any moved id and no copy means Kodi dropped them: the 1.1
+    defaults are not assumed, nothing is switched on, the languages stay."""
+    _write_v11(addon_data, settings={})
+    svc = _Service()
+    svc.discovered = [MOVIES, SERIES]
+    scan = MagicMock(return_value=_complete_stats())
+    svc.run(ticks=1, scan=scan)
+    movies, series = scan.call_args.args[1].libraries
+    assert (movies.included, movies.toggles, movies.language) == (True, frozenset(), "de-DE")
+    assert (series.included, series.toggles, series.language) == (True, frozenset(), "nl-NL")
+    assert svc.window.call_args.args[0] == attention.Problem(
+        attention.LIBRARIES_CONVERTED, attention.SETTINGS_UNREAD)
+    assert svc.settings == {"libraries_converted": True}
+
+
+def test_copy_made_at_service_start_before_any_gate(kodi_stubs, addon_data):
+    """Kodi drops the moved ids when it next saves the add-on settings,
+    which can come before the first scan cycle: the copy cannot wait for
+    playback to stop or a key to be set."""
+    _write_v11(addon_data)
     svc = _Service()
     svc.discovered = [MOVIES]
     scan = MagicMock(return_value=_complete_stats())
-    svc.run(ticks=1, scan=scan)
-    (movies,) = scan.call_args.args[1].libraries
-    assert movies.included and movies.toggles == {"ratings", "plots", "certifications"}
+    svc.run(ticks=1, scan=scan, key="", playing=lambda svc: True)
+    scan.assert_not_called()
+    assert json.loads((addon_data / COPY_FILE_NAME).read_text()) == _OLD_SETTINGS
+
+
+def test_no_copy_before_setup_or_after_conversion(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    svc = _Service()
+    svc.discovered = [MOVIES]
+    svc.run(ticks=1, setup=False)
+    assert not (addon_data / COPY_FILE_NAME).exists()
+    (addon_data / "sources.json").unlink()
+    svc.settings["libraries_converted"] = True
+    svc.run(ticks=1, key="")
+    assert not (addon_data / COPY_FILE_NAME).exists()
+
+
+def test_conversion_records_that_it_ran(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    svc = _Service()
+    svc.discovered = [MOVIES]
+    with patch.object(daemon, "save_libraries", return_value=False):
+        svc.run(ticks=1)
+    assert svc.settings == {}
+    svc.run(ticks=1)
+    assert svc.settings == {"libraries_converted": True}
+
+
+def test_missing_file_after_conversion_starts_afresh(kodi_stubs, addon_data):
+    """sources.json deleted after the libraries were converted: the 1.1
+    values in Kodi's file are stale, so nothing is converted and every
+    library is found again as new, not included."""
+    _write_v11(addon_data)
+    (addon_data / "sources.json").unlink()
+    svc = _Service()
+    svc.settings["libraries_converted"] = True
+    svc.discovered = [MOVIES, SERIES]
+    scan = MagicMock(return_value=_complete_stats())
+    with patch.object(daemon, "convert") as conv:
+        svc.run(ticks=1, scan=scan)
+    conv.assert_not_called()
+    stored = load_libraries(_libraries_file(addon_data))
+    assert stored is not None
+    assert [(lib.path, lib.included, lib.toggles) for lib in stored.libraries] == [
+        (MOVIES["path"], False, frozenset()), (SERIES["path"], False, frozenset())]
+    assert scan.call_args.args[1] == stored
+    assert svc.window.call_args.args[0] == attention.Problem(
+        attention.NEW_LIBRARY, "Movies, Series")
+    assert not (addon_data / COPY_FILE_NAME).exists()
+
+
+def test_discovery_error_starts_nothing_afresh(kodi_stubs, addon_data):
+    with patch.object(daemon, "discover_folders", return_value=None), \
+            patch.object(daemon, "is_setup_complete", return_value=True), \
+            patch.object(daemon, "get_bool_setting", return_value=True):
+        assert daemon._load_libraries(MagicMock()) is None
+    assert not (addon_data / "sources.json").exists()
+
+
+def test_discovery_error_defers_the_conversion(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    with patch.object(daemon, "discover_folders", return_value=None), \
+            patch.object(daemon, "is_setup_complete", return_value=True), \
+            patch.object(daemon, "convert") as conv:
+        assert daemon._load_libraries(MagicMock()) is None
+    conv.assert_not_called()
+    assert "version" not in json.loads((addon_data / "sources.json").read_text())
+
+
+def test_discovery_error_adds_no_library(kodi_stubs, addon_data):
+    config = LibraryConfig([_lib("smb://nas/Movies/", label="Movies")])
+    save_libraries(_libraries_file(addon_data), config)
+    before = (addon_data / "sources.json").read_text()
+    tracker = MagicMock()
+    with patch.object(daemon, "discover_folders", return_value=None):
+        assert daemon._sync_libraries(tracker, "en-US") == config
+    assert (addon_data / "sources.json").read_text() == before
+    tracker.set_scan_state.assert_not_called()
 
 
 def test_damaged_libraries_file_is_never_converted_over(kodi_stubs, addon_data):

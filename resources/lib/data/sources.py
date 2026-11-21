@@ -105,15 +105,11 @@ def source_paths(path: str) -> list[str]:
     return [unquote(part) for part in path[len(_MULTIPATH):].split("/") if part]
 
 
-def discover_sources() -> list[dict[str, str]]:
-    """Discover video sources from Kodi via JSON-RPC.
-
-    Calls Files.GetSources with media="video" and returns a list of
-    dicts with "path" and "label" keys.
-
-    Returns:
-        List of source dicts, or empty list on failure.
-    """
+def discover_sources() -> list[dict[str, str]] | None:
+    """Kodi's video sources ("path" and "label" each), from
+    Files.GetSources. [] when Kodi has none; None when the query failed,
+    which must not be taken for "no sources": the caller would then fall
+    back to library-derived folders and store them as libraries."""
     query = {
         "jsonrpc": "2.0",
         "method": "Files.GetSources",
@@ -125,20 +121,17 @@ def discover_sources() -> list[dict[str, str]]:
         with log_timing(log, "discover_sources"):
             raw = xbmc.executeJSONRPC(json.dumps(query))
             data = json.loads(raw)
+        sources = data["result"].get("sources", [])
+        discovered = [
+            {"path": s.get("file", ""), "label": s.get("label", "")}
+            for s in sources
+        ]
     except Exception:
         log.exception(
             "Failed to discover video sources",
             event="sources.discover",
         )
-        return []
-
-    result = data.get("result", {})
-    sources = result.get("sources", [])
-
-    discovered = [
-        {"path": s.get("file", ""), "label": s.get("label", "")}
-        for s in sources
-    ]
+        return None
 
     log.info(
         "Video sources discovered",
@@ -199,30 +192,40 @@ def library_folders(
     return [{"path": r, "label": _folder_label(r)} for r in top]
 
 
-def _library_files(method: str, key: str) -> list[str]:
+def _query_library_files(method: str, key: str) -> list[str] | None:
+    """The file of every item ``method`` lists; None when the query failed."""
     query = {"jsonrpc": "2.0", "method": method,
              "params": {"properties": ["file"]}, "id": 1}
     try:
         data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
+        items = data["result"].get(key, [])
+        return [item.get("file", "") for item in items]
     except Exception:
         log.exception("Failed to read library paths", event="sources.library", method=method)
-        return []
-    items = data.get("result", {}).get(key, [])
-    return [item.get("file", "") for item in items]
+        return None
 
 
-def discover_folders() -> list[dict[str, str]]:
+def _library_files(method: str, key: str) -> list[str]:
+    return _query_library_files(method, key) or []
+
+
+def discover_folders() -> list[dict[str, str]] | None:
     """The folders the setup screens offer: Kodi's video sources, or, when
     Kodi lists none (a client sharing another machine's library database
-    has no sources of its own), the folders derived from the library."""
+    has no sources of its own), the folders derived from the library.
+    None when a query failed: what was found then is incomplete and must
+    not be stored."""
     sources = discover_sources()
+    if sources is None:
+        return None
     if sources:
         return sources
     with log_timing(log, "library_folders"):
-        folders = library_folders(
-            _library_files("VideoLibrary.GetMovies", "movies"),
-            _library_files("VideoLibrary.GetTVShows", "tvshows"),
-        )
+        movies = _query_library_files("VideoLibrary.GetMovies", "movies")
+        shows = _query_library_files("VideoLibrary.GetTVShows", "tvshows")
+        if movies is None or shows is None:
+            return None
+        folders = library_folders(movies, shows)
     log.info("Library folders derived", event="sources.library", count=len(folders))
     return folders
 

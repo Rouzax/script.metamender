@@ -145,8 +145,10 @@ class SetupFlow:
 
 
 def settings_to_write(state: SetupState) -> dict[str, Any]:
-    """The add-on settings Finish writes, setup_complete last."""
-    return {"tmdb_api_key": state.api_key.strip(), "setup_complete": True}
+    """The add-on settings Finish writes, setup_complete last. Finish has
+    saved the libraries, so the 1.1 settings are never converted again."""
+    return {"tmdb_api_key": state.api_key.strip(), "libraries_converted": True,
+            "setup_complete": True}
 
 
 def libraries_to_write(state: SetupState) -> LibraryConfig:
