@@ -5906,6 +5906,108 @@ class TestMainTitles:
         assert "scan.rekey_failed" in events
 
 
+class TestKeepOriginalTitle:
+    """Library title_mode "original": a show's or movie's title is TMDB's
+    original title whatever the library's language; episodes are untouched."""
+
+    @staticmethod
+    def _lib(**overrides):
+        return one_library(frozenset({"main_title"}), title_mode="original", **overrides)
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_original_mode_sets_original_title_movie(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(
+            title="Tummy Tom", original_title="Dikkie Dik")
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, self._lib(), "k", _make_settings(),
+                 items=[_make_movie_item(title="Old")])
+        fs = _fs(tracker, MOVIE, _make_movie_item(title="Old"))
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Dikkie Dik"
+        assert _count(fs, "title") == 1
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_original_mode_show(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
+        mock_fetch.return_value = _tmdb_tvshow_response(
+            title="Tummy Tom", original_title="Dikkie Dik")
+        tracker = _make_tracker(tmp_path)
+        run_scan(TVSHOW, tracker, self._lib(), "k", _make_settings(),
+                 items=[_make_tvshow_item(title="Old")])
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Dikkie Dik"
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_original_mode_keeps_nfo_title(
+        self, mock_fetch, mock_update, _nfo, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(
+            title="Tummy Tom", original_title="Dikkie Dik")
+        item = _make_movie_item(title="Mijn Titel")
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, self._lib(), "k", _make_settings(), items=[item])
+        fs = _fs(tracker, MOVIE, item)
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        assert fs["title"]["written_value"] is None
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_original_mode_no_tmdb_id_keeps_title(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_movie_item(title="Old", tmdb_id="")
+        item["uniqueid"] = {}
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, self._lib(), "k", _make_settings(), items=[item])
+        tracker.close()
+
+        mock_fetch.assert_not_called()
+        assert _written(mock_update, "title") is None
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_season")
+    def test_original_mode_leaves_episode_titles_in_language(
+        self, mock_season, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_season.return_value = [_tmdb_episode_data(title="Pilot")]
+        item = _make_episode_item(title="Episode 1")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, one_library(frozenset({"title"}), title_mode="original"),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Pilot"
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_original_mode_transient_tmdb_is_transient(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        mock_fetch.side_effect = TransientProviderError("http 503")
+        item = _make_movie_item(title="Old")
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, self._lib(), "k", _make_settings(), items=[item])
+        fs = _fs(tracker, MOVIE, item)
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        assert fs["title"]["fetch_count"] == 0
+        assert fs["title"]["last_reason"] == "unchecked"
+
+
 class TestCertifications:
     """mpaa for movies and TV shows: TMDB first, sites only when due, the
     configured country's system and prefix, and its own maturity rule."""

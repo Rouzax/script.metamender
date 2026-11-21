@@ -387,6 +387,7 @@ def fetch_tvshow(
             data.get("name"), data.get("original_name"),
             data.get("original_language"), language,
         ),
+        "original_title": data.get("original_name", ""),
         "genres": [g["name"] for g in data.get("genres", []) if "name" in g],
         "certifications": certifications,
         "imdb_id": data.get("external_ids", {}).get("imdb_id", ""),

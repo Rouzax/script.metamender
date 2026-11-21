@@ -589,6 +589,16 @@ class TestFetchTvshow:
         assert result["genres"] == ["Action & Adventure", "Drama"]
 
     @patch("resources.lib.providers.http._send")
+    def test_tvshow_parse_has_original_title(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(
+            200, {**TVSHOW_RESPONSE, "name": "Tummy Tom", "original_name": "Dikkie Dik"})
+
+        result = fetch_tvshow("129552", "fake_key")
+
+        assert result is not None
+        assert result["original_title"] == "Dikkie Dik"
+
+    @patch("resources.lib.providers.http._send")
     def test_certifications_parsed(self, mock_get: MagicMock) -> None:
         mock_get.return_value = _mock_response(200, TVSHOW_RESPONSE)
 

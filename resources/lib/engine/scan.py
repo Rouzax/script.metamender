@@ -88,6 +88,7 @@ from resources.lib.data.identity import compute_identity
 from resources.lib.data.kodi import get_item_by_id
 from resources.lib.data.libraries import (
     TITLE_LANGUAGE,
+    TITLE_ORIGINAL,
     Library,
     LibraryConfig,
     scan_settings,
@@ -503,7 +504,14 @@ def _resolve_fields(
             # Ratings and certifications have their own producers.
             continue
         key = _KODI_TO_TMDB.get(f, f)
-        if f in _CHAIN_FIELDS:
+        if (f == "title" and ctx.media_type.name != "episode"
+                and ctx.title_mode == TITLE_ORIGINAL):
+            # The original title is the same whatever language was asked for,
+            # so it needs no language chain and no fallback.
+            value = None if tmdb_transient else tmdb_data.get("original_title") or None
+            outcome = FieldOutcome(transient=tmdb_transient, value=value, from_fallback=False)
+            provider = None if value is None else "tmdb"
+        elif f in _CHAIN_FIELDS:
             current = None if f in reopened else item.get(f)
             outcome, provider = _text_chain(ctx, text, f, folder_lang, fallback_lang, current)
         else:
