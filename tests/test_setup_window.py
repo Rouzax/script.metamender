@@ -759,3 +759,17 @@ def test_readable_file_opens_without_asking(run):
     run(FILE_OK, True)
     run(FILE_MISSING, False, "wizard")
     assert _messages() == [] and len(_Window.opened) == 2
+
+
+def test_country_labels_follow_country_codes():
+    # cert_country is an index into COUNTRY_CODES, so the picker's labels
+    # must be in the same order or one country is shown while another's
+    # certifications are written.
+    from resources.lib.constants import COUNTRY_CODES
+
+    po = Path("resources/language/resource.language.en_gb/strings.po").read_text(encoding="utf-8")
+    strings = {int(k): v for k, v in re.findall(r'msgctxt "#(\d+)"\nmsgid "(.*)"', po)}
+    labels = setup_window._COUNTRY_LABELS
+    assert len(labels) == len(COUNTRY_CODES)
+    for string_id, code in zip(labels, COUNTRY_CODES):
+        assert strings[string_id].startswith(code + " "), (string_id, code)
