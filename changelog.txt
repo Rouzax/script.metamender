@@ -13,14 +13,20 @@ New Features:
     page starts with every field off.
   - A video source Kodi gains after setup is added as not included and
     raises one notice (once per library) that opens the library list.
-  - Keep original title, per library: with show and movie titles ticked,
+  - Keep the original title, per library: with show and movie titles ticked,
     the library's movies and shows get their original title (TMDB's
     original_title and original_name) in its own language and script
     instead of the title in the library's language. Episode titles and
     other text still follow the library's language.
   - Settings from 1.1 are converted automatically on the first start:
     each library keeps the choices it had, one notice says so, and
-    nothing in the video library changes.
+    nothing in the video library changes. The 1.1 values are copied
+    aside at service start; when Kodi had already dropped them, the
+    libraries 1.1 scanned are included with their languages but nothing
+    switched on, and the notice says the earlier choices could not be
+    read. A 1.1 setting for a folder above a library applies to it.
+  - Back or Cancel on the library list with unsaved changes asks
+    whether to save them.
 
 Bug Fixes:
   - Fixed: the service and the add-on failed to start on Kodi builds

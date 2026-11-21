@@ -92,7 +92,7 @@ library.
   languages works best split into one library per language.
 - **The site has no text in that language yet**: MetaMender keeps the current
   text and checks again on its schedule. The fallback language only fills
-  empty fields, so an English plot in a Dutch folder stays until a Dutch one
+  empty fields, so an English plot in a Dutch library stays until a Dutch one
   appears.
 - **Show and movie titles** are only changed with **Show and movie titles**
   ticked for the library. With **Keep the original title**, a movie or show
@@ -122,8 +122,9 @@ library.
 ### An age rating looks wrong
 
 - **Wrong country**: check **Certification country** on the library's
-  [page](libraries.md#age-ratings); **Automatic** follows the library's
-  language, then Kodi's interface language.
+  [page](libraries.md#age-ratings); **Automatic** follows the country of
+  the library's language, and Kodi's interface language only when the
+  library's language has no country.
 - **Wrong prefix for your skin**: change **Rating prefix** on the library's
   page.
 - **The American rating is still there**: **Replace other countries'

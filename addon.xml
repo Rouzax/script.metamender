@@ -39,8 +39,8 @@
         <news>v1.2.0 (unreleased)
 - Choose which libraries MetaMender works on; each one gets its own settings page
 - Ticking a library switches nothing on, and libraries added later stay out with a notice
-- New Keep original title option per library
-- Settings from 1.1 are converted automatically on first start; nothing in your library changes
+- New Keep the original title option per library
+- Settings from 1.1 are converted automatically on first start; nothing in your library changes. If they could not be read, nothing is switched on and a notice says so
 - Fixed: on OSMC and other Kodi builds with Python 3.9 the add-on did not start
 - With the IMDb ratings module 1.1.0, IMDb ratings no longer start a download in the middle of a scan
 

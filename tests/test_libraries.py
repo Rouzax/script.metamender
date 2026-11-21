@@ -132,6 +132,14 @@ def test_resolve_country_follows_library_language():
     assert resolve_country(lib, "en-US") == COUNTRY_CODES[1]
 
 
+def test_resolve_country_region_without_preset_is_no_country():
+    # The library language has a region, so Kodi's interface language is
+    # not consulted, even when the region has no rating preset.
+    assert resolve_country(_lib(language="es-ES"), "en-US") is None
+    assert resolve_country(_lib(language="nl-NL"), "de-DE") == "NL"
+    assert resolve_country(_lib(language="en"), "de-DE") == "DE"
+
+
 def test_scan_settings_merges_general():
     lib = Library(**{**_lib(language="nl-NL").__dict__, "cert_not_found": "NR",
                      "rating_source": 1})

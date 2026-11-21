@@ -6,8 +6,10 @@ defaults that you can change later in the [settings](settings.md).
 
 Setup opens when you choose **Open setup** in the "MetaMender needs you"
 window, or when you open MetaMender from **Add-ons > Program add-ons**.
-Nothing is scanned or changed until you choose **Finish** on the last step;
-**Cancel** on any step leaves everything as it was.
+Nothing is scanned or changed until you choose **Finish** on the last step.
+**Cancel** on any step leaves everything as it was; if you changed a library,
+MetaMender first asks whether to save your changes, and **Yes** finishes
+setup as **Finish** does.
 
 Use the remote as usual: up and down to move, OK to choose, and Back for the
 previous step. The dots in the top corner show how far along you are.

@@ -395,7 +395,7 @@ msgid "Plots"
 msgstr ""
 
 msgctxt "#32435"
-msgid "Movie, show and episode plots in the folder's language."
+msgid "Movie, show and episode plots in the library's language."
 msgstr ""
 
 msgctxt "#32436"
@@ -403,7 +403,7 @@ msgid "Episode titles"
 msgstr ""
 
 msgctxt "#32437"
-msgid "Episode titles in the folder's language."
+msgid "Episode titles in the library's language."
 msgstr ""
 
 msgctxt "#32438"
@@ -411,7 +411,7 @@ msgid "Show and movie titles"
 msgstr ""
 
 msgctxt "#32439"
-msgid "Replace the title with the one in the folder's language."
+msgid "Replace the title with the one in the library's language."
 msgstr ""
 
 msgctxt "#32440"
@@ -443,7 +443,7 @@ msgid "Taglines"
 msgstr ""
 
 msgctxt "#32447"
-msgid "Movie taglines in the folder's language."
+msgid "Movie taglines in the library's language."
 msgstr ""
 
 msgctxt "#32448"
@@ -507,7 +507,7 @@ msgid "Run setup wizard"
 msgstr ""
 
 msgctxt "#32468"
-msgid "Walk through the TMDB key, the library and folder languages and what to fill, starting from your current settings."
+msgid "Walk through the TMDB key, the libraries MetaMender looks after and what it does in each, starting from your current settings."
 msgstr ""
 
 msgctxt "#32469"
@@ -1232,7 +1232,7 @@ msgid "Which libraries MetaMender looks after"
 msgstr ""
 
 msgctxt "#32659"
-msgid "Tick a library to include it, then choose it to set what MetaMender does there. Libraries you add to Kodi later stay out until you tick them."
+msgid "Choose a library to include it or leave it out; for an included one you can also change its settings. Libraries you add to Kodi later stay out until you include them."
 msgstr ""
 
 msgctxt "#32660"
@@ -1380,7 +1380,7 @@ msgid "The library settings could not be saved, so nothing was changed. The add-
 msgstr ""
 
 msgctxt "#32696"
-msgid "MetaMender has not moved your settings to libraries yet, so they cannot be changed now. Try again once Kodi lists your video sources."
+msgid "MetaMender has not moved your settings to libraries yet, so they cannot be changed now. It tries again every few minutes: it waits until Kodi lists your video sources, and retries when your settings could not be copied or saved. Try again later."
 msgstr ""
 
 msgctxt "#32697"

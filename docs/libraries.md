@@ -19,7 +19,10 @@ library, with the name you gave it there. A source with several folders
 
 MetaMender recognises a library by its folder, not its name: renaming a
 source in Kodi keeps its settings. A source whose folder path changed appears
-as a new library, not included, next to the old entry.
+as a new library, not included, next to the old entry, unless its new folder
+lies inside the folder of a library already in the list: it is then not
+listed separately, and its items stay part of that library, with that
+library's settings.
 
 A library removed from Kodi stays in MetaMender's list under its last known
 name, and MetaMender still looks after it while its items remain in Kodi's
@@ -48,8 +51,12 @@ Choose a library to change it:
 Including a library changes nothing by itself: a library you include for the
 first time has every field switched off, so MetaMender does not write to it
 until you tick something on its page. Its settings are saved when you choose **Finish** in
-setup, or **Save** when you opened the list from the settings. **Cancel**
-leaves every library as it was.
+setup, or **Save** when you opened the list from the settings.
+
+If you changed something and then choose **Cancel**, or Back on the list,
+MetaMender asks whether to save your changes. **Yes** saves them as **Save**
+(or, in setup, **Finish**) does; **No** leaves every library as it was. Back
+on a library's page only returns to the list.
 
 ## A library's page
 
@@ -117,7 +124,7 @@ the ratings up to date while new votes come in.
 **Follow your scraper** is right for most libraries. An item with an NFO file
 keeps the rating its NFO file chose, whatever you pick.
 
-![Further down the page of a movie library, with the Rating, Text sources and Age ratings groups](screenshots/setup/setup-library-page-ratings.png)
+![Further down the page of the Movies library: Which rating to show, the Text sources group with its two choices, and the Age ratings heading](screenshots/setup/setup-library-page-ratings.png)
 
 ### Text sources
 
@@ -184,10 +191,12 @@ for the countries, where ratings come from and what MetaMender writes.
 **Certification country**
 :   The country whose rating system the library's age ratings are written in.
     **Automatic** (the default) uses the country of the library's language,
-    so a library in Dutch (NL) gets Kijkwijzer for the Netherlands. When that
-    country has no rating system in MetaMender, Automatic uses the country of
-    Kodi's interface language. When neither has one, Automatic says so, and
-    the page does not close until you choose a country.
+    so a library in Dutch (NL) gets Kijkwijzer for the Netherlands. Only a
+    language without a country, such as plain English, makes Automatic use
+    the country of Kodi's interface language instead. When that country has
+    no rating system in MetaMender, as for a library in Spanish (ES),
+    Automatic says so, and the page does not close until you choose a
+    country.
 
 **Replace other countries' ratings**
 :   Ticked (the default), a rating from another country's system, such as
@@ -211,7 +220,8 @@ for the countries, where ratings come from and what MetaMender writes.
 ## When your changes apply
 
 A change you save applies from the next scan; nothing is scanned when you
-save. At that scan MetaMender checks the fields your change affects again in
+save, except when you choose **Finish** in the first setup, which starts the
+first scan straight away. At that scan MetaMender checks the fields your change affects again in
 that library's items, even fields it had already settled, so a new language
 or a new title choice reaches every item. Other libraries are not affected.
 To see the result on one item straight away, use [Update now](update-now.md).
@@ -269,11 +279,23 @@ folder. The first time MetaMender 1.2 starts, it converts these once:
   file** becomes a library that is left out. It gets the same choices anyway,
   so including it later starts from what you had. A folder inside a library
   that you switched off that way stays switched off.
+- **A setting for a folder above a library**, such as a language for the
+  whole share that holds your Movies and Series sources, gives each library
+  inside it that language, or leaves it out if that folder was switched off,
+  as it did in 1.1.
 - **Title to show** is **In the library's language**, which is what 1.1 did.
 
 Nothing in your library changes and nothing is fetched again because of the
 conversion. One notice says that the settings are now per library;
 **Open Libraries** shows the result.
+
+Kodi removes settings an add-on no longer has from its settings file, for
+example when you open MetaMender's settings, so MetaMender copies your 1.1
+choices aside as soon as it starts. If Kodi removed them before that copy
+was made, MetaMender cannot know what you had chosen and does not guess:
+every library 1.1 scanned is still included with its language, but nothing
+is switched on, and the notice says that your earlier choices could not be
+read. Open **Libraries** and tick what each library should fill.
 
 ![The notice after the conversion](screenshots/attention/attention-converted.png)
 

@@ -26,9 +26,10 @@ them.
 | Sweden | Mediemyndigheten | `SE:11` |
 | Australia | ACB (Australian Classification Board) | `AU:MA 15+` |
 
-**Automatic** (the default) uses the country of the library's language, or
-of Kodi's interface language when the library's has no rating system in this
-list. Some skins expect a different prefix; **Rating prefix** on the
+**Automatic** (the default) uses the country of the library's language; only
+a language without a country makes it use the country of Kodi's interface
+language. When that country is not in this list, the library's page asks you
+to choose one. Some skins expect a different prefix; **Rating prefix** on the
 library's [page](libraries.md#age-ratings) lets you choose your own, or none.
 
 Australian ratings are written with their official spelling (`MA 15+`,

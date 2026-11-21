@@ -144,6 +144,10 @@ def test_page_groups_follow_ticks(toggles, groups):
 def test_country_missing_only_with_certifications():
     lib = replace(_lib("certifications"), language="xx-ZZ")
     assert country_missing(lib, "yy-QQ")
+    # A region without a preset is not rescued by the interface language.
+    assert country_missing(lib, "nl-NL")
+    lib = replace(lib, language="xx")
+    assert country_missing(lib, "yy-QQ")
     assert not country_missing(lib, "nl-NL")
     assert not country_missing(replace(lib, cert_country=1), "yy-QQ")
     assert not country_missing(_lib("plots"), "yy-QQ")

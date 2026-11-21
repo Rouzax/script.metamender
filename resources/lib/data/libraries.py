@@ -267,11 +267,13 @@ def save_libraries(path: str, config: LibraryConfig) -> bool:
 
 
 def resolve_country(lib: Library, ui_language: str) -> Optional[str]:
-    """The certification country: Automatic follows the library's language
-    region, then Kodi's interface language."""
+    """The certification country. Automatic follows the region of the
+    library's language; Kodi's interface language is used only when that
+    language has no region. A region without a rating preset gives None, so
+    the library page can say that no country was found."""
     if lib.cert_country == 0:
-        return (country_for_setting(0, lib.language)
-                or country_for_setting(0, ui_language))
+        has_region = len(lib.language.replace("_", "-").split("-")) > 1
+        return country_for_setting(0, lib.language if has_region else ui_language)
     return country_for_setting(lib.cert_country, ui_language)
 
 
