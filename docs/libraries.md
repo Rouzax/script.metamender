@@ -18,8 +18,12 @@ library, with the name you gave it there. A source with several folders
 (a multipath source) is one library.
 
 MetaMender recognises a library by its folder, not its name: renaming a
-source in Kodi keeps its settings, but a source that points at another folder
-counts as a new library.
+source in Kodi keeps its settings. A source whose folder path changed appears
+as a new library, not included, next to the old entry.
+
+A library removed from Kodi stays in MetaMender's list under its last known
+name, and MetaMender still looks after it while its items remain in Kodi's
+library. Leave it out to stop that.
 
 On a device that shares another device's library database, Kodi often has no
 video sources of its own. MetaMender then lists the top folders it finds in
@@ -243,9 +247,9 @@ include it, and the notice does not come back for it.
 
 ## Items in no library
 
-An item whose file is in none of Kodi's video sources, for example because
-its source was removed from Kodi while its items stayed in the library, has
-no library settings, so MetaMender skips it, and **Update now** on it changes
+An item whose file lies under none of the libraries in the list, for example
+because its path is spelled differently from its source's, has no library
+settings, so MetaMender skips it, and **Update now** on it changes
 nothing. When a scan finds such items, a
 notice says how many there are ("12 items are in no MetaMender library"). It
 comes back only when the number grows. To have MetaMender update them, add
