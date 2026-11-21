@@ -12,8 +12,8 @@ examples below fill in the details.
 
 - **Your Kodi library**: the values your scraper stored, and the ids it found
   (TMDB, TheTVDB, IMDb).
-- **TMDB** (The Movie Database): most fields, in the language of the folder an
-  item is in.
+- **TMDB** (The Movie Database): most fields, in the language of the library
+  an item is in.
 - **TheTVDB**: TV show and episode titles and plots.
 - **IMDb's ratings**, from IMDb's public data, which the IMDb Ratings module
   downloads and keeps up to date on your device.
@@ -23,8 +23,8 @@ examples below fill in the details.
 
 **MetaMender writes to:**
 
-- **Your Kodi library**, and only the fields you ticked in
-  [setup](setup.md#4-what-to-fill).
+- **Your Kodi library**, and only in the libraries you included, the fields
+  you ticked for that library (see [What to fill](libraries.md#what-to-fill)).
 - **Its own records**, kept in the add-on's data folder: the ids it found,
   when it checked each field and when the next check is due, the value a field
   had before MetaMender first changed it, and the fields you locked.
@@ -40,31 +40,33 @@ examples below fill in the details.
 
 ## Field by field
 
-"Folder language" is the language of the folder the item is in (see
-[setup](setup.md#2-library-language)); "fallback" is that folder's fallback
-language, if it has one.
+"Library language" is the language of the library the item is in (see
+[Language](libraries.md#language)); "fallback" is that library's fallback
+language, if it has one. The **bold** names are choices on the library's
+page.
 
 | Field | For | Asked, in order | When MetaMender writes |
 |---|---|---|---|
-| Rating and votes | Movies, shows, episodes | TMDB and IMDb, as **Rating source** says | Adds or refreshes its own TMDB and IMDb ratings beside your scraper's; your scraper's own ratings stay. Which one Kodi shows: see [Rating source](libraries.md). |
-| Plot | Movies | TMDB in the folder language, then TMDB in the fallback | Replaces a different plot. The fallback only fills an empty plot. |
-| Plot | Shows, episodes | TMDB and TheTVDB in the folder language (order: **Text source order**), then both in the fallback (**Fallback language order**) | As for movies. |
+| Rating and votes | Movies, shows, episodes | TMDB and IMDb, as **Which rating to show** says | Adds or refreshes its own TMDB and IMDb ratings beside your scraper's; your scraper's own ratings stay. Which one Kodi shows: see [Rating](libraries.md#rating). |
+| Plot | Movies | TMDB in the library language, then TMDB in the fallback | Replaces a different plot. The fallback only fills an empty plot. |
+| Plot | Shows, episodes | TMDB and TheTVDB in the library language (order: **Where plots and titles come from**), then both in the fallback (**Fallback language order**); see [Text sources](libraries.md#text-sources) | As for movies. |
 | Episode title | Episodes | As episode plots | As plots. A generic title such as "Episode 3" counts as no title: it is never written, and one in Kodi counts as empty. |
-| Show or movie title | Shows, movies | TMDB (and TheTVDB for shows), folder language only | Only with **Show and movie titles** ticked, and only a title the site really has in that language. Never from the fallback language. |
-| Tagline | Movies | TMDB, folder language | Replaces a different tagline. |
-| Genre | Movies, shows | TMDB, folder language | Replaces a different genre list. |
+| Show or movie title | Shows, movies | TMDB (and TheTVDB for shows), library language only; with **Keep the original title**, TMDB's original title | Only with **Show and movie titles** ticked, and only a title the site really has in that language. Never from the fallback language. With **Keep the original title**, the original title in its own language and script; an item without a TMDB id keeps its title. See [Titles](libraries.md#titles). |
+| Tagline | Movies | TMDB, library language | Replaces a different tagline. |
+| Genre | Movies, shows | TMDB, library language | Replaces a different genre list. |
 | Director, writer | Movies, episodes | TMDB | Replaces a different value. |
 | Studio, country | Movies | TMDB | Replaces a different value. |
 | Runtime | Movies, episodes | TMDB | Replaces a different value. |
 | First aired | Episodes | TMDB | Replaces a different date. |
 | Trailer | Movies | TMDB | Replaces a different link. |
-| Age rating | Movies, shows | TMDB for your country, your country's rating site, then other countries converted ([details](age-ratings.md#where-a-rating-comes-from)) | Fills an empty rating; replaces a rating from another country's system (switch off with **Replace incorrect certifications**). |
+| Age rating | Movies, shows | TMDB for your country, your country's rating site, then other countries converted ([details](age-ratings.md#where-a-rating-comes-from)) | Fills an empty rating; replaces a rating from another country's system (switch off with **Replace other countries' ratings**). |
 
 Every row has the same three exceptions:
 
 - **An item with an NFO file** only gets its empty fields filled. A value
   MetaMender filled there is its own, so it keeps refreshing it.
-- **In a folder without a language**, the text fields (plot, titles, tagline,
+- **In a folder without a language** (only possible by editing
+  MetaMender's `sources.json` file), the text fields (plot, titles, tagline,
   genre) are only filled when empty, because MetaMender cannot tell which
   language the existing text is in. Again, what MetaMender filled it keeps
   refreshing.
@@ -95,12 +97,12 @@ shows how each id was found.
 
 ### An episode plot
 
-An episode in a Dutch folder with English as its fallback. Your scraper stored
-an English plot. Plots are ticked in setup.
+An episode in a Dutch library with English as its fallback. Your scraper
+stored an English plot. Plots are ticked for that library.
 
 1. **Does the item have an NFO file?** No, so MetaMender may replace values.
 2. **Is the plot locked?** No.
-3. **Does the folder have a language?** Yes, Dutch.
+3. **Does the library have a language?** Yes, Dutch.
 4. **Is the plot due for a check?** It is the first check, so yes.
 5. **TMDB in Dutch:** it has a Dutch plot. MetaMender writes it; the English
    plot is kept as the original, so you can restore it from the Details
@@ -113,11 +115,11 @@ already has a plot. It stays English until a Dutch plot appears.
 ### A movie's age rating
 
 A movie in a Dutch library, scraped with "Rated PG-13". Age certifications are
-ticked and the country is the Netherlands.
+ticked for that library and its country is the Netherlands.
 
 1. **Does the item have an NFO file?** No.
 2. **Is the current rating in the Dutch system?** No, "Rated PG-13" is
-   American. **Replace incorrect certifications** is on, so MetaMender looks
+   American. **Replace other countries' ratings** is on, so MetaMender looks
    for a Dutch rating.
 3. **TMDB's Dutch rating:** none.
 4. **A Dutch rating site:** MetaMender has none for the Netherlands.

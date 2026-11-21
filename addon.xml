@@ -38,11 +38,11 @@
         <forum>https://forum.kodi.tv/showthread.php?tid=389809</forum>
         <news>v1.2.0 (unreleased)
 - Choose which libraries MetaMender works on; each one gets its own settings page
-- Ticking a library switches nothing on, and libraries added later stay out until you decide
+- Ticking a library switches nothing on, and libraries added later stay out with a notice
 - New Keep original title option per library
 - Settings from 1.1 are converted automatically on first start; nothing in your library changes
 - Fixed: on OSMC and other Kodi builds with Python 3.9 the add-on did not start
-- IMDb ratings no longer start a download in the middle of a scan
+- With the IMDb ratings module 1.1.0, IMDb ratings no longer start a download in the middle of a scan
 
 v1.1.0 (2026-11-13)
 - Setup now asks which rating Kodi shows: your scraper's, TMDB's or IMDb's
