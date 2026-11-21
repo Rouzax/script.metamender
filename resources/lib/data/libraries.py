@@ -227,6 +227,37 @@ def scan_settings(lib: Library, general: dict[str, Any], ui_language: str) -> di
     }
 
 
+def library_from_legacy_settings(
+    settings: dict[str, Any], *, path: str, label: str, included: bool,
+    language: str, fallback_language: str,
+    subfolders: tuple[dict[str, Any], ...] = (),
+) -> Library:
+    """A library carrying the 1.1 global options in the scan-settings shape
+    (enabled_fields, rating_source, cert_country as a code, ...). The
+    country goes back to its index so that a country that was Automatic
+    keeps the value it resolved to, and one without a preset stays off."""
+    enabled = frozenset(settings.get("enabled_fields") or ())
+    toggles = frozenset(name for name, fields in FIELD_TOGGLES.items() if fields <= enabled)
+    country = settings.get("cert_country")
+    cert_country = COUNTRY_CODES.index(country) + 1 if country in COUNTRY_CODES else NO_COUNTRY
+    return Library(
+        path=path,
+        label=label,
+        included=included,
+        language=language,
+        fallback_language=fallback_language,
+        toggles=toggles,
+        rating_source=int(settings.get("rating_source", 4)),
+        text_source_order=int(settings.get("text_source_order", 2)),
+        fallback_order=int(settings.get("fallback_order", 0)),
+        cert_country=cert_country,
+        cert_replace_foreign=bool(settings.get("cert_replace_foreign", True)),
+        cert_prefix_override=settings.get("cert_prefix_override"),
+        cert_not_found=settings.get("cert_not_found"),
+        subfolders=subfolders,
+    )
+
+
 def legacy_config(source_config: dict[str, Any], settings: dict[str, Any],
                   ui_language: str) -> LibraryConfig:
     """The libraries a 1.1 sources.json and global settings describe: one per
@@ -238,27 +269,16 @@ def legacy_config(source_config: dict[str, Any], settings: dict[str, Any],
     ui_language is not consulted: the old settings carry the certification
     country already resolved, and an unconfigured language stays "".
     """
-    enabled = frozenset(settings.get("enabled_fields") or ())
-    toggles = frozenset(name for name, fields in FIELD_TOGGLES.items() if fields <= enabled)
-    country = settings.get("cert_country")
-    cert_country = COUNTRY_CODES.index(country) + 1 if country in COUNTRY_CODES else NO_COUNTRY
     default_language = str(source_config.get("default_language") or "")
     default_fallback = str(source_config.get("fallback_language") or "")
     libraries = [
-        Library(
+        library_from_legacy_settings(
+            settings,
             path=str(entry["path"]),
             label="",
             included=entry.get("enabled", True) is not False,
             language=str(entry.get("language") or default_language),
             fallback_language=str(entry.get("fallback_language", default_fallback) or ""),
-            toggles=toggles,
-            rating_source=int(settings.get("rating_source", 4)),
-            text_source_order=int(settings.get("text_source_order", 2)),
-            fallback_order=int(settings.get("fallback_order", 0)),
-            cert_country=cert_country,
-            cert_replace_foreign=bool(settings.get("cert_replace_foreign", True)),
-            cert_prefix_override=settings.get("cert_prefix_override"),
-            cert_not_found=settings.get("cert_not_found"),
         )
         for entry in source_config.get("sources") or []
         if entry.get("path")
