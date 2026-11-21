@@ -42,6 +42,11 @@ Bug Fixes:
   - Trailer links only take a TMDB video key that is a YouTube video id;
     any other key is skipped, so it cannot add parameters to the
     YouTube add-on call stored in the library.
+  - On Kodi 22, setup offered only "Video add-ons" when Kodi had no
+    video sources of its own (a client sharing another machine's
+    library database), instead of the folders taken from the library.
+    Kodi 22 lists its Video add-ons node as a video source; sources that
+    are no folder are now left out.
 
 Internal:
   - Library choices are stored per library and read through the

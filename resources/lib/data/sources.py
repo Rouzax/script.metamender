@@ -105,11 +105,17 @@ def source_paths(path: str) -> list[str]:
     return [unquote(part) for part in path[len(_MULTIPATH):].split("/") if part]
 
 
+# Paths that are no folder of files: nothing in the library lies under them.
+_NOT_FOLDERS = ("addons://", "plugin://", "videodb://", "http://", "https://")
+
+
 def discover_sources() -> list[dict[str, str]] | None:
     """Kodi's video sources ("path" and "label" each), from
-    Files.GetSources. [] when Kodi has none; None when the query failed,
-    which must not be taken for "no sources": the caller would then fall
-    back to library-derived folders and store them as libraries."""
+    Files.GetSources, without the ones that are no folder: Kodi 22 lists
+    its Video add-ons node there even when the user has no sources. []
+    when Kodi has none; None when the query failed, which must not be
+    taken for "no sources": the caller would then fall back to
+    library-derived folders and store them as libraries."""
     query = {
         "jsonrpc": "2.0",
         "method": "Files.GetSources",
@@ -125,6 +131,7 @@ def discover_sources() -> list[dict[str, str]] | None:
         discovered = [
             {"path": s.get("file", ""), "label": s.get("label", "")}
             for s in sources
+            if not s.get("file", "").startswith(_NOT_FOLDERS)
         ]
     except Exception:
         log.exception(
@@ -140,9 +147,6 @@ def discover_sources() -> list[dict[str, str]] | None:
     )
 
     return discovered
-
-
-_NOT_FOLDERS = ("plugin://", "videodb://", "http://", "https://")
 
 
 def _parent(path: str) -> str | None:

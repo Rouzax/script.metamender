@@ -111,6 +111,32 @@ def test_discover_folders_prefers_kodi_sources():
         assert discover_folders() == [{"path": "/m/", "label": "Films"}]
 
 
+def test_discover_sources_leaves_out_sources_that_are_no_folder():
+    # Kodi 22 lists its Video add-ons node as a video source, also when
+    # the user has no sources of their own.
+    rpc = _rpc({"Files.GetSources": {"result": {"sources": [
+        {"file": "addons://sources/video/", "label": "Video add-ons"},
+        {"file": "plugin://plugin.video.x/", "label": "X"},
+        {"file": "/m/", "label": "Films"}]}}})
+    with patch("resources.lib.data.sources.xbmc.executeJSONRPC", side_effect=rpc):
+        assert discover_sources() == [{"path": "/m/", "label": "Films"}]
+
+
+def test_discover_folders_falls_back_when_kodi_lists_only_video_add_ons():
+    rpc = _rpc({
+        "Files.GetSources": {"result": {"sources": [
+            {"file": "addons://sources/video/", "label": "Video add-ons"}]}},
+        "VideoLibrary.GetMovies": {"result": {"movies": [
+            {"file": "/data/Movies/A (1)/a.mkv"}, {"file": "/data/Movies/B (2)/b.mkv"}]}},
+        "VideoLibrary.GetTVShows": {"result": {"tvshows": [{"file": "/data/TV/Show/"}]}},
+    })
+    with patch("resources.lib.data.sources.xbmc.executeJSONRPC", side_effect=rpc):
+        assert discover_folders() == [
+            {"path": "/data/Movies/", "label": "data/Movies"},
+            {"path": "/data/TV/", "label": "data/TV"},
+        ]
+
+
 def test_discover_folders_falls_back_to_the_library():
     rpc = _rpc({
         "Files.GetSources": {"result": {"sources": []}},
