@@ -152,8 +152,7 @@ class FakeScan:
         self.stop_after = stop_after
         self.aborted_on = aborted_on
 
-    def __call__(self, media_type, tracker, source_config, enabled_fields, api_key,
-                 settings, **kw):
+    def __call__(self, media_type, tracker, libraries, api_key, settings, **kw):
         self.calls.append((media_type, [i.get("title") for i in kw["items"]],
                            kw.get("show_id_map"), kw.get("reset")))
         stats = {"updated": 0, "transient": 0, "unreachable": 0,

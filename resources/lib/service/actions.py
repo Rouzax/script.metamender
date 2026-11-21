@@ -26,8 +26,9 @@ import xbmcgui
 
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.kodi import get_item_by_id
+from resources.lib.data.libraries import legacy_config
 from resources.lib.data.media_types import EPISODE, MOVIE, MediaType
-from resources.lib.data.sources import load_source_config
+from resources.lib.data.sources import kodi_ui_language, load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
@@ -226,8 +227,7 @@ def update_now(dbtype: str, dbid: str) -> None:
         stats = run_scan(
             media_type=media_type,
             tracker=tracker,
-            source_config=source_config,
-            enabled_fields=settings["enabled_fields"],
+            libraries=legacy_config(source_config, settings, kodi_ui_language()),
             tmdb_api_key=tmdb_api_key,
             settings=settings,
             monitor=monitor,

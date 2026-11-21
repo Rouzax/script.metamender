@@ -43,7 +43,7 @@ from resources.lib.constants import (
     SERVICE_SLEEP_INTERVAL_SEC,
     SOURCES_CONFIG_FILENAME,
 )
-from resources.lib.data.libraries import FIELD_TOGGLES
+from resources.lib.data.libraries import FIELD_TOGGLES, legacy_config
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.presets import country_for_setting
 from resources.lib.data.sources import (
@@ -242,7 +242,7 @@ def _run_scan(
         Dict keyed by media type name with stats dicts as values.
     """
     tmdb_api_key = settings["tmdb_api_key"]
-    enabled_fields = settings["enabled_fields"]
+    libraries = legacy_config(source_config, settings, kodi_ui_language())
     settings = dict(settings, imdb_ready=_prepare_imdb_ratings(settings, monitor))
 
     all_stats: dict[str, dict[str, int]] = {}
@@ -258,8 +258,7 @@ def _run_scan(
         stats = run_scan(
             media_type=media_type,
             tracker=tracker,
-            source_config=source_config,
-            enabled_fields=enabled_fields,
+            libraries=libraries,
             tmdb_api_key=tmdb_api_key,
             settings=settings,
             monitor=monitor,
@@ -279,8 +278,7 @@ def _run_scan(
     episode_stats = run_scan(
         media_type=EPISODE,
         tracker=tracker,
-        source_config=source_config,
-        enabled_fields=enabled_fields,
+        libraries=libraries,
         tmdb_api_key=tmdb_api_key,
         settings=settings,
         monitor=monitor,

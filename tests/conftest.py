@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any, Dict, Generator
+from typing import TYPE_CHECKING, Any, Dict, Generator
 from unittest.mock import MagicMock
 
 import pytest
+
+if TYPE_CHECKING:
+    from resources.lib.data.libraries import LibraryConfig
 
 
 # ---------------------------------------------------------------------------
@@ -153,3 +156,32 @@ def imdbratings_stub() -> Generator[MagicMock, None, None]:
         sys.modules.pop("imdbratings", None)
     else:
         sys.modules["imdbratings"] = previous
+
+
+# Covers every file path the scan tests use.
+ONE_LIBRARY_PATH = "smb://"
+
+
+def one_library(fields: set[str] | frozenset[str], **overrides: Any) -> LibraryConfig:
+    """A LibraryConfig with one included library covering every test path,
+    language en-US and no fallback. ``fields`` are Kodi field names as the
+    scan manages them ("main_title" for a show's or movie's title); they must
+    be exactly the fields of some set of toggles. ``overrides`` set any other
+    Library attribute."""
+    from resources.lib.data.libraries import FIELD_TOGGLES, Library, LibraryConfig
+
+    wanted = frozenset(fields)
+    toggles = frozenset(name for name, own in FIELD_TOGGLES.items() if own <= wanted)
+    covered = frozenset().union(*(FIELD_TOGGLES[t] for t in toggles))
+    if covered != wanted:
+        raise ValueError("no toggles give exactly the fields {}".format(sorted(wanted)))
+    values: dict[str, Any] = {
+        "path": ONE_LIBRARY_PATH,
+        "label": "Test",
+        "included": True,
+        "language": "en-US",
+        "fallback_language": "",
+        "toggles": toggles,
+    }
+    values.update(overrides)
+    return LibraryConfig([Library(**values)])

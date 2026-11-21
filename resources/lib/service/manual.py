@@ -17,8 +17,9 @@ import time
 import xbmc
 
 from resources.lib.constants import DEFAULT_ADDON_ID
+from resources.lib.data.libraries import legacy_config
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
-from resources.lib.data.sources import load_source_config
+from resources.lib.data.sources import kodi_ui_language, load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
@@ -91,7 +92,7 @@ def run() -> None:
         tracker.begin_cycle(settings["resume_interrupted"])
 
         tmdb_api_key = settings["tmdb_api_key"]
-        enabled_fields = settings["enabled_fields"]
+        libraries = legacy_config(source_config, settings, kodi_ui_language())
 
         scan_start = time.perf_counter()
         all_stats = {}
@@ -107,8 +108,7 @@ def run() -> None:
             stats = run_scan(
                 media_type=media_type,
                 tracker=tracker,
-                source_config=source_config,
-                enabled_fields=enabled_fields,
+                libraries=libraries,
                 tmdb_api_key=tmdb_api_key,
                 settings=settings,
                 monitor=monitor,
@@ -120,8 +120,7 @@ def run() -> None:
         episode_stats = run_scan(
             media_type=EPISODE,
             tracker=tracker,
-            source_config=source_config,
-            enabled_fields=enabled_fields,
+            libraries=libraries,
             tmdb_api_key=tmdb_api_key,
             settings=settings,
             monitor=monitor,

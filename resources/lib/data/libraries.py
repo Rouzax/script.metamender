@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from resources.lib.constants import COUNTRY_CODES
 from resources.lib.data.presets import country_for_setting
 from resources.lib.data.sources import _path_matches, source_paths
 from resources.lib.utils import get_logger
@@ -29,6 +30,10 @@ VERSION = 2
 
 TITLE_LANGUAGE = "language"
 TITLE_ORIGINAL = "original"
+
+# A cert_country outside 0..len(COUNTRY_CODES): country_for_setting gives
+# None for it, so certifications have no country (they are off).
+NO_COUNTRY = -1
 
 # Toggle name -> the fields it switches on. "main_title" stands for the
 # "title" field of shows and movies, so the episode-title toggle does not
@@ -220,3 +225,42 @@ def scan_settings(lib: Library, general: dict[str, Any], ui_language: str) -> di
         "cert_replace_foreign": lib.cert_replace_foreign,
         "cert_not_found": lib.cert_not_found,
     }
+
+
+def legacy_config(source_config: dict[str, Any], settings: dict[str, Any],
+                  ui_language: str) -> LibraryConfig:
+    """The libraries a 1.1 sources.json and global settings describe: one per
+    source entry, each with the global options. An entry without a language
+    takes the config's default_language, or "" when that is unset too, so
+    the scan treats the folder as one without a configured language. Items
+    under no entry belong to no library.
+
+    ui_language is not consulted: the old settings carry the certification
+    country already resolved, and an unconfigured language stays "".
+    """
+    enabled = frozenset(settings.get("enabled_fields") or ())
+    toggles = frozenset(name for name, fields in FIELD_TOGGLES.items() if fields <= enabled)
+    country = settings.get("cert_country")
+    cert_country = COUNTRY_CODES.index(country) + 1 if country in COUNTRY_CODES else NO_COUNTRY
+    default_language = str(source_config.get("default_language") or "")
+    default_fallback = str(source_config.get("fallback_language") or "")
+    libraries = [
+        Library(
+            path=str(entry["path"]),
+            label="",
+            included=entry.get("enabled", True) is not False,
+            language=str(entry.get("language") or default_language),
+            fallback_language=str(entry.get("fallback_language", default_fallback) or ""),
+            toggles=toggles,
+            rating_source=int(settings.get("rating_source", 4)),
+            text_source_order=int(settings.get("text_source_order", 2)),
+            fallback_order=int(settings.get("fallback_order", 0)),
+            cert_country=cert_country,
+            cert_replace_foreign=bool(settings.get("cert_replace_foreign", True)),
+            cert_prefix_override=settings.get("cert_prefix_override"),
+            cert_not_found=settings.get("cert_not_found"),
+        )
+        for entry in source_config.get("sources") or []
+        if entry.get("path")
+    ]
+    return LibraryConfig(libraries)

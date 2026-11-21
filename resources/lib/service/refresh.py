@@ -22,8 +22,9 @@ from resources.lib.data.kodi import (
     get_item_by_id,
     get_season_info,
 )
+from resources.lib.data.libraries import legacy_config
 from resources.lib.data.media_types import EPISODE, TVSHOW, MediaType
-from resources.lib.data.sources import load_source_config
+from resources.lib.data.sources import kodi_ui_language, load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
@@ -226,7 +227,7 @@ def _pass(
         return True
 
     stats = run_scan(
-        media_type, tracker, source_config, settings["enabled_fields"],
+        media_type, tracker, legacy_config(source_config, settings, kodi_ui_language()),
         settings["tmdb_api_key"], settings, monitor=monitor, items=items,
         reset=True, breaker=breaker, show_id_map=show_id_map, progress=on_item,
     )

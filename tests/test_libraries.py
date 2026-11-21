@@ -8,6 +8,7 @@ from resources.lib.data.libraries import (
     FIELD_TOGGLES,
     Library,
     LibraryConfig,
+    legacy_config,
     load_libraries,
     new_library,
     resolve_country,
@@ -139,3 +140,44 @@ def test_scan_settings_merges_general():
     assert out["title_mode"] == "language"
     assert out["cert_replace_foreign"] is True
     assert general == {"cert_sites": frozenset({"fsk"}), "rate_limit": 0.5}
+
+
+def _legacy_settings(**kw):
+    settings = {
+        "enabled_fields": frozenset({"rating", "plot", "director", "writer"}),
+        "rating_source": 2, "text_source_order": 1, "fallback_order": 1,
+        "cert_country": "DE", "cert_prefix_override": "FSK ",
+        "cert_replace_foreign": False, "cert_not_found": "NR",
+    }
+    settings.update(kw)
+    return settings
+
+
+def test_legacy_config_one_library_per_entry():
+    config = legacy_config({
+        "default_language": "nl-NL", "fallback_language": "en-US",
+        "sources": [
+            {"path": "/m/", "language": "de-DE"},
+            {"path": "/s/", "enabled": False},
+            {"path": "/k/", "language": "fr-FR", "fallback_language": ""},
+        ],
+    }, _legacy_settings(), "en-US")
+    m, s, k = config.libraries
+    assert [lib.path for lib in config.libraries] == ["/m/", "/s/", "/k/"]
+    assert (m.included, m.language, m.fallback_language) == (True, "de-DE", "en-US")
+    assert (s.included, s.language) == (False, "nl-NL")
+    assert (k.language, k.fallback_language) == ("fr-FR", "")
+    assert m.toggles == {"ratings", "plots", "credits"}
+    assert (m.rating_source, m.text_source_order, m.fallback_order) == (2, 1, 1)
+    assert (m.cert_prefix_override, m.cert_replace_foreign, m.cert_not_found) == (
+        "FSK ", False, "NR")
+    assert scan_settings(m, {}, "en-US")["cert_country"] == "DE"
+    assert config.for_file("/elsewhere/a.mkv") is None
+
+
+def test_legacy_config_keeps_an_unconfigured_language_and_no_country():
+    config = legacy_config({"sources": [{"path": "/m/"}]},
+                           _legacy_settings(cert_country=None), "nl-NL")
+    lib = config.libraries[0]
+    assert lib.language == ""
+    assert scan_settings(lib, {}, "nl-NL")["cert_country"] is None
