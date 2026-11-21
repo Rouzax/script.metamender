@@ -72,9 +72,14 @@ An issue without a milestone has not been triaged yet. The label list lives in
 
 ### Requirements
 
-- Python 3.10 or newer. Kodi 21 runs 3.11, but some Linux builds use the
-  system's Python, so the code stays compatible with 3.10: no `typing.Self`,
-  `tomllib`, `except*` or `StrEnum`.
+- Python 3.10 or newer to run the checks; the add-on itself runs on 3.9.
+  Kodi 21 runs 3.11 on the official builds, but builds that use the system's
+  Python run older ones: OSMC's Kodi 21 runs 3.9. So the code stays
+  compatible with 3.9: no `match`, no `typing.Self`, `tomllib`, `except*` or
+  `StrEnum`, and `X | Y` only in annotations (every module starts with
+  `from __future__ import annotations`), never in a type alias or an
+  `isinstance` call evaluated at runtime. `tests/test_python_floor.py`
+  checks this.
 - For the checks: `pytest`, `Pillow` (for the art tests), `ruff`, `pyflakes`
   and `pyright`.
 - For the docs site: Zensical, installed from the hash-locked

@@ -49,5 +49,9 @@ updated, unchanged, or could not be checked.
 When it ends, a notification sums it up, for example "Updated: The Night
 Ferry, 6 of 24 changed".
 
+Update now only works in the [libraries you included](libraries.md). On an
+item in a library that is left out, or in no library, it changes nothing and
+a notification says the library is not included.
+
 Only one scan runs at a time. If a background scan is busy, Update now says
 **A scan is already running**; try again when it has finished.

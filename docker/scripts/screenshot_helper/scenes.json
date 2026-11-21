@@ -5,41 +5,53 @@
     "kind": "setup",
     "step": "key"
   },
-  "setup-language": {
+  "setup-libraries": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
     "kind": "setup",
-    "step": "language"
+    "step": "libraries"
   },
-  "setup-folders": {
+  "setup-library-page": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
     "kind": "setup",
-    "step": "folders"
+    "step": "libraries",
+    "library": "Kids Movies",
+    "focus": "title_mode",
+    "scroll": "end"
   },
-  "setup-features": {
+  "setup-library-page-new": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
     "kind": "setup",
-    "step": "features"
+    "step": "libraries",
+    "library": "TV Shows"
   },
-  "setup-ratings": {
+  "setup-library-page-ratings": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
     "kind": "setup",
-    "step": "ratings"
+    "step": "libraries",
+    "library": "Movies",
+    "focus": "rating",
+    "scroll": "end"
   },
-  "setup-text": {
+  "setup-library-page-age-ratings": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
     "kind": "setup",
-    "step": "text"
+    "step": "libraries",
+    "library": "Movies",
+    "focus": "country",
+    "scroll": "end"
   },
-  "setup-country": {
+  "setup-save-question": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
+    "active": "yesnodialog",
     "kind": "setup",
-    "step": "country"
+    "step": "libraries",
+    "question": true
   },
   "setup-summary": {
     "group": "setup",
@@ -77,6 +89,32 @@
         "smb://nas/media/Kids/TV/"
       ]
     ]
+  },
+  "attention-new-library": {
+    "group": "attention",
+    "window": "script-metamender-attention.xml",
+    "kind": "attention",
+    "main": "new_library",
+    "main_detail": "Sport Videos"
+  },
+  "attention-converted": {
+    "group": "attention",
+    "window": "script-metamender-attention.xml",
+    "kind": "attention",
+    "main": "libraries_converted",
+    "others": [
+      [
+        "new_library",
+        "Sport Videos"
+      ]
+    ]
+  },
+  "attention-converted-unread": {
+    "group": "attention",
+    "window": "script-metamender-attention.xml",
+    "kind": "attention",
+    "main": "libraries_converted",
+    "main_detail": "unread"
   },
   "details-plot-updated": {
     "group": "details",

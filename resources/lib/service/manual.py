@@ -9,6 +9,8 @@ Logging:
         - manual.start (INFO): Manual scan started
         - manual.complete (INFO): Manual scan finished with summary
         - manual.error (ERROR): Manual scan failed
+        - manual.no_libraries (WARNING): No libraries to scan yet (see
+          daemon._load_libraries); nothing scanned
 """
 from __future__ import annotations
 
@@ -18,16 +20,15 @@ import xbmc
 
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
-from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
 from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
-    _get_sources_config_path,
     _load_settings,
     _prepare_imdb_ratings,
+    _sync_libraries,
     tvdb_auth_failed,
     updated_text,
 )
@@ -86,12 +87,14 @@ def run() -> None:
         locked = True
 
         tracker = TrackerDB(_get_db_path())
-        source_config = load_source_config(_get_sources_config_path())
+        libraries = _sync_libraries(tracker, settings["ui_language"])
+        if libraries is None:
+            log.warning("No libraries to scan", event="manual.no_libraries")
+            return
 
         tracker.begin_cycle(settings["resume_interrupted"])
 
         tmdb_api_key = settings["tmdb_api_key"]
-        enabled_fields = settings["enabled_fields"]
 
         scan_start = time.perf_counter()
         all_stats = {}
@@ -101,14 +104,14 @@ def run() -> None:
         # A monitor so the manual scan yields to playback and honors abort,
         # exactly like the service scan.
         monitor = xbmc.Monitor()
-        settings["imdb_ready"] = _prepare_imdb_ratings(settings, monitor)
+        settings["imdb_ready"] = _prepare_imdb_ratings(
+            [lib for lib in libraries.libraries if lib.included], monitor)
 
         for media_type in (MOVIE, TVSHOW):
             stats = run_scan(
                 media_type=media_type,
                 tracker=tracker,
-                source_config=source_config,
-                enabled_fields=enabled_fields,
+                libraries=libraries,
                 tmdb_api_key=tmdb_api_key,
                 settings=settings,
                 monitor=monitor,
@@ -120,8 +123,7 @@ def run() -> None:
         episode_stats = run_scan(
             media_type=EPISODE,
             tracker=tracker,
-            source_config=source_config,
-            enabled_fields=enabled_fields,
+            libraries=libraries,
             tmdb_api_key=tmdb_api_key,
             settings=settings,
             monitor=monitor,

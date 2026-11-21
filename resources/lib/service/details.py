@@ -24,13 +24,9 @@ from typing import TYPE_CHECKING, Any
 
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
+from resources.lib.data.libraries import LibraryConfig, load_libraries, resolve_country
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW, MediaType
 from resources.lib.data.presets import load_preset
-from resources.lib.data.sources import (
-    kodi_ui_language,
-    load_source_config,
-    match_source,
-)
 from resources.lib.data.tracker import REASON_LOCKED, TrackerDB
 from resources.lib.engine.scan import candidate_fields, item_fields
 from resources.lib.engine.scanctx import holds_written_value
@@ -352,14 +348,22 @@ class DetailsSession:
         if not item:
             return None
         settings = _load_settings()
-        config = load_source_config(_get_sources_config_path())
-        source = match_source(item.get("file", ""), config.get("sources", []))
-        # The scan's language for the folder (scan.run_scan): the folder's
-        # own, else the configured default; with neither, the folder has no
-        # language and text is filled in Kodi's interface language.
-        code = source.get("language") or config.get("default_language") or ""
+        ui_language = settings["ui_language"]
+        libraries = load_libraries(_get_sources_config_path()) or LibraryConfig()
+        file_path = item.get("file", "")
+        lib = libraries.for_file(file_path)
+        # The item's library settings as the scan uses them. A library that
+        # is not included still shows its fields: what MetaMender wrote
+        # there can be restored. An item in no library has none.
+        code = ""
+        enabled: frozenset[str] = frozenset()
+        cert_country = None
+        if lib is not None:
+            code = libraries.folder_settings(file_path, lib)[1]
+            enabled = lib.fields()
+            cert_country = resolve_country(lib, ui_language)
         folder = language_name(code) if code else ""
-        text_language = folder or language_name(kodi_ui_language())
+        text_language = folder or language_name(ui_language)
         tracker = TrackerDB(_get_db_path())
         try:
             identity, scan_identity = _read_identity(
@@ -370,8 +374,7 @@ class DetailsSession:
         finally:
             tracker.close()
         self.identity = identity
-        enabled = settings["enabled_fields"]
-        cert_usable = cert_country_usable(settings.get("cert_country"))
+        cert_usable = cert_country_usable(cert_country)
         managed = managed_fields(self.media_type, enabled, cert_usable, scan_identity)
         rows = build_rows(
             self.media_type, item, item_row, fs_map, keep, date.today().isoformat(),

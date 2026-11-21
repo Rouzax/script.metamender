@@ -5,10 +5,14 @@ from resources.lib.service import attention
 from resources.lib.service.attention import (
     FOLDER_OFFLINE,
     KEY_REJECTED,
+    LIBRARIES_CONVERTED,
+    NEW_LIBRARY,
     NO_KEY,
     SCANS_FAILING,
     SETUP,
     TVDB_AUTH,
+    UNMATCHED,
+    WINDOW_KINDS,
     Attention,
     Problem,
 )
@@ -214,3 +218,48 @@ def test_update_does_not_write_over_a_record_it_could_not_read():
     tracker = ReadFails('{"open": {"key_rejected": ""}}')
     attention.update(tracker, lambda a: a.raise_problem(SETUP))
     assert tracker.values == {"attention": '{"open": {"key_rejected": ""}}'}
+
+
+def test_library_kinds_follow_the_offline_folder():
+    assert WINDOW_KINDS[WINDOW_KINDS.index(FOLDER_OFFLINE) + 1:] == (
+        NEW_LIBRARY, UNMATCHED, LIBRARIES_CONVERTED)
+
+
+def test_unmatched_reshown_only_on_growth():
+    a = Attention()
+    a.raise_problem(UNMATCHED, "5")
+    assert a.pending_window() == (Problem(UNMATCHED, "5"), [])
+    _show(a)
+    a.raise_problem(UNMATCHED, "3")
+    assert a.pending_window() is None
+    a.raise_problem(UNMATCHED, "5")
+    assert a.pending_window() is None
+    a.raise_problem(UNMATCHED, "6")
+    assert a.pending_window() == (Problem(UNMATCHED, "6"), [])
+    _show(a)
+    a.clear(UNMATCHED)
+    a.raise_problem(UNMATCHED, "1")
+    assert a.pending_window() == (Problem(UNMATCHED, "1"), [])
+
+
+def test_new_library_labels_accumulate():
+    a = Attention()
+    a.add_new_libraries(["Kids"])
+    assert a.pending_window() == (Problem(NEW_LIBRARY, "Kids"), [])
+    _show(a)
+    a.add_new_libraries(["Kids"])
+    assert a.pending_window() is None
+    a.add_new_libraries(["Sport", "Docs"])
+    assert a.pending_window() == (Problem(NEW_LIBRARY, "Kids, Sport, Docs"), [])
+    a.libraries_opened()
+    assert a.pending_window() is None
+    a.add_new_libraries(["Music videos"])
+    assert a.pending_window() == (Problem(NEW_LIBRARY, "Music videos"), [])
+
+
+def test_opening_the_libraries_clears_the_conversion_notice():
+    a = Attention()
+    a.raise_problem(LIBRARIES_CONVERTED)
+    a.raise_problem(UNMATCHED, "2")
+    a.libraries_opened()
+    assert a.pending_window() == (Problem(UNMATCHED, "2"), [])

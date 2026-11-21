@@ -6,9 +6,10 @@ Berlin. MetaMender writes every movie's and TV show's age rating in the
 rating system of **your** country, so you can rely on it when deciding what
 the kids may watch.
 
-Age ratings are on when **Age certifications** is ticked in
-[setup](setup.md#4-what-to-fill). Episodes have no age rating of their own in
-Kodi; the show's rating covers them.
+Age ratings are on in a library when **Age certifications** is ticked on its
+[page](libraries.md#what-to-fill), and each library has its own country.
+Episodes have no age rating of their own in Kodi; the show's rating covers
+them.
 
 ## Which countries
 
@@ -25,9 +26,11 @@ Kodi; the show's rating covers them.
 | Sweden | Mediemyndigheten | `SE:11` |
 | Australia | ACB (Australian Classification Board) | `AU:MA 15+` |
 
-**Automatic** (the default) uses the country of Kodi's interface language.
-Some skins expect a different prefix; **Override certification prefix** in the
-settings lets you choose your own, or none.
+**Automatic** (the default) uses the country of the library's language; only
+a language without a country makes it use the country of Kodi's interface
+language. When that country is not in this list, the library's page asks you
+to choose one. Some skins expect a different prefix; **Rating prefix** on the
+library's [page](libraries.md#age-ratings) lets you choose your own, or none.
 
 Australian ratings are written with their official spelling (`MA 15+`,
 `R 18+`); a value already in Kodi as `AU:MA15+` counts as the same rating and
@@ -70,12 +73,12 @@ converted one says so, for example "TMDB (GB), converted".
   prefix is changed.
 - **A rating from another country's system**, such as "Rated PG-13" in a Dutch
   library, is replaced, once MetaMender finds a rating for your country.
-  Switch off **Replace incorrect certifications** to have MetaMender only fill
+  Untick **Replace other countries' ratings** to have MetaMender only fill
   empty ratings.
 - **A rating from an NFO file** is never replaced.
 - **When no source has a rating**, the field stays empty. If you would rather
-  see that an item was checked, switch on **Apply certification when not
-  found**: after a year of monthly checks MetaMender writes the value you
+  see that an item was checked, set **When no rating is found** to **Write a
+  value**: after a year of monthly checks MetaMender writes the value you
   choose (for example `NR`) into ratings that are still empty.
 
 You can undo a rating MetaMender wrote with **Restore original** in the

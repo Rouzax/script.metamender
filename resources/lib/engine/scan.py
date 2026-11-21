@@ -18,9 +18,17 @@ Logging:
         - scan.complete (INFO): Scan cycle finished with stats, the
           providers disabled this cycle, and counts of the per-item DEBUG
           outcomes (unknown ids accepted, episodes found by TVDB id)
-        - scan.skip (DEBUG): Item skipped (disabled source, not due, no
-          candidates, or reason="unreachable": the media could not be found,
-          so NFO state is unknown; scan.complete counts these)
+        - scan.skip (DEBUG): Item skipped (not due, no candidates;
+          reason="excluded": its library or subfolder is not included;
+          reason="unmatched": its file is in no library; reason="unreachable":
+          the media could not be found, so NFO state is unknown;
+          reason="no_fields": its library has nothing switched on;
+          reason="providers_down": every provider its library needs is
+          disabled while another library's still work; scan.complete
+          counts these)
+        - scan.fields_disabled (DEBUG): An item's fields its library no
+          longer manages lost their fingerprint, so they are checked again
+          once switched back on
         - scan.transient (DEBUG): An episode's TMDB path waits because its
           show's ids are not resolved yet (reason="show_unresolved")
         - scan.protected (DEBUG): An answered value was not written because
@@ -64,6 +72,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
@@ -77,10 +86,17 @@ from resources.lib.constants import (
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.kodi import get_item_by_id
+from resources.lib.data.libraries import (
+    TITLE_LANGUAGE,
+    TITLE_ORIGINAL,
+    Library,
+    LibraryConfig,
+    scan_settings,
+)
 from resources.lib.data.media_types import MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import load_preset
-from resources.lib.data.sources import kodi_ui_language, match_source
+from resources.lib.data.sources import kodi_ui_language
 from resources.lib.data.tracker import (
     REASON_FILL_ONLY,
     REASON_LOCKED,
@@ -181,8 +197,9 @@ def settings_fingerprint(
     sampled, so the inputs are exactly what changes the answer: rating_source
     for ratings; for title and plot the folder's language and fallback
     language ("" when it has none), plus the provider and fallback orders on
-    shows and episodes (movies ask TMDB only); for every other field, one
-    TMDB step, the folder language.
+    shows and episodes (movies ask TMDB only), plus the library's title mode
+    for a show's or movie's title; for every other field, one TMDB step, the
+    folder language.
     """
     if field in RATING_FIELDS:
         inputs: dict[str, Any] = {
@@ -206,6 +223,11 @@ def settings_fingerprint(
         if media_type != "movie":
             inputs["text_source_order"] = settings.get("text_source_order", TEXT_FOLLOW_SCRAPER)
             inputs["fallback_order"] = settings.get("fallback_order", FALLBACK_TVDB_FIRST)
+        # Only another mode is recorded: titles kept in the library's
+        # language keep the fingerprint they were sampled under.
+        title_mode = settings.get("title_mode", TITLE_LANGUAGE)
+        if field == "title" and media_type != "episode" and title_mode != TITLE_LANGUAGE:
+            inputs["title_mode"] = title_mode
     else:
         inputs = {"folder_language": folder_language}
     return json.dumps(inputs, sort_keys=True)
@@ -222,6 +244,10 @@ def _make_stats() -> dict[str, Any]:
         # field values not written because an NFO supplied the field.
         "unreachable": 0,
         "protected": 0,
+        # Items skipped because their library, or the subfolder they are in,
+        # is not included; and items whose file is in no library.
+        "excluded": 0,
+        "unmatched": 0,
         # Fields left unchecked because a provider failed transiently, plus
         # items skipped while an id lookup had no answer: Update now tells
         # "could not check" from "nothing changed" by it.
@@ -478,7 +504,14 @@ def _resolve_fields(
             # Ratings and certifications have their own producers.
             continue
         key = _KODI_TO_TMDB.get(f, f)
-        if f in _CHAIN_FIELDS:
+        if (f == "title" and ctx.media_type.name != "episode"
+                and ctx.title_mode == TITLE_ORIGINAL):
+            # The original title is the same whatever language was asked for,
+            # so it needs no language chain and no fallback.
+            value = None if tmdb_transient else tmdb_data.get("original_title") or None
+            outcome = FieldOutcome(transient=tmdb_transient, value=value, from_fallback=False)
+            provider = None if value is None else "tmdb"
+        elif f in _CHAIN_FIELDS:
             current = None if f in reopened else item.get(f)
             outcome, provider = _text_chain(ctx, text, f, folder_lang, fallback_lang, current)
         else:
@@ -623,9 +656,10 @@ def _cert_config(
     monitor: Any,
     gate: SiteGate | None,
 ) -> _CertConfig | None:
-    """The pass's certification settings, or None when certifications are off
-    for it. A configured country without a usable preset turns them off for
-    the pass with one ERROR, rather than writing ratings from a wrong system."""
+    """A library's certification settings, or None when certifications are
+    off for it. A configured country without a usable preset turns them off
+    for the library's items with one ERROR, rather than writing ratings from
+    a wrong system."""
     if "mpaa" not in enabled_fields or media_type.name not in ("movie", "tvshow"):
         return None
     country = settings.get("cert_country")
@@ -813,11 +847,71 @@ def _new_items(tracker: TrackerDB, media_type: MediaType) -> list[dict[str, Any]
     return items
 
 
+@dataclass(frozen=True)
+class _LibraryPass:
+    """One library's share of a pass: its ctx, its settings as the engine
+    reads them, the fields it manages and the providers those need."""
+
+    ctx: _ScanCtx
+    settings: dict[str, Any]
+    candidates: list[str]
+    needed: list[str]
+
+
+def _library_pass(
+    base: _ScanCtx,
+    lib: Library,
+    settings: dict[str, Any],
+    ui_language: str,
+    monitor: Any,
+    gate: SiteGate,
+) -> _LibraryPass:
+    """The ctx and fields for the items of ``lib``, derived from the pass's
+    base ctx so caches, pacing and the breaker stay shared."""
+    lib_settings = scan_settings(lib, settings, ui_language)
+    fields = lib.fields()
+    ctx = replace(
+        base,
+        enabled_fields=fields,
+        rating_pref=lib_settings["rating_source"],
+        text_order=lib_settings["text_source_order"],
+        fallback_order=lib_settings["fallback_order"],
+        cert=_cert_config(base.media_type, fields, lib_settings, base.breaker, monitor, gate),
+        title_mode=lib.title_mode,
+    )
+    candidates = candidate_fields(base.media_type, fields)
+    if ctx.cert is not None:
+        candidates = sorted(set(candidates) | {"mpaa"})
+    return _LibraryPass(ctx, lib_settings, candidates,
+                        _needed_providers(base.media_type, candidates))
+
+
+def _pass_providers(
+    media_type: MediaType,
+    libraries: LibraryConfig,
+    items: list[dict[str, Any]],
+    reset: bool,
+) -> list[str]:
+    """Providers the pass as a whole can still make progress with: those of
+    every library with items to scan (included, or any on Update now) and
+    fields switched on. The pass stops only when all of them are down."""
+    seen: dict[str, Library] = {}
+    for item in items:
+        lib = libraries.for_file(item.get("file", ""))
+        if lib is not None and (lib.included or reset):
+            seen[lib.path] = lib
+    needed: set[str] = set()
+    for lib in seen.values():
+        candidates = candidate_fields(media_type, lib.fields())
+        if candidates or "mpaa" in lib.fields():
+            needed.update(_needed_providers(media_type, candidates))
+    return sorted(needed)
+
+
 def run_scan(
     media_type: MediaType,
     tracker: TrackerDB,
-    source_config: dict[str, Any],
-    enabled_fields: frozenset[str],
+    libraries: LibraryConfig,
     tmdb_api_key: str,
     settings: dict[str, Any],
     monitor: Any = None,
@@ -839,16 +933,15 @@ def run_scan(
     Args:
         media_type: MOVIE, TVSHOW, or EPISODE.
         tracker: Open TrackerDB instance.
-        source_config: Loaded source config dict with a "sources" list and
-            optionally "default_language" and "fallback_language"; a source
-            entry may set its own "language" and "fallback_language".
-        enabled_fields: Set of field names the user wants backfilled.
+        libraries: The libraries. Each item is scanned with the fields and
+            options of the library its file is in (an episode by its own
+            file); an item in no library is skipped (stats["unmatched"]).
         tmdb_api_key: TMDB API key.
-        settings: Dict with stale_threshold_days, rate_limit, rating_source,
-            text_source_order, fallback_order, imdb_ready
+        settings: The general settings: stale_threshold_days, rate_limit,
+            cert_sites, optionally refetch_schedule, plus imdb_ready
             (whether the IMDb ratings store is loaded this cycle; an IMDb
-            rating is transient while it is False) and optionally
-            refetch_schedule.
+            rating is transient while it is False) and ui_language (Kodi's
+            interface language; read from Kodi when absent).
         monitor: xbmc.Monitor instance (has abortRequested()), or
             None for tests.
         show_id_map: Dict mapping a show's Kodi id to its show-level TMDB ID.
@@ -863,11 +956,12 @@ def run_scan(
             disabled across passes. When None, a fresh per-call breaker
             is created (single-pass / test convenience).
         reset: The "Update now" path. When True every candidate field is
-            treated as due regardless of recorded maturity, the
-            disabled-source gate and the playback yield are skipped (so the
-            action always runs), and a field with history keeps its clock:
-            only what was written is recorded (record_manual_check). A field
-            without history gets a normal first sample.
+            treated as due regardless of recorded maturity, the inclusion
+            gate (library and subfolder) and the playback yield are skipped
+            (so the action always runs; the caller decides whether it may),
+            and a field with history keeps its clock: only what was written
+            is recorded (record_manual_check). A field without history gets
+            a normal first sample.
         new_only: Library-event scan: process only the items whose Kodi id
             the tracker does not hold for this type. Kodi's dateadded is the
             file's date, not when the item entered the library, so it cannot
@@ -878,8 +972,8 @@ def run_scan(
             (stats["stopped"]); an item is never stopped half-way.
 
     Returns:
-        Stats dict with processed, skipped, updated, errors, and
-        per-field counts.
+        Stats dict with processed, skipped, updated, errors, excluded,
+        unmatched and per-field counts.
     """
     scan_start = time.perf_counter()
     stats = _make_stats()
@@ -892,16 +986,16 @@ def run_scan(
         schedule = tuple(raw_schedule)
     else:
         schedule = DEFAULT_REFETCH_SCHEDULE
-    ctx = _ScanCtx(
+    ui_language = str(settings.get("ui_language") or kodi_ui_language())
+    # One gate for every library: its request cap and memo are per cycle.
+    gate = cert_gate or SiteGate(frozenset(settings.get("cert_sites") or ()), breaker, monitor)
+    shared = _ScanCtx(
         media_type=media_type,
         tracker=tracker,
         breaker=breaker,
         pacer=_Pacer(settings.get("rate_limit", 0.25)),
         tmdb_api_key=tmdb_api_key,
-        default_language=source_config.get("default_language") or kodi_ui_language(),
-        default_language_set=bool(source_config.get("default_language")),
-        sources=source_config.get("sources", []),
-        enabled_fields=enabled_fields,
+        enabled_fields=frozenset(),
         show_id_map=show_id_map or {},
         show_tvdb_map=(
             tracker.get_show_tvdb_map() if media_type.name == "episode" else {}
@@ -915,26 +1009,19 @@ def run_scan(
         logged_once=set(),
         counts={"unknown_ids_accepted": 0, "episodes_found_by_tvdb": 0},
         schedule=schedule,
-        rating_pref=settings.get("rating_source", FOLLOW_SCRAPER),
-        text_order=settings.get("text_source_order", TEXT_FOLLOW_SCRAPER),
-        fallback_order=settings.get("fallback_order", FALLBACK_TVDB_FIRST),
-        default_fallback=str(source_config.get("fallback_language") or ""),
+        rating_pref=FOLLOW_SCRAPER,
+        text_order=TEXT_FOLLOW_SCRAPER,
+        fallback_order=FALLBACK_TVDB_FIRST,
         imdb_ready=bool(settings.get("imdb_ready", False)),
-        cert=_cert_config(media_type, enabled_fields, settings, breaker, monitor, cert_gate),
         reset=reset,
         tracked_shows=(
             tracker.get_tracked_show_ids()
             if media_type.name == "episode" else frozenset()
         ),
     )
-    candidates = candidate_fields(media_type, enabled_fields)
-    if ctx.cert is not None:
-        candidates = sorted(set(candidates) | {"mpaa"})
-    forgotten = tracker.forget_disabled_fields(media_type.name, candidates)
-    if forgotten:
-        log.debug("Disabled fields will be checked again when enabled",
-                  event="scan.fields_disabled", media_type=media_type.name, rows=forgotten)
-    needed = _needed_providers(media_type, candidates)
+    # Built on a library's first item, so a library the pass never meets
+    # costs nothing (and logs no certification error).
+    passes: dict[str, _LibraryPass] = {}
 
     log.info(
         "Scan starting",
@@ -945,6 +1032,7 @@ def run_scan(
 
     if items is None:
         items = _new_items(tracker, media_type) if new_only else kodi.get_all_items(media_type)
+    needed = _pass_providers(media_type, libraries, items, reset)
 
     for index, item in enumerate(items):
         # Check for Kodi shutdown
@@ -971,11 +1059,43 @@ def run_scan(
         # Yield: pause while video is playing. The reset path (Update now)
         # skips this so a manual single-item action does not silently block.
         if not reset:
-            _yield_to_playback(ctx, monitor, stats["processed"])
+            _yield_to_playback(shared, monitor, stats["processed"])
 
         title = _item_title(item, media_type)
+        file_path = item.get("file", "")
+        # An item in no library has no settings to scan it with, on Update
+        # now too; it is not tracked, so it leaves no trace.
+        lib = libraries.for_file(file_path)
+        if lib is None:
+            log.debug(
+                "Skipping item in no library",
+                event="scan.skip", reason="unmatched", title=title,
+                media_type=media_type.name, file_path=file_path,
+            )
+            stats["skipped"] += 1
+            stats["unmatched"] += 1
+            continue
+        included_here, folder_language, fallback_lang = libraries.folder_settings(
+            file_path, lib)
+        fallback_lang = fallback_lang.strip()
+
         kodi_id = item.get(media_type.kodi_id_field, 0)
         identity = _tracker_identity(tracker, media_type, item, kodi_id)
+
+        # A library or subfolder that is not included is skipped, but its
+        # items count as present, so orphan pruning keeps their history for
+        # when it is included again. Update now bypasses the gate: whether
+        # it may run there is the caller's call.
+        if not reset and not (lib.included and included_here):
+            log.debug(
+                "Skipping item outside the included libraries",
+                event="scan.skip", reason="excluded", title=title,
+                media_type=media_type.name, library=lib.path,
+            )
+            tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
+            stats["skipped"] += 1
+            stats["excluded"] += 1
+            continue
 
         # Resume: skip items already processed in this cycle. The reset path
         # (Update now) bypasses this so a just-scanned item can still be
@@ -986,36 +1106,37 @@ def run_scan(
                 stats["skipped"] += 1
                 continue
 
-        # Match source. The reset path (Update now) bypasses the disabled-source
-        # gate: the user explicitly requested a refresh, so the source setting
-        # must not silently block it.
-        source = match_source(item.get("file", ""), ctx.sources)
-        if not reset and not source.get("enabled", True):
+        lib_pass = passes.get(lib.path)
+        if lib_pass is None:
+            lib_pass = _library_pass(shared, lib, settings, ui_language, monitor, gate)
+            passes[lib.path] = lib_pass
+        ctx = lib_pass.ctx
+        candidates = lib_pass.candidates
+
+        # A library with nothing switched on has nothing to fetch: no id
+        # lookups, no new tracker row. A row it already has stays present
+        # for orphan pruning and drops the fingerprints of its old fields.
+        if not candidates:
             log.debug(
-                "Skipping disabled source",
-                event="scan.skip",
-                title=title,
-                source_path=source.get("path", ""),
+                "Skipping item in a library with no fields",
+                event="scan.skip", reason="no_fields", title=title,
+                media_type=media_type.name, library=lib.path,
             )
+            tracker.forget_item_fields(media_type.name, identity, candidates)
+            tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
             stats["skipped"] += 1
             continue
 
-        language = source.get("language") or ctx.default_language
-        # A source's own fallback_language wins, "" included (no fallback for
-        # that folder even when sources.json sets a default).
-        fallback_lang = str(
-            source.get("fallback_language", ctx.default_fallback) or ""
-        ).strip()
-        fill_only = (
-            frozenset() if source.get("language") or ctx.default_language_set
-            else LANGUAGE_FIELDS
-        )
+        # A folder without a configured language is fetched in Kodi's
+        # interface language, a guess, so its text only fills empty fields.
+        language = folder_language or ui_language
+        fill_only = frozenset() if folder_language else LANGUAGE_FIELDS
         if fill_only and "language_unconfigured" not in ctx.logged_once:
             ctx.logged_once.add("language_unconfigured")
             log.info(
                 "Folder without a configured language: text fills empty fields only",
                 event="scan.language_unconfigured", language=language,
-                media_type=media_type.name, source_path=item.get("file", ""),
+                media_type=media_type.name, source_path=file_path,
             )
 
         # Extract external IDs
@@ -1047,6 +1168,11 @@ def run_scan(
             date_added=item.get("dateadded", ""),
         )
         tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
+        forgotten = tracker.forget_item_fields(media_type.name, identity, candidates)
+        if forgotten:
+            log.debug("Disabled fields will be checked again when enabled",
+                      event="scan.fields_disabled", media_type=media_type.name,
+                      identity=identity, rows=forgotten)
         stored = tracker.get_item(media_type.name, identity) or {}
 
         # --- Per-field maturity decisions (see maturity.decide_field) ---
@@ -1068,7 +1194,8 @@ def run_scan(
         # stored) is re-checked as if never sampled, and re-baselined once it
         # answers. A transient keeps the old fingerprint, so it stays due.
         fps = {
-            f: settings_fingerprint(f, settings, language, media_type.name, fallback_lang)
+            f: settings_fingerprint(f, lib_pass.settings, language, media_type.name,
+                                    fallback_lang)
             for f in fields
         }
         rebaseline = {
@@ -1193,6 +1320,17 @@ def run_scan(
             )
             stats["aborted"] = True
             break
+        # Another library of the pass can still make progress: this item
+        # waits for its providers, with nothing recorded.
+        if breaker.all_disabled(lib_pass.needed):
+            log.debug(
+                "Providers of this library are disabled, skipping item",
+                event="scan.skip", reason="providers_down", title=title,
+                media_type=media_type.name, providers=lib_pass.needed,
+            )
+            stats["skipped"] += 1
+            stats["transient"] += 1
+            continue
 
         tmdb_lang = tmdb_language(language)
         fetch_primary = (
@@ -1396,6 +1534,8 @@ def run_scan(
         tracker.mark_cycle_processed(media_type.name, identity)
         stats["processed"] += 1
 
+    # The last items' last_seen stamps, when they were skipped as excluded.
+    tracker.commit()
     stats["tvdb_auth_failed"] = "tvdb" in breaker.auth_rejected()
     stats["tmdb_answered"] = breaker.answered("tmdb")
     stats["tvdb_answered"] = breaker.answered("tvdb")
@@ -1410,8 +1550,10 @@ def run_scan(
         errors=stats["errors"],
         unreachable=stats["unreachable"],
         protected=stats["protected"],
-        unknown_ids_accepted=ctx.counts["unknown_ids_accepted"],
-        episodes_found_by_tvdb=ctx.counts["episodes_found_by_tvdb"],
+        excluded=stats["excluded"],
+        unmatched=stats["unmatched"],
+        unknown_ids_accepted=shared.counts["unknown_ids_accepted"],
+        episodes_found_by_tvdb=shared.counts["episodes_found_by_tvdb"],
         disabled=breaker.disabled(),
         duration_ms=int((time.perf_counter() - scan_start) * 1000),
     )

@@ -11,9 +11,9 @@ your own country.
 
 **Gaps get filled.**
 :   Missing plots, episode titles, credits, taglines and more are filled in
-    from TMDB and TheTVDB, in each folder's own language, with an optional
+    from TMDB and TheTVDB, in each library's own language, with an optional
     fallback language for what does not exist in yours.
-    [What to fill](setup.md#4-what-to-fill)
+    [What to fill](libraries.md#what-to-fill)
 
 **Scores that keep up.**
 :   Scrapers fetch an episode's score once, often in its first week when it has
@@ -40,6 +40,10 @@ your own country.
 - **Quiet.** Nothing on screen while you watch; a short notification after a
   scan that changed something; a window only when something needs you.
   [Scans](scans.md)
+- **Your choice, per library.** Each library has its own settings, and
+  MetaMender only works in the libraries you include. Keep original titles in
+  the kids' library and leave the sport recordings alone.
+  [Libraries](libraries.md)
 - **Update now.** Refresh a movie, show, season or episode from its context
   menu. [Update now](update-now.md)
 
@@ -56,12 +60,13 @@ New here? [Install](install.md) MetaMender, then walk through the
 | Page | What it covers |
 |---|---|
 | [Install](install.md) | What you need, the Rouzax repository, a zip file |
-| [Setup](setup.md) | The TMDB key, languages, what to fill, which rating to show, where plots and titles come from, the age rating country |
+| [Setup](setup.md) | The TMDB key, the libraries MetaMender looks after, the summary |
+| [Libraries](libraries.md) | Each library's choices: language, what to fill, which rating to show, where plots and titles come from, original titles, the age rating country |
 | [Scans](scans.md) | When MetaMender scans, how often a field is checked, what you see |
 | [Update now](update-now.md) | Refreshing one item, show or season right away |
 | [The Details window](details.md) | Why a field looks the way it does; Restore original and the lock |
 | [Age ratings](age-ratings.md) | Countries, where ratings come from, what is kept |
 | [Coming from EU Certification Fixer](coming-from-eu-cert-fixer.md) | Switching over |
-| [Settings](settings.md) | Every setting explained |
+| [Settings](settings.md) | The settings for the whole add-on |
 | [Where your data comes from](where-data-comes-from.md) | What MetaMender reads and writes, field by field |
 | [Troubleshooting and FAQ](troubleshooting.md) | Common questions and problems |

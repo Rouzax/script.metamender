@@ -134,6 +134,12 @@ def cmd_probe() -> int:
 def cmd_apikey() -> int:
     """An invalid TMDB key must surface as ApiKeyError (read-only on Kodi)."""
     from resources.lib.data.kodi import get_all_items
+    from resources.lib.data.libraries import (
+        FIELD_TOGGLES,
+        NO_COUNTRY,
+        Library,
+        LibraryConfig,
+    )
     from resources.lib.data.media_types import TVSHOW
     from resources.lib.data.tracker import TrackerDB
     from resources.lib.engine.scan import run_scan
@@ -155,15 +161,19 @@ def cmd_apikey() -> int:
         print("provider raised ApiKeyError on bad key?  YES")
 
     tracker = TrackerDB(os.path.join(_TMP, "tracker.db"))
-    settings = {"rate_limit": 0, "rating_source": 0,
-                "text_source_order": 0, "stale_threshold_days": 365}
+    settings = {"rate_limit": 0, "stale_threshold_days": 365}
     raised = None
     stats = None
     try:
         stats = run_scan(
             media_type=TVSHOW, tracker=tracker,
-            source_config={"sources": [], "default_language": "en-US"},
-            enabled_fields=TVSHOW.backfill_fields, tmdb_api_key=bogus,
+            libraries=LibraryConfig([Library(
+                path=target["file"], label="verify", included=True, language="en-US",
+                fallback_language="",
+                toggles=frozenset(name for name, own in FIELD_TOGGLES.items()
+                                  if own & TVSHOW.backfill_fields),
+                rating_source=0, text_source_order=0, cert_country=NO_COUNTRY)]),
+            tmdb_api_key=bogus,
             settings=settings, monitor=None, items=[target],
         )
     except Exception as exc:  # noqa: BLE001

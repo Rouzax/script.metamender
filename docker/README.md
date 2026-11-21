@@ -23,7 +23,7 @@ lock (`service/lock.py`) keeps its token in `special://temp/metamender_scan.lock
 instead of a window property, and the service deletes that file at startup in
 case a killed Kodi left it behind. Kodi logs one harmless
 `EXCEPTION: Window id does not exist` per interpreter when the lock first looks
-for the window. The image runs Python 3.10, the add-on's floor. There is no
+for the window. The image runs Python 3.10; the add-on's floor is 3.9 (OSMC). There is no
 scoped scan: a scan in the container covers the whole library, so bracket it
 with backup and restore.
 

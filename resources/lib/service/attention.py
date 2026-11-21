@@ -29,7 +29,19 @@ NO_KEY = "no_key"
 KEY_REJECTED = "key_rejected"
 SCANS_FAILING = "scans_failing"
 FOLDER_OFFLINE = "folder_offline"
-WINDOW_KINDS: tuple[str, ...] = (SETUP, NO_KEY, KEY_REJECTED, SCANS_FAILING, FOLDER_OFFLINE)
+# Notices about the libraries, all answered by opening the library list.
+# NEW_LIBRARY's detail is the labels found since the list was last opened,
+# UNMATCHED's the number of items in no library.
+NEW_LIBRARY = "new_library"
+UNMATCHED = "unmatched"
+LIBRARIES_CONVERTED = "libraries_converted"
+# LIBRARIES_CONVERTED's detail when the 1.1 values could not be read, so
+# the libraries were converted with nothing switched on.
+SETTINGS_UNREAD = "unread"
+WINDOW_KINDS: tuple[str, ...] = (
+    SETUP, NO_KEY, KEY_REJECTED, SCANS_FAILING, FOLDER_OFFLINE,
+    NEW_LIBRARY, UNMATCHED, LIBRARIES_CONVERTED,
+)
 
 # A problem the user cannot fix, told by a toast instead of the window.
 TVDB_AUTH = "tvdb_auth"
@@ -112,12 +124,29 @@ class Attention:
         self._open.pop(kind, None)
         self._shown.pop(kind, None)
 
+    def add_new_libraries(self, labels: list[str]) -> None:
+        """Add libraries found since the library list was last opened to
+        the new-library notice."""
+        known = _folders(self._open.get(NEW_LIBRARY, ""))
+        added = [label for label in labels if label and label not in known]
+        if added:
+            self.raise_problem(NEW_LIBRARY, ", ".join(known + added))
+
+    def libraries_opened(self) -> None:
+        """The user saw the library list: the new libraries and the
+        conversion are no longer news."""
+        self.clear(NEW_LIBRARY)
+        self.clear(LIBRARIES_CONVERTED)
+
     def _unshown(self, kind: str) -> bool:
         if kind not in self._shown:
             return True
         if kind == FOLDER_OFFLINE:
             # Only a newly offline folder is news; one coming back is not.
             return bool(set(_folders(self._open[kind])) - set(_folders(self._shown[kind])))
+        if kind == UNMATCHED:
+            # Fewer items in no library is not news; more is.
+            return _count(self._open[kind]) > _count(self._shown[kind])
         return self._shown[kind] != self._open[kind]
 
     def pending_window(self) -> tuple[Problem, list[Problem]] | None:
@@ -179,6 +208,13 @@ class Attention:
 
 def _folders(detail: str) -> list[str]:
     return [f for f in detail.split(", ") if f]
+
+
+def _count(detail: str) -> int:
+    try:
+        return int(detail)
+    except ValueError:
+        return 0
 
 
 def _read(tracker: Any) -> tuple[Attention, bool]:

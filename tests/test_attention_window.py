@@ -9,8 +9,12 @@ import pytest
 from resources.lib.service.attention import (
     FOLDER_OFFLINE,
     KEY_REJECTED,
+    LIBRARIES_CONVERTED,
+    NEW_LIBRARY,
     NO_KEY,
+    SETTINGS_UNREAD,
     SETUP,
+    UNMATCHED,
     WINDOW_KINDS,
     Problem,
 )
@@ -71,3 +75,43 @@ def test_window_xml_reads_every_property():
     xml = (_ROOT / "resources/skins/Default/1080i/script-metamender-attention.xml").read_text()
     for key in attention_properties(Problem(SETUP, ""), []):
         assert "Window.Property(%s)" % key in xml, key
+
+
+def test_new_kinds_offer_open_libraries():
+    for kind, detail in ((NEW_LIBRARY, "Kids, Sport"), (UNMATCHED, "4"),
+                         (LIBRARIES_CONVERTED, "")):
+        props = attention_properties(Problem(kind, detail), [])
+        assert props["MM.Action"] == "Open Libraries", kind
+        assert detail in props["MM.Problem"], kind
+        assert attention_window.fix_for(kind) == "libraries"
+    assert attention_window.fix_for(SETUP) == "setup"
+    assert attention_window.fix_for(FOLDER_OFFLINE) == ""
+
+
+
+@pytest.mark.parametrize("problem,full,short", [
+    (Problem(NEW_LIBRARY, "Kids"),
+     "MetaMender found a new library, Kids. It stays out until you include it.",
+     "New library found: Kids"),
+    (Problem(NEW_LIBRARY, "Kids, Sport"),
+     "MetaMender found new libraries: Kids, Sport. They stay out until you include them.",
+     "New libraries found: Kids, Sport"),
+    (Problem(UNMATCHED, "1"),
+     "1 item is in no MetaMender library, so it is not being updated.",
+     "1 item is in no MetaMender library"),
+    (Problem(UNMATCHED, "12"),
+     "12 items are in no MetaMender library, so they are not being updated.",
+     "12 items are in no MetaMender library"),
+    (Problem(LIBRARIES_CONVERTED, ""),
+     "MetaMender now has settings per library. Your settings were copied to each library.",
+     "Settings are now per library"),
+    (Problem(LIBRARIES_CONVERTED, SETTINGS_UNREAD),
+     ("MetaMender now has settings per library. Your earlier choices could not be read, "
+      "so nothing is switched on yet: open Libraries to choose."),
+     "Settings are now per library, nothing switched on"),
+])
+def test_library_notices_read_for_one_or_several(problem, full, short):
+    assert attention_window.problem_text(problem, short=False) == full
+    assert attention_window.problem_text(problem, short=True) == short
+    props = attention_properties(Problem(SETUP, ""), [problem])
+    assert props["MM.Also"].endswith(short)

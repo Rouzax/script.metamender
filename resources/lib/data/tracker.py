@@ -899,7 +899,7 @@ class TrackerDB:
     def forget_field_fingerprint(self, media_type: str, identity: str, field: str) -> bool:
         """Clear one field's settings fingerprint (no commit), so the next
         scan checks it again whatever its clock says, keeping its provenance,
-        as forget_disabled_fields does for a re-enabled field. False when the
+        as forget_item_fields does for a re-enabled field. False when the
         write failed."""
         try:
             self._conn.execute(
@@ -913,11 +913,12 @@ class TrackerDB:
             return False
         return True
 
-    def forget_disabled_fields(self, media_type: str, enabled: Iterable[str]) -> int:
-        """Clear the settings fingerprint of every field of ``media_type`` not
-        in ``enabled``. A field switched off and on again then no longer
-        matches its fingerprint, so the scan checks it once more, keeping
-        its provenance. Returns the number of rows cleared."""
+    def forget_item_fields(self, media_type: str, identity: str, enabled: Iterable[str]) -> int:
+        """Clear the settings fingerprint of every field of one item not in
+        ``enabled``. A field switched off and on again then no longer matches
+        its fingerprint, so the scan checks it once more, keeping its
+        provenance. Commits only when a row changed, since the scan calls it
+        for every item. Returns the number of rows cleared."""
         keep = sorted(set(enabled))
         marks = ",".join("?" * len(keep))
         not_kept = "AND field NOT IN ({})".format(marks) if keep else ""
@@ -925,14 +926,15 @@ class TrackerDB:
             cur = self._conn.execute(
                 "UPDATE field_status SET settings_fp = NULL "
                 "WHERE settings_fp IS NOT NULL {} AND item_id IN "
-                "(SELECT id FROM items WHERE media_type = ?)".format(not_kept),
-                (*keep, media_type),
+                "(SELECT id FROM items WHERE media_type = ? AND identity = ?)".format(not_kept),
+                (*keep, media_type, identity),
             )
-            self._conn.commit()
+            if cur.rowcount:
+                self._conn.commit()
             return cur.rowcount
         except sqlite3.Error:
             log.exception("Failed to forget disabled fields", event="tracker.error",
-                          media_type=media_type)
+                          media_type=media_type, identity=identity)
             return 0
 
     def commit(self) -> None:

@@ -1,17 +1,31 @@
 """Tests for the setup wizard model."""
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import replace
 
 import pytest
 
+from resources.lib.data.libraries import (
+    FIELD_TOGGLES,
+    TITLE_ORIGINAL,
+    LibraryConfig,
+    load_libraries,
+    new_library,
+    save_libraries,
+)
 from resources.lib.providers.tmdb import KEY_OK, KEY_UNCHECKED
 from resources.lib.ui.setup_model import (
-    FEATURES,
+    LIBRARIES,
+    TOGGLES,
+    WIZARD,
     SetupFlow,
-    config_to_write,
+    SetupState,
+    changes_nothing,
+    country_missing,
     initial_state,
+    libraries_to_write,
     mask_key,
+    page_groups,
     settings_to_write,
 )
 
@@ -19,135 +33,76 @@ _MP = "multipath://%2fa%2f/%2fb%2f/"
 _DISCOVERED = [{"path": _MP, "label": "Kids"}, {"path": "/c/", "label": "Films"}]
 
 
-def _settings(**overrides: Any) -> dict[str, Any]:
-    base: dict[str, Any] = {f: False for f in FEATURES}
-    base.update({"enable_ratings": True, "enable_plots": True,
-                 "enable_certifications": True, "tmdb_api_key": "", "country": 0})
-    base.update(overrides)
-    return base
+def _state(key: str = "", libraries: LibraryConfig | None = None) -> SetupState:
+    return initial_state({"tmdb_api_key": key}, libraries, _DISCOVERED, "nl-NL")
 
 
-def _state(**overrides: Any):
-    return initial_state(_settings(**overrides), {"sources": []}, _DISCOVERED, "nl-NL")
+def test_toggles_follow_the_library_model():
+    assert TOGGLES == tuple(FIELD_TOGGLES)
+    assert TOGGLES[0] == "ratings" and TOGGLES[-1] == "details"
 
 
-def test_features_are_the_nine_toggles_in_settings_order():
-    assert FEATURES == (
-        "enable_ratings", "enable_plots", "enable_episode_titles",
-        "enable_main_titles", "enable_certifications", "enable_credits",
-        "enable_trailers", "enable_taglines", "enable_details",
-    )
-
-
-def test_first_run_state_uses_ui_language_and_no_key():
+def test_first_run_adds_every_discovered_library_left_out():
     state = _state()
-    assert state.default_language == "nl-NL"
-    assert state.fallback_language == ""
     assert state.api_key == "" and state.key_status == ""
-    assert state.exceptions == {}
-    assert state.features["enable_ratings"] and not state.features["enable_details"]
+    assert state.open_library is None
+    libs = state.libraries.libraries
+    assert [(lib.path, lib.label) for lib in libs] == [(_MP, "Kids"), ("/c/", "Films")]
+    assert all(not lib.included and not lib.toggles and lib.language == "nl-NL"
+               for lib in libs)
 
 
-def test_rerun_state_reproduces_stored_values():
-    config = {"default_language": "en-US", "fallback_language": "de-DE",
-              "sources": [{"path": "/a/", "language": "nl-NL"}]}
-    state = initial_state(
-        _settings(tmdb_api_key="abcdef1234", enable_details=True, country=3),
-        config, _DISCOVERED, "nl-NL")
-    assert state.api_key == "abcdef1234" and state.key_status == KEY_OK
-    assert state.default_language == "en-US" and state.fallback_language == "de-DE"
-    assert state.exceptions == {_MP: ("nl-NL", "")}
-    assert state.features["enable_details"] is True
-    assert state.country == 3
+def test_stored_libraries_are_kept_and_new_ones_added():
+    stored = replace(new_library("/c/", "Old name", "en-US"), included=True,
+                     toggles=frozenset({"plots"}), title_mode=TITLE_ORIGINAL)
+    gone = new_library("/gone/", "Gone", "en-US")
+    state = _state(key="abc", libraries=LibraryConfig([stored, gone]))
+    assert state.key_status == KEY_OK
+    films = state.libraries.by_path("/c/")
+    assert films is not None
+    # Kodi's current label wins; everything else is kept.
+    assert films == replace(stored, label="Films")
+    assert state.libraries.by_path("/gone/") == gone
+    kids = state.libraries.by_path(_MP)
+    assert kids is not None and not kids.included
 
 
-_BASE_STEPS = ["key", "language", "folders", "features"]
+def test_a_source_inside_a_library_is_not_added():
+    parent = replace(new_library("/c/", "Films", "en-US"), included=True)
+    state = initial_state({}, LibraryConfig([parent]),
+                          [{"path": "/c/kids/", "label": "Kids"}], "nl-NL")
+    assert [lib.path for lib in state.libraries.libraries] == ["/c/"]
 
 
-@pytest.mark.parametrize("ticked,extra", [
-    (("enable_ratings", "enable_plots", "enable_certifications"),
-     ["ratings", "text", "country"]),
-    (("enable_main_titles",), ["text"]),
-    (("enable_episode_titles",), ["text"]),
-    ((), []),
-    (("enable_ratings",), ["ratings"]),
+def test_initial_state_does_not_change_the_stored_config():
+    stored = LibraryConfig([new_library("/c/", "Old", "en-US")])
+    _state(libraries=stored)
+    assert [lib.label for lib in stored.libraries] == ["Old"]
+
+
+@pytest.mark.parametrize("mode,steps", [
+    (WIZARD, ["key", "libraries", "summary"]),
+    (LIBRARIES, ["libraries"]),
 ])
-def test_source_steps_follow_ticks(ticked, extra):
-    state = _state(**{f: f in ticked for f in FEATURES})
-    assert SetupFlow("wizard", "nl-NL").steps(state) == _BASE_STEPS + extra + ["summary"]
+def test_steps_per_mode(mode, steps):
+    flow = SetupFlow(mode)
+    assert flow.steps(_state()) == steps
+    assert flow.current == steps[0]
 
 
-def test_rerun_state_reads_source_settings():
-    state = _state(rating_source=1, text_source_order=0, replace_incorrect=False)
-    assert state.rating_source == 1
-    assert state.text_source_order == 0
-    assert state.replace_incorrect is False
-
-
-def test_missing_source_settings_use_defaults():
-    state = _state()
-    assert state.rating_source == 4
-    assert state.text_source_order == 2
-    assert state.replace_incorrect is True
-
-
-def test_back_from_summary_skips_unticked_source_steps():
-    flow = SetupFlow("wizard", "nl-NL")
-    state = _state(tmdb_api_key="k")
-    while flow.current != "summary":
-        assert flow.next(state)
-    state.features["enable_ratings"] = False
-    assert flow.back(state)
-    assert flow.current == "country"
-    assert flow.total(state) == 7
-    visited = []
-    while flow.current != "features":
-        assert flow.back(state)
-        visited.append(flow.current)
-    assert "ratings" not in visited
-
-
-def test_current_step_dropping_out_goes_to_summary():
-    flow = SetupFlow("wizard", "nl-NL")
-    state = _state(tmdb_api_key="k")
-    flow.current = "ratings"
-    state.features["enable_ratings"] = False
-    assert flow.index(state) == flow.total(state)
-    assert flow.current == "summary"
-
-
-def test_country_step_only_with_certifications():
-    flow = SetupFlow("wizard", "nl-NL")
-    state = _state()
-    assert flow.steps(state) == ["key", "language", "folders", "features", "ratings", "text",
-                                 "country", "summary"]
-    state.features["enable_certifications"] = False
-    assert flow.steps(state) == ["key", "language", "folders", "features", "ratings", "text",
-                                 "summary"]
-
-
-def test_back_from_summary_skips_country_after_unticking():
-    flow = SetupFlow("wizard", "nl-NL")
-    state = _state(tmdb_api_key="k")
-    while flow.current != "summary":
-        assert flow.next(state)
-    state.features["enable_certifications"] = False
-    assert flow.back(state)
-    assert flow.current == "text"
-    assert flow.index(state) == 6 and flow.total(state) == 7
-
-
-def test_first_step_has_no_back_and_last_has_no_next():
-    flow = SetupFlow("wizard", "nl-NL")
-    state = _state(tmdb_api_key="k")
+def test_wizard_walks_forward_and_back():
+    flow = SetupFlow(WIZARD)
+    state = _state(key="k")
     assert not flow.back(state)
-    while flow.next(state):
-        pass
-    assert flow.current == "summary"
+    assert flow.next(state) and flow.current == "libraries"
+    assert flow.index(state) == 2 and flow.total(state) == 3
+    assert flow.next(state) and flow.current == "summary"
+    assert not flow.next(state)
+    assert flow.back(state) and flow.current == "libraries"
 
 
 def test_key_step_blocks_until_checked():
-    flow = SetupFlow("wizard", "nl-NL")
+    flow = SetupFlow(WIZARD)
     state = _state()
     assert not flow.can_advance(state)
     state.api_key, state.key_status = "abc", ""
@@ -158,54 +113,76 @@ def test_key_step_blocks_until_checked():
     assert flow.can_advance(state)
 
 
-def test_country_step_blocks_on_automatic_without_preset():
-    state = _state(tmdb_api_key="k")
-    for ui, ok in (("xx-ZZ", False), ("nl-NL", True)):
-        flow = SetupFlow("wizard", ui)
-        while flow.current != "country":
-            flow.next(state)
-        assert flow.can_advance(state) is ok
-    state.country = 1
+def test_libraries_step_always_advances():
+    flow = SetupFlow(WIZARD)
+    flow.current = "libraries"
+    state = _state()
+    assert changes_nothing(state.libraries)
     assert flow.can_advance(state)
 
 
-def test_folders_mode_has_one_step():
-    flow = SetupFlow("folders", "nl-NL")
-    assert flow.steps(_state()) == ["folders"]
-    assert flow.current == "folders"
+def _lib(*toggles: str):
+    return replace(new_library("/c/", "Films", "nl-NL"), included=True,
+                   toggles=frozenset(toggles))
 
 
-def test_settings_to_write():
-    state = _state(tmdb_api_key=" abc ")
-    out = settings_to_write(state)
-    assert out["setup_complete"] is True
-    assert out["tmdb_api_key"] == "abc"
-    assert set(out) == {"tmdb_api_key", "country", "rating_source", "text_source_order",
-                        "replace_incorrect", "setup_complete", *FEATURES}
+@pytest.mark.parametrize("toggles,groups", [
+    ((), ["language", "fields"]),
+    (("ratings",), ["language", "fields", "rating"]),
+    (("plots",), ["language", "fields", "text"]),
+    (("episode_titles",), ["language", "fields", "text"]),
+    (("main_titles",), ["language", "fields", "text", "titles"]),
+    (("certifications",), ["language", "fields", "age_ratings"]),
+    (("credits", "trailers", "taglines", "details"), ["language", "fields"]),
+    (tuple(FIELD_TOGGLES),
+     ["language", "fields", "rating", "text", "titles", "age_ratings"]),
+])
+def test_page_groups_follow_ticks(toggles, groups):
+    assert page_groups(_lib(*toggles)) == groups
+
+
+def test_country_missing_only_with_certifications():
+    lib = replace(_lib("certifications"), language="xx-ZZ")
+    assert country_missing(lib, "yy-QQ")
+    # A region without a preset is not rescued by the interface language.
+    assert country_missing(lib, "nl-NL")
+    lib = replace(lib, language="xx")
+    assert country_missing(lib, "yy-QQ")
+    assert not country_missing(lib, "nl-NL")
+    assert not country_missing(replace(lib, cert_country=1), "yy-QQ")
+    assert not country_missing(_lib("plots"), "yy-QQ")
+
+
+def test_changes_nothing_needs_an_included_library_with_a_field():
+    assert changes_nothing(LibraryConfig([_lib()]))
+    assert changes_nothing(LibraryConfig([replace(_lib("plots"), included=False)]))
+    assert not changes_nothing(LibraryConfig([_lib("plots")]))
+
+
+def test_settings_to_write_ends_with_setup_complete():
+    out = settings_to_write(_state(key=" abc "))
+    # Finish has written a v2 sources.json, so a missing one later is
+    # never converted from the 1.1 values.
+    assert out == {"tmdb_api_key": "abc", "libraries_converted": True,
+                   "setup_complete": True}
     assert list(out)[-1] == "setup_complete"
 
 
-def test_settings_to_write_keeps_source_values_when_their_steps_are_skipped():
-    state = _state(rating_source=1, text_source_order=0, replace_incorrect=False,
-                   enable_ratings=False, enable_plots=False, enable_certifications=False)
-    out = settings_to_write(state)
-    assert out["rating_source"] == 1
-    assert out["text_source_order"] == 0
-    assert out["replace_incorrect"] is False
-
-
-def test_config_to_write_applies_languages():
+def test_libraries_to_write_round_trips(tmp_path):
     state = _state()
-    state.fallback_language = "en-US"
-    state.exceptions = {_MP: ("de-DE", "")}
-    out = config_to_write(state, {"sources": []}, _DISCOVERED)
-    assert out["default_language"] == "nl-NL"
-    assert out["fallback_language"] == "en-US"
-    assert {"path": "/a/", "language": "de-DE"} in out["sources"]
+    state.libraries.replace(replace(state.libraries.libraries[0], included=True,
+                                    toggles=frozenset({"ratings", "main_titles"}),
+                                    title_mode=TITLE_ORIGINAL, cert_not_found="NR"))
+    out = libraries_to_write(state)
+    assert out.libraries == state.libraries.libraries
+    assert out.libraries is not state.libraries.libraries
+    path = str(tmp_path / "sources.json")
+    assert save_libraries(path, out)
+    loaded = load_libraries(path)
+    assert loaded is not None and loaded.libraries == out.libraries
 
 
 def test_mask_key_hides_the_length():
     assert mask_key("abcdef1234") == "****1234"
     assert mask_key("x" * 28 + "1234") == "****1234"
     assert mask_key("abc") == "****"
-

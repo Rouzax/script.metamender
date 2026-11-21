@@ -76,6 +76,9 @@ problems:
 | Your TMDB key was rejected | Choose **Open setup** and enter the key again; check that it is the API Key, not the Read Access Token. |
 | The last background scans did not finish | Background scans failed at least three times over at least a day. The log has the details (see [Troubleshooting](troubleshooting.md)). |
 | A folder is unreachable | A library folder has been unreachable for three days or more, for example a network share that is off. Its items are not updated until it is back. |
+| MetaMender found a new library | A video source was added to Kodi. It stays out until you include it; choose **Open Libraries**. See [Libraries added to Kodi later](libraries.md#libraries-added-to-kodi-later). |
+| Items are in no MetaMender library | Some items are in none of Kodi's video sources, so they are skipped. See [Items in no library](libraries.md#items-in-no-library). |
+| MetaMender now has settings per library | Shown once after updating from 1.1. Choose **Open Libraries** to see the result. See [Upgrading from 1.1](libraries.md#upgrading-from-11). |
 
 When there is more than one problem, the most important one is shown and the
 others are listed under **Also**. **Later** closes the window; it does not come

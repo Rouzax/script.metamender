@@ -11,7 +11,7 @@ MetaMender is a Kodi add-on that quietly improves your video library in the
 background:
 
 - **Gaps get filled.** Missing plots, episode titles, credits, taglines and
-  more come from TMDB and TheTVDB, in each folder's own language.
+  more come from TMDB and TheTVDB, in each library's own language.
 - **Scores that keep up.** A new episode's score is checked again while its
   votes come in, instead of staying at its first-week number forever.
 - **Age ratings you can trust.** Movies and shows get their age rating in
@@ -30,8 +30,8 @@ where each value came from and why a field was left alone.
 1. Install the [Rouzax repository](https://github.com/Rouzax/repository.rouzax/releases)
    with **Settings > Add-ons > Install from zip file**.
 2. Install **MetaMender** from **Install from repository > Rouzax Repository**.
-3. Follow the setup: a free TMDB API key, your library's languages, and what
-   to fill.
+3. Follow the setup: a free TMDB API key, then the libraries MetaMender may
+   work in and what it fills in each.
 
 Requires Kodi 21 (Omega) or Kodi 22 (Piers). Full instructions:
 [Install](https://rouzax.github.io/script.metamender/docs/install/).
