@@ -8,7 +8,8 @@ the WindowXMLDialog that renders it; run_setup wires both to Kodi.
 The libraries step is a list of libraries; choosing one opens its page in
 the same window (SetupState.open_library), and Done on the page returns to
 the list. Nothing is written before Finish (or Save in the Libraries
-dialog): Cancel anywhere leaves settings and sources.json as they were.
+dialog); leaving with changed libraries asks whether to save them, and
+leaving without saving leaves settings and sources.json as they were.
 sources.json is written first, so a failed write leaves the settings
 untouched too.
 
@@ -18,6 +19,7 @@ Logging:
         - setup.start (INFO): The wizard or the Libraries dialog opened
         - setup.finish (INFO): Everything was saved
         - setup.cancel (INFO): Closed without saving
+        - setup.discard (INFO): The user chose not to save changed libraries
         - setup.save_fail (WARNING): sources.json could not be written
         - setup.not_converted (WARNING): the 1.1 settings are not converted
           yet, so the libraries cannot be edited
@@ -234,6 +236,9 @@ class SetupController:
         self._write = settings_writer
         self._name = name
         self._libraries_seen = libraries_seen
+        # What the libraries were when the window opened, to tell whether
+        # leaving would lose changes.
+        self._loaded = list(state.libraries.libraries)
 
     # -- what the window shows ---------------------------------------------
 
@@ -520,6 +525,25 @@ class SetupController:
             return True
         return self.mode == WIZARD and self.flow.back(self.state)
 
+    def on_cancel(self) -> bool:
+        """Cancel, or Back where there is no step to go back to. True when
+        the window should close. With changed libraries the user is asked
+        to save them first: yes saves as Done (or Finish) does, no
+        discards them. False keeps the window open, when saving could not
+        go ahead (a page without a country, a refused key, a failed save)."""
+        if self.state.libraries.libraries == self._loaded:
+            return True
+        if not self._dialogs.yesno(self.heading(), lang(32708)):
+            log.info("Library changes discarded", event="setup.discard", mode=self.mode)
+            return True
+        if self.view == PAGE:
+            self._close_page()
+            if self.view == PAGE:
+                return False
+        if self.mode == WIZARD and not self._key_passes():
+            return False
+        return self._finish()
+
     def shown(self) -> None:
         """The window drew the current view. Showing the library list
         answers the notices that asked the user to open it."""
@@ -689,14 +713,15 @@ class SetupWindow(xbmcgui.WindowXMLDialog):
                 return
         elif controlId == _BACK:
             c.on_back()
-        elif controlId == _CANCEL:
+        elif controlId == _CANCEL and c.on_cancel():
             self.close()
             return
         self._render()
 
     def onAction(self, action: Any) -> None:
         if action.getId() in (_ACTION_PREVIOUS_MENU, _ACTION_NAV_BACK):
-            if self.controller.on_back():
+            c = self.controller
+            if c.on_back() or not c.on_cancel():
                 self._render()
             else:
                 self.close()

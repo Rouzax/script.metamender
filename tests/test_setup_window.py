@@ -38,9 +38,11 @@ _DISCOVERED = [{"path": _MP, "label": "Kids"}, {"path": "/c/", "label": "Films"}
 
 
 class FakeDialogs:
-    def __init__(self, inputs=(), selects=()):
+    def __init__(self, inputs=(), selects=(), answers=()):
         self.inputs = list(inputs)
         self.selects = list(selects)
+        self.answers = list(answers)
+        self.questions: list[str] = []
         self.oks: list[str] = []
         self.defaults: list[str] = []
         self.headings: list[str] = []
@@ -59,6 +61,10 @@ class FakeDialogs:
 
     def ok(self, heading: str, message: str) -> None:
         self.oks.append(message)
+
+    def yesno(self, heading: str, message: str) -> bool:
+        self.questions.append(message)
+        return self.answers.pop(0)
 
 
 class Recorder:
@@ -484,6 +490,76 @@ def test_done_needs_a_country_for_age_ratings():
     c.state.libraries.replace(replace(_lib(c, "/c/"), cert_country=1))
     c.on_next()
     assert c.state.open_library is None
+
+
+# -- leaving with unsaved changes ------------------------------------------------
+
+
+def _include_films(c):
+    """Include Films from the list; its page opens, Back returns to the list."""
+    c.activate(_row(c, "/c/"))
+    assert c.view == PAGE
+    assert c.on_back() is True and c.view == "libraries"
+
+
+def test_leaving_the_list_with_changes_asks_and_yes_saves(ids):
+    dialogs = FakeDialogs(selects=[0], answers=[True])
+    c, rec = _controller(mode="libraries", key="abc", dialogs=dialogs, first_run=False)
+    _include_films(c)
+    assert c.on_back() is False
+    assert c.on_cancel() is True
+    assert dialogs.questions == ["#32708"]
+    assert c.finished and len(rec.saved) == 1 and rec.written == []
+    assert rec.saved[0].by_path("/c/").included
+
+
+def test_leaving_the_list_with_changes_no_discards(ids):
+    dialogs = FakeDialogs(selects=[0], answers=[False])
+    c, rec = _controller(mode="libraries", key="abc", dialogs=dialogs, first_run=False)
+    _include_films(c)
+    assert c.on_cancel() is True
+    assert dialogs.questions == ["#32708"]
+    assert not c.finished and rec.saved == [] and rec.written == []
+
+
+def test_leaving_without_changes_asks_nothing():
+    dialogs = FakeDialogs()
+    c, rec = _controller(mode="libraries", key="abc", dialogs=dialogs, first_run=False)
+    assert c.on_cancel() is True
+    c, rec = _controller(key="abc", dialogs=dialogs)
+    assert c.on_cancel() is True
+    assert dialogs.questions == [] and rec.saved == []
+
+
+def test_leaving_from_a_page_asks_too(ids):
+    dialogs = FakeDialogs(selects=[0], answers=[True])
+    c, rec = _controller(mode="libraries", key="abc", dialogs=dialogs, first_run=False)
+    c.activate(_row(c, "/c/"))
+    assert c.view == PAGE
+    assert c.on_cancel() is True
+    assert len(rec.saved) == 1 and c.finished
+
+
+def test_saving_on_leave_keeps_the_page_open_without_a_country(ids):
+    dialogs = FakeDialogs(selects=[0], answers=[True])
+    c, rec = _controller(mode="libraries", key="abc", dialogs=dialogs, first_run=False,
+                         ui="yy")
+    c.activate(_row(c, "/c/"))
+    c.state.libraries.replace(replace(_lib(c, "/c/"), language="xx",
+                                      toggles=frozenset({"certifications"})))
+    assert c.on_cancel() is False
+    assert c.view == PAGE and rec.saved == [] and len(dialogs.oks) == 1
+
+
+def test_wizard_cancel_with_changes_yes_finishes(ids):
+    dialogs = FakeDialogs(selects=[0], answers=[True])
+    c, rec = _controller(key="abc", dialogs=dialogs)
+    c.on_next()
+    _include_films(c)
+    assert c.on_cancel() is True
+    assert c.finished and len(rec.saved) == 1
+    assert rec.written == [{"tmdb_api_key": "abc", "libraries_converted": True,
+                            "setup_complete": True}]
 
 
 # -- summary and finish ---------------------------------------------------------

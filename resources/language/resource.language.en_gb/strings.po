@@ -1426,3 +1426,7 @@ msgstr ""
 msgctxt "#32707"
 msgid "Libraries converted"
 msgstr ""
+
+msgctxt "#32708"
+msgid "Save your changes?"
+msgstr ""
