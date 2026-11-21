@@ -36,6 +36,23 @@
     "focus": "rating",
     "scroll": "end"
   },
+  "setup-library-page-age-ratings": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "kind": "setup",
+    "step": "libraries",
+    "library": "Movies",
+    "focus": "country",
+    "scroll": "end"
+  },
+  "setup-save-question": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "active": "yesnodialog",
+    "kind": "setup",
+    "step": "libraries",
+    "question": true
+  },
   "setup-summary": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
@@ -91,6 +108,13 @@
         "Sport Videos"
       ]
     ]
+  },
+  "attention-converted-unread": {
+    "group": "attention",
+    "window": "script-metamender-attention.xml",
+    "kind": "attention",
+    "main": "libraries_converted",
+    "main_detail": "unread"
   },
   "details-plot-updated": {
     "group": "details",

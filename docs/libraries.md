@@ -58,6 +58,8 @@ MetaMender asks whether to save your changes. **Yes** saves them as **Save**
 (or, in setup, **Finish**) does; **No** leaves every library as it was. Back
 on a library's page only returns to the list.
 
+![The question on Cancel with changed libraries](screenshots/setup/setup-save-question.png)
+
 ## A library's page
 
 ![The page of a library with nothing switched on yet](screenshots/setup/setup-library-page-new.png)
@@ -188,6 +190,8 @@ setting uses.
 Shown while **Age certifications** is ticked. See [Age ratings](age-ratings.md)
 for the countries, where ratings come from and what MetaMender writes.
 
+![The Age ratings group on the page of the Movies library](screenshots/setup/setup-library-page-age-ratings.png)
+
 **Certification country**
 :   The country whose rating system the library's age ratings are written in.
     **Automatic** (the default) uses the country of the library's language,
@@ -289,6 +293,8 @@ Nothing in your library changes and nothing is fetched again because of the
 conversion. One notice says that the settings are now per library;
 **Open Libraries** shows the result.
 
+![The notice after the conversion](screenshots/attention/attention-converted.png)
+
 Kodi removes settings an add-on no longer has from its settings file, for
 example when you open MetaMender's settings, so MetaMender copies your 1.1
 choices aside as soon as it starts. If Kodi removed them before that copy
@@ -297,7 +303,7 @@ every library 1.1 scanned is still included with its language, but nothing
 is switched on, and the notice says that your earlier choices could not be
 read. Open **Libraries** and tick what each library should fill.
 
-![The notice after the conversion](screenshots/attention/attention-converted.png)
+![The notice when the 1.1 choices could not be read](screenshots/attention/attention-converted-unread.png)
 
 The conversion needs to know your libraries. If MetaMender finds none when it
 starts (Kodi lists no video sources and the library has no items, or Kodi

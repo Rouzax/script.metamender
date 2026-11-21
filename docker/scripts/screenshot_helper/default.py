@@ -12,6 +12,7 @@ special://temp (or a minute passes), then closes.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sys
@@ -72,13 +73,19 @@ def _close_dialogs() -> None:
 class _FocusedSetup(sw.SetupWindow):
     """Opens with the scene's row selected. "scroll": "end" first selects
     the last row, so the list scrolls up to the focused row from below and
-    shows the rows after it rather than the ones before."""
+    shows the rows after it rather than the ones before. "question" puts
+    the save question of Cancel with changed libraries over the window."""
 
     focus_key: str | None = None
     scroll_end: bool = False
+    question: bool = False
 
     def onInit(self) -> None:
         self._render()
+        if self.question:
+            # From a thread: a modal dialog opened inside onInit would hold
+            # the window's own initialisation until it closed.
+            threading.Thread(target=self._ask, daemon=True).start()
         rows = self.controller.rows()
         index = next((i for i, row in enumerate(rows) if row.key == self.focus_key), None)
         if index is None:
@@ -86,6 +93,15 @@ class _FocusedSetup(sw.SetupWindow):
         if self.scroll_end:
             self._list().selectItem(len(rows) - 1)
         self._list().selectItem(index)
+
+    def _ask(self) -> None:
+        # The question on_cancel asks; its answer is thrown away.
+        self.controller._dialogs.yesno(self.controller.heading(), lang(32708))
+
+
+def _close_setup(window: sw.SetupWindow) -> None:
+    _close_dialogs()
+    window.close()
 
 
 def setup(scene: dict) -> None:
@@ -100,7 +116,8 @@ def setup(scene: dict) -> None:
     window.controller = controller
     window.focus_key = scene.get("focus")
     window.scroll_end = scene.get("scroll") == "end"
-    _watch(window.close)
+    window.question = bool(scene.get("question"))
+    _watch(functools.partial(_close_setup, window))
     window.doModal()
     del window
 

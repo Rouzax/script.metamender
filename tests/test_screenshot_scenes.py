@@ -79,6 +79,25 @@ def test_attention_scenes_name_real_problems():
             assert all(kind in WINDOW_KINDS for kind, _ in scene.get("others", [])), name
 
 
+def test_question_scenes_wait_for_kodis_question_over_setup():
+    """The save question is Kodi's own yes/no dialog over the setup window:
+    the runner waits for that dialog and crops to the setup panel."""
+    asking = [name for name, scene in SCENES.items() if scene.get("question")]
+    assert asking
+    for name in asking:
+        scene = SCENES[name]
+        assert scene["kind"] == "setup", name
+        assert scene["window"] == "script-metamender-setup.xml", name
+        assert scene.get("active") == "yesnodialog", name
+
+
+def test_a_scene_shows_the_notice_for_unread_1_1_settings():
+    from resources.lib.service.attention import SETTINGS_UNREAD
+    details = {scene.get("main_detail") for scene in SCENES.values()
+               if scene["kind"] == "attention" and scene["main"] == "libraries_converted"}
+    assert SETTINGS_UNREAD in details
+
+
 @pytest.fixture
 def demo(monkeypatch):
     from resources.lib.ui import details_model
