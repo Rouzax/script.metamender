@@ -17,7 +17,6 @@ import os
 import sys
 import threading
 import time
-from typing import Any
 
 import xbmc
 import xbmcaddon
@@ -46,25 +45,10 @@ from resources.lib.ui.attention_window import show_attention_window
 from resources.lib.ui.details_model import build_rows, header_line
 from resources.lib.ui.progress_window import show_progress_window
 from resources.lib.providers.tmdb import KEY_OK
-from resources.lib.ui.setup_model import FEATURES, initial_state
 from resources.lib.utils import lang
 
 CLOSE_FLAG = "special://temp/metamender-screenshots.close"
 GIVE_UP_SECONDS = 60
-
-DEMO_FOLDERS = [
-    {"path": "smb://nas/media/Movies/", "label": "Movies"},
-    {"path": "smb://nas/media/TV Shows/", "label": "TV Shows"},
-    {"path": "smb://nas/media/Kids/TV/", "label": "Kids TV"},
-]
-DEMO_CONFIG = {
-    "default_language": "en-US",
-    "sources": [{"path": "smb://nas/media/Kids/TV/", "language": "nl-NL",
-                 "fallback_language": "en-US"}],
-}
-# Shaped like a TMDB key, but not one.
-DEMO_KEY = "demo0key0for0screenshots0only00"
-
 
 def _close_when_flagged(close) -> None:
     """Wait for the capture script's flag, then close the window."""
@@ -85,20 +69,37 @@ def _close_dialogs() -> None:
     xbmc.executebuiltin("Dialog.Close(all,true)")
 
 
+class _FocusedSetup(sw.SetupWindow):
+    """Opens with the scene's row selected. "scroll": "end" first selects
+    the last row, so the list scrolls up to the focused row from below and
+    shows the rows after it rather than the ones before."""
+
+    focus_key: str | None = None
+    scroll_end: bool = False
+
+    def onInit(self) -> None:
+        self._render()
+        rows = self.controller.rows()
+        index = next((i for i, row in enumerate(rows) if row.key == self.focus_key), None)
+        if index is None:
+            return
+        if self.scroll_end:
+            self._list().selectItem(len(rows) - 1)
+        self._list().selectItem(index)
+
+
 def setup(scene: dict) -> None:
-    settings: dict[str, Any] = {f: f in ("enable_ratings", "enable_plots", "enable_episode_titles",
-                         "enable_certifications") for f in FEATURES}
-    settings["tmdb_api_key"] = DEMO_KEY
-    settings["country"] = 0
-    state = initial_state(settings, DEMO_CONFIG, DEMO_FOLDERS, "en-US")
+    state = demo.setup_state(scene)
     controller = sw.SetupController(
-        "wizard", state, DEMO_CONFIG, DEMO_FOLDERS, "en-US", "", first_run=True,
-        save_config=lambda path, config: True, settings_writer=lambda values: None,
+        "wizard", state, demo.DEMO_UI_LANGUAGE, "", first_run=True,
+        save=lambda path, config: True, settings_writer=lambda values: None,
         key_checker=lambda key: KEY_OK,
     )
     controller.flow.current = scene["step"]
-    window = sw.SetupWindow(sw._XML, TARGET.getAddonInfo("path"), "Default", "1080i")
+    window = _FocusedSetup(sw._XML, TARGET.getAddonInfo("path"), "Default", "1080i")
     window.controller = controller
+    window.focus_key = scene.get("focus")
+    window.scroll_end = scene.get("scroll") == "end"
     _watch(window.close)
     window.doModal()
     del window

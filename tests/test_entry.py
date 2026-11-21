@@ -37,9 +37,10 @@ def test_no_argument_opens_wizard_before_setup(entry):
     entry["run"].assert_not_called()
 
 
-@pytest.mark.parametrize("mode", ["wizard", "folders"])
-def test_setup_actions(entry, mode):
-    default.main([mode])
+@pytest.mark.parametrize("arg,mode", [("wizard", "wizard"), ("libraries", "libraries"),
+                                      ("folders", "libraries")])
+def test_setup_actions(entry, arg, mode):
+    default.main([arg])
     entry["open_setup"].assert_called_once_with(mode)
     entry["run"].assert_not_called()
 
@@ -57,7 +58,9 @@ def launcher(monkeypatch: pytest.MonkeyPatch):
         "manual_run": MagicMock(),
         "is_setup_complete": MagicMock(return_value=False),
         "libraries_seen": MagicMock(),
+        "convert_pending": MagicMock(),
     }
+    monkeypatch.setattr(setup, "_convert_pending", mocks["convert_pending"])
     monkeypatch.setattr(setup, "_libraries_seen", mocks["libraries_seen"])
     monkeypatch.setattr(setup, "run_setup", mocks["run_setup"])
     monkeypatch.setattr(setup.manual, "run", mocks["manual_run"])
@@ -68,7 +71,8 @@ def launcher(monkeypatch: pytest.MonkeyPatch):
 
 def test_first_setup_starts_one_scan(launcher):
     assert setup.open_setup("wizard") is True
-    launcher["run_setup"].assert_called_once_with("wizard", "s.json")
+    launcher["run_setup"].assert_called_once_with("wizard", "s.json", None)
+    launcher["convert_pending"].assert_not_called()
     launcher["manual_run"].assert_called_once()
 
 
@@ -84,21 +88,22 @@ def test_cancelled_first_setup_starts_no_scan(launcher):
     launcher["manual_run"].assert_not_called()
 
 
-def test_folder_dialog_starts_no_scan(launcher):
-    setup.open_setup("folders")
+def test_libraries_dialog_starts_no_scan(launcher):
+    setup.open_setup("libraries")
     launcher["manual_run"].assert_not_called()
 
 
-@pytest.mark.parametrize("mode", ["wizard", "folders"])
-def test_opening_the_libraries_clears_their_notices(launcher, mode):
+@pytest.mark.parametrize("mode", ["wizard", "libraries"])
+def test_the_library_list_clears_their_notices(launcher, mode):
     launcher["is_setup_complete"].return_value = True
     setup.open_setup(mode)
-    launcher["libraries_seen"].assert_called_once_with()
+    launcher["run_setup"].assert_called_once_with(mode, "s.json", launcher["libraries_seen"])
+    launcher["convert_pending"].assert_called_once_with("s.json")
 
 
 def test_first_setup_has_no_notices_to_clear(launcher):
     setup.open_setup("wizard")
-    launcher["libraries_seen"].assert_not_called()
+    assert launcher["run_setup"].call_args.args[2] is None
 
 
 def test_libraries_seen_clears_the_notices(monkeypatch, tmp_path):
@@ -117,3 +122,19 @@ def test_libraries_seen_clears_the_notices(monkeypatch, tmp_path):
         assert attention.load(tracker).pending_window() is None
     finally:
         tracker.close()
+
+
+@pytest.mark.parametrize("content,converts", [
+    ('{"sources": []}', True),
+    ('{"version": 2, "libraries": []}', False),
+    (None, False),
+])
+def test_convert_pending_only_for_a_1_1_file(monkeypatch, tmp_path, content, converts):
+    path = tmp_path / "sources.json"
+    if content is not None:
+        path.write_text(content)
+    convert = MagicMock()
+    monkeypatch.setattr(setup, "_convert_libraries", convert)
+    monkeypatch.setattr(setup, "_get_db_path", lambda: str(tmp_path / "t.db"))
+    setup._convert_pending(str(path))
+    assert convert.called is converts

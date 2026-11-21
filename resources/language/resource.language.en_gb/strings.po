@@ -1446,3 +1446,179 @@ msgstr ""
 msgctxt "#32657"
 msgid "Settings are now per library"
 msgstr ""
+
+msgctxt "#32658"
+msgid "Which libraries MetaMender looks after"
+msgstr ""
+
+msgctxt "#32659"
+msgid "Tick a library to include it, then choose it to set what MetaMender does there. Libraries you add to Kodi later stay out until you tick them."
+msgstr ""
+
+msgctxt "#32660"
+msgid "Nothing switched on yet"
+msgstr ""
+
+msgctxt "#32661"
+msgid "Not included: MetaMender never touches it"
+msgstr ""
+
+msgctxt "#32662"
+msgid "{0} · {1}"
+msgstr ""
+
+msgctxt "#32663"
+msgid "Include"
+msgstr ""
+
+msgctxt "#32664"
+msgid "Leave out"
+msgstr ""
+
+msgctxt "#32665"
+msgid "Change settings"
+msgstr ""
+
+msgctxt "#32666"
+msgid "What MetaMender does in this library. Nothing is on until you switch it on."
+msgstr ""
+
+msgctxt "#32667"
+msgid "Tick what MetaMender should fill; more choices appear as you tick."
+msgstr ""
+
+msgctxt "#32668"
+msgid "Rating"
+msgstr ""
+
+msgctxt "#32669"
+msgid "Text sources"
+msgstr ""
+
+msgctxt "#32670"
+msgid "Titles"
+msgstr ""
+
+msgctxt "#32671"
+msgid "Age ratings"
+msgstr ""
+
+msgctxt "#32672"
+msgid "Title to show"
+msgstr ""
+
+msgctxt "#32673"
+msgid "In the library's language"
+msgstr ""
+
+msgctxt "#32674"
+msgid "Keep the original title"
+msgstr ""
+
+msgctxt "#32675"
+msgid "MetaMender will not change anything until you include a library and switch something on."
+msgstr ""
+
+msgctxt "#32676"
+msgid "ratings"
+msgstr ""
+
+msgctxt "#32677"
+msgid "plots"
+msgstr ""
+
+msgctxt "#32678"
+msgid "episode titles"
+msgstr ""
+
+msgctxt "#32679"
+msgid "titles"
+msgstr ""
+
+msgctxt "#32680"
+msgid "titles kept original"
+msgstr ""
+
+msgctxt "#32681"
+msgid "age ratings"
+msgstr ""
+
+msgctxt "#32682"
+msgid "age ratings ({0})"
+msgstr ""
+
+msgctxt "#32683"
+msgid "credits"
+msgstr ""
+
+msgctxt "#32684"
+msgid "trailers"
+msgstr ""
+
+msgctxt "#32685"
+msgid "taglines"
+msgstr ""
+
+msgctxt "#32686"
+msgid "details"
+msgstr ""
+
+msgctxt "#32687"
+msgid "Done"
+msgstr ""
+
+msgctxt "#32688"
+msgid "Left out"
+msgstr ""
+
+msgctxt "#32689"
+msgid "Rating prefix"
+msgstr ""
+
+msgctxt "#32690"
+msgid "The country's own"
+msgstr ""
+
+msgctxt "#32691"
+msgid "When no rating is found"
+msgstr ""
+
+msgctxt "#32692"
+msgid "Leave it empty"
+msgstr ""
+
+msgctxt "#32693"
+msgid "Write \"{0}\""
+msgstr ""
+
+msgctxt "#32694"
+msgid "Write a value"
+msgstr ""
+
+msgctxt "#32695"
+msgid "The library settings could not be saved, so nothing was changed. The add-on log has the details."
+msgstr ""
+
+msgctxt "#32696"
+msgid "MetaMender has not moved your settings to libraries yet, so they cannot be changed now. Try again once Kodi lists your video sources."
+msgstr ""
+
+msgctxt "#32697"
+msgid "MetaMender found new libraries: {}. They stay out until you include them."
+msgstr ""
+
+msgctxt "#32698"
+msgid "New libraries found: {}"
+msgstr ""
+
+msgctxt "#32699"
+msgid "1 item is in no MetaMender library, so it is not being updated."
+msgstr ""
+
+msgctxt "#32700"
+msgid "1 item is in no MetaMender library"
+msgstr ""
+
+msgctxt "#32701"
+msgid "No prefix"
+msgstr ""

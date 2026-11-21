@@ -57,7 +57,7 @@ from resources.lib.data.libraries import (
     FILE_OK,
     Library,
     LibraryConfig,
-    new_library,
+    add_new_libraries,
     read_libraries,
     save_libraries,
 )
@@ -67,7 +67,6 @@ from resources.lib.data.sources import (
     kodi_ui_language,
     library_folders_in_use,
     load_source_config,
-    source_paths,
 )
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.data.upgrade import (
@@ -194,34 +193,6 @@ def _get_sources_config_path() -> str:
     return _addon_data_file(SOURCES_CONFIG_FILENAME)
 
 
-def _norm(path: str) -> str:
-    return path.rstrip("/\\")
-
-
-def _add_new_libraries(
-    config: LibraryConfig, found: list[dict[str, str]], ui_language: str,
-) -> list[Library]:
-    """Append a new, not included library for every found source the
-    config does not hold yet; the added ones are returned. A source inside
-    a library's folder is not added: as a library of its own it would take
-    its items out of the library that covers them now."""
-    known = [_norm(f) for lib in config.libraries for f in source_paths(lib.path)]
-    added: list[Library] = []
-    for source in found:
-        path = str(source.get("path") or "")
-        folders = [_norm(f) for f in source_paths(path)]
-        if not path or not folders:
-            continue
-        if any(k and (f == k or f.startswith((k + "/", k + "\\")))
-               for f in folders for k in known):
-            continue
-        lib = new_library(path, str(source.get("label") or ""), ui_language)
-        config.libraries.append(lib)
-        known.extend(folders)
-        added.append(lib)
-    return added
-
-
 def _convert_libraries(tracker: TrackerDB, path: str) -> Optional[LibraryConfig]:
     """Turn the 1.1 settings into libraries, once. The moved settings are
     read from a copy of their own, which is deleted only after the new
@@ -293,7 +264,7 @@ def _sync_libraries(tracker: TrackerDB, ui_language: str) -> Optional[LibraryCon
     libraries = _load_libraries(tracker)
     if libraries is None:
         return None
-    added = _add_new_libraries(libraries, discover_folders(), ui_language)
+    added = add_new_libraries(libraries, discover_folders(), ui_language)
     if added and save_libraries(_get_sources_config_path(), libraries):
         labels = [lib.label or display_path(lib.path) for lib in added]
         log.info("New libraries added, not included", event="service.libraries_added",
@@ -570,7 +541,7 @@ def _attention_tick(
                 if answer == "setup":
                     xbmc.executebuiltin("RunScript(script.metamender,wizard)")
                 elif answer == "libraries":
-                    xbmc.executebuiltin("RunScript(script.metamender,folders)")
+                    xbmc.executebuiltin("RunScript(script.metamender,libraries)")
         toast = (attention.TVDB_AUTH, "")
         if record.pending_toast(attention.TVDB_AUTH) and toast not in shown:
             shown.add(toast)

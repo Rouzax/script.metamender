@@ -136,6 +136,34 @@ def new_library(path: str, label: str, ui_language: str) -> Library:
                    fallback_language="", toggles=frozenset())
 
 
+def _norm(path: str) -> str:
+    return path.rstrip("/\\")
+
+
+def add_new_libraries(
+    config: LibraryConfig, found: list[dict[str, str]], ui_language: str,
+) -> list[Library]:
+    """Append a new, not included library for every found source the
+    config does not hold yet; the added ones are returned. A source inside
+    a library's folder is not added: as a library of its own it would take
+    its items out of the library that covers them now."""
+    known = [_norm(f) for lib in config.libraries for f in source_paths(lib.path)]
+    added: list[Library] = []
+    for source in found:
+        path = str(source.get("path") or "")
+        folders = [_norm(f) for f in source_paths(path)]
+        if not path or not folders:
+            continue
+        if any(k and (f == k or f.startswith((k + "/", k + "\\")))
+               for f in folders for k in known):
+            continue
+        lib = new_library(path, str(source.get("label") or ""), ui_language)
+        config.libraries.append(lib)
+        known.extend(folders)
+        added.append(lib)
+    return added
+
+
 def _to_dict(lib: Library) -> dict[str, Any]:
     return {
         "path": lib.path,

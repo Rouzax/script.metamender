@@ -5,42 +5,6 @@
     "kind": "setup",
     "step": "key"
   },
-  "setup-language": {
-    "group": "setup",
-    "window": "script-metamender-setup.xml",
-    "kind": "setup",
-    "step": "language"
-  },
-  "setup-folders": {
-    "group": "setup",
-    "window": "script-metamender-setup.xml",
-    "kind": "setup",
-    "step": "folders"
-  },
-  "setup-features": {
-    "group": "setup",
-    "window": "script-metamender-setup.xml",
-    "kind": "setup",
-    "step": "features"
-  },
-  "setup-ratings": {
-    "group": "setup",
-    "window": "script-metamender-setup.xml",
-    "kind": "setup",
-    "step": "ratings"
-  },
-  "setup-text": {
-    "group": "setup",
-    "window": "script-metamender-setup.xml",
-    "kind": "setup",
-    "step": "text"
-  },
-  "setup-country": {
-    "group": "setup",
-    "window": "script-metamender-setup.xml",
-    "kind": "setup",
-    "step": "country"
-  },
   "setup-summary": {
     "group": "setup",
     "window": "script-metamender-setup.xml",

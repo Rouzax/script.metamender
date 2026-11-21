@@ -774,6 +774,7 @@ def test_updated_text_singular_and_plural():
 import pytest  # noqa: E402
 
 from resources.lib.data.libraries import (  # noqa: E402
+    add_new_libraries,
     load_libraries,
     save_libraries,
     scan_settings,
@@ -952,7 +953,7 @@ def test_new_library_added_not_included_and_notified(kodi_stubs, addon_data):
 
 def test_add_new_libraries_skips_known_paths_however_spelled():
     config = LibraryConfig([_lib("smb://nas/Movies/")])
-    added = daemon._add_new_libraries(
+    added = add_new_libraries(
         config, [{"path": "smb://nas/Movies", "label": "M"},
                  {"path": "smb://nas/TV/", "label": "TV"},
                  {"path": "smb://nas/TV/", "label": "TV again"}], "nl-NL")
@@ -985,7 +986,7 @@ def test_open_libraries_answer_opens_the_library_list(kodi_stubs):
     svc = _Service()
     svc.window.return_value = "libraries"
     svc.run(ticks=1, scan=MagicMock(return_value=stats))
-    svc.builtin.assert_called_once_with("RunScript(script.metamender,folders)")
+    svc.builtin.assert_called_once_with("RunScript(script.metamender,libraries)")
 
 
 @pytest.mark.parametrize("country, ui_language, code", [("3", "en-US", "DE"),

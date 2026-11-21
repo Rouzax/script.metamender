@@ -1,4 +1,5 @@
-"""Demo items for the details window scenes. Development only, never shipped.
+"""Demo items for the details window scenes and the demo libraries for the
+setup scenes. Development only, never shipped.
 
 Every title, name, id and date here is invented, so a screenshot shows the
 window and nothing of a real library. The rows come from the add-on's own
@@ -9,8 +10,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from dataclasses import replace
+
+from resources.lib.data.libraries import TITLE_ORIGINAL, Library, LibraryConfig, new_library
 from resources.lib.data.media_types import EPISODE, MOVIE, MediaType
 from resources.lib.engine.protect import fingerprint
+from resources.lib.ui.setup_model import SetupState, initial_state
 
 # The scenes are dated, so a re-take gives the same "next check" dates.
 TODAY = "2026-11-12"
@@ -153,3 +158,38 @@ def episode_locked() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[st
 
 
 PRESETS = {"episode": episode, "episode-locked": episode_locked, "episode-dutch": episode_dutch, "episode-not-matched": episode_not_matched, "movie": movie}
+
+
+# Shaped like a TMDB key, but not one.
+DEMO_KEY = "demo0key0for0screenshots0only00"
+DEMO_UI_LANGUAGE = "en-US"
+
+
+def demo_libraries() -> list[Library]:
+    """One library in each state the library list shows."""
+    return [
+        # cert_country 1 is NL: an English library can still follow Dutch
+        # age ratings, which is what the list line shows.
+        replace(new_library("smb://nas/media/Movies/", "Movies", "en-US"), included=True,
+                toggles=frozenset({"ratings", "plots", "taglines", "certifications"}),
+                cert_country=1),
+        replace(new_library("smb://nas/media/Kids/Movies/", "Kids Movies", "nl-NL"),
+                included=True, toggles=frozenset({"plots", "main_titles"}),
+                title_mode=TITLE_ORIGINAL),
+        replace(new_library("smb://nas/media/TV Shows/", "TV Shows", "en-US"), included=True),
+        new_library("smb://nas/media/Sport/", "Sport Videos", "en-US"),
+    ]
+
+
+def setup_state(scene: dict[str, Any]) -> SetupState:
+    """The setup state a setup scene opens with: the demo libraries, as
+    Kodi lists them and as sources.json holds them, and the page of the
+    scene's "library" (a label) when it names one."""
+    libraries = demo_libraries()
+    found = [{"path": lib.path, "label": lib.label} for lib in libraries]
+    state = initial_state({"tmdb_api_key": DEMO_KEY}, LibraryConfig(libraries), found,
+                          DEMO_UI_LANGUAGE)
+    label = scene.get("library")
+    if label:
+        state.open_library = next(lib.path for lib in libraries if lib.label == label)
+    return state

@@ -46,6 +46,22 @@ _FIXES = {SETUP: "setup", NO_KEY: "setup", KEY_REJECTED: "setup",
           NEW_LIBRARY: "libraries", UNMATCHED: "libraries",
           LIBRARIES_CONVERTED: "libraries"}
 _FIX_LABEL = {"setup": 32502, "libraries": 32651}
+# (full, short) forms for a detail naming several libraries or counting
+# other than one item; the tables above hold the other form.
+_SEVERAL_TEXT = {NEW_LIBRARY: (32697, 32698)}
+_ONE_TEXT = {UNMATCHED: (32699, 32700)}
+
+
+def problem_text(problem: Problem, short: bool) -> str:
+    """The problem's sentence (or its short form) with its detail filled
+    in, worded for one library or item or for several."""
+    form = 1 if short else 0
+    text = (ALSO_TEXT if short else FULL_TEXT)[problem.kind]
+    if problem.kind in _SEVERAL_TEXT and ", " in problem.detail:
+        text = _SEVERAL_TEXT[problem.kind][form]
+    if problem.kind in _ONE_TEXT and problem.detail.strip() == "1":
+        text = _ONE_TEXT[problem.kind][form]
+    return lang(text).format(problem.detail)
 
 
 def fix_for(kind: str) -> str:
@@ -58,10 +74,8 @@ def attention_properties(main: Problem, others: list[Problem]) -> dict[str, str]
     """Every window property the attention XML reads."""
     props = {
         "MM.Heading": lang(32490),
-        "MM.Problem": lang(FULL_TEXT[main.kind]).format(main.detail),
-        "MM.Also": "\n".join(
-            lang(32501).format(lang(ALSO_TEXT[p.kind]).format(p.detail)) for p in others
-        ),
+        "MM.Problem": problem_text(main, short=False),
+        "MM.Also": "\n".join(lang(32501).format(problem_text(p, short=True)) for p in others),
         "MM.Action": lang(_FIX_LABEL[fix_for(main.kind)]) if fix_for(main.kind) else "",
         "MM.Later": lang(32503),
     }

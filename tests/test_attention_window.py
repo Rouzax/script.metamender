@@ -86,3 +86,24 @@ def test_new_kinds_offer_open_libraries():
     assert attention_window.fix_for(SETUP) == "setup"
     assert attention_window.fix_for(FOLDER_OFFLINE) == ""
 
+
+
+@pytest.mark.parametrize("problem,full,short", [
+    (Problem(NEW_LIBRARY, "Kids"),
+     "MetaMender found a new library, Kids. It stays out until you include it.",
+     "New library found: Kids"),
+    (Problem(NEW_LIBRARY, "Kids, Sport"),
+     "MetaMender found new libraries: Kids, Sport. They stay out until you include them.",
+     "New libraries found: Kids, Sport"),
+    (Problem(UNMATCHED, "1"),
+     "1 item is in no MetaMender library, so it is not being updated.",
+     "1 item is in no MetaMender library"),
+    (Problem(UNMATCHED, "12"),
+     "12 items are in no MetaMender library, so they are not being updated.",
+     "12 items are in no MetaMender library"),
+])
+def test_library_notices_read_for_one_or_several(problem, full, short):
+    assert attention_window.problem_text(problem, short=False) == full
+    assert attention_window.problem_text(problem, short=True) == short
+    props = attention_properties(Problem(SETUP, ""), [problem])
+    assert props["MM.Also"].endswith(short)
