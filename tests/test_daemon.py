@@ -392,10 +392,8 @@ def test_certification_settings_shipped():
     root = ET.parse("resources/settings.xml").getroot()
     ids = {s.get("id"): s for s in root.iter("setting")}
     assert "retry_days" not in ids and "enable_kijkwijzer" not in ids
-    assert ids["enable_fallback"].findtext("default") == "false"
-    assert ids["enable_certifications"].findtext("default") == "true"
-    assert ids["replace_incorrect"].findtext("default") == "true"
-    for sid in ("enable_certifications", "country", "enable_fsk"):
+    for sid in ("enable_fsk", "enable_bbfc", "enable_medieraadet"):
+        assert ids[sid].findtext("default") == "true"
         assert ids[sid].findtext("visible") is None
 
 
@@ -466,7 +464,7 @@ def test_setup_settings_shipped():
     assert hidden.get("type") == "boolean"
     assert hidden.findtext("level") == "4"
     assert hidden.findtext("default") == "false"
-    assert by_id["configure_sources"].findtext("data") == "RunScript(script.metamender,folders)"
+    assert by_id["configure_sources"].findtext("data") == "RunScript(script.metamender,libraries)"
     assert by_id["run_setup_wizard"].findtext("data") == "RunScript(script.metamender,wizard)"
 
 

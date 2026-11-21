@@ -124,7 +124,7 @@ keeps both up to date. The others:
 
 An item with an NFO file keeps the rating its NFO file chose, whatever you
 pick. You can change this later as
-[Rating source](settings.md#source-priority) in the settings.
+[Rating source](libraries.md) in the settings.
 
 ## 6. Where plots and titles come from
 
@@ -141,7 +141,7 @@ language. Movies always come from TMDB.
 - **TMDB, then TheTVDB** and **TheTVDB, then TMDB** use that order for every
   show.
 
-You can change this later as [Text source order](settings.md#source-priority)
+You can change this later as [Text source order](libraries.md)
 in the settings.
 
 ## 7. Certification country
@@ -175,7 +175,7 @@ Dutch library. Ticked (the first choice), MetaMender replaces it with your
 country's rating. Unticked, it only fills items that have no rating. Ratings
 already in your country's system are kept either way, and ratings from an NFO
 file are never replaced. In the settings this is
-[Replace incorrect certifications](settings.md#correction).
+[Replace incorrect certifications](libraries.md).
 
 ## 8. Summary
 

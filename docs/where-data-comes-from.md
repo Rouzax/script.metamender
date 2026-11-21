@@ -46,7 +46,7 @@ language, if it has one.
 
 | Field | For | Asked, in order | When MetaMender writes |
 |---|---|---|---|
-| Rating and votes | Movies, shows, episodes | TMDB and IMDb, as **Rating source** says | Adds or refreshes its own TMDB and IMDb ratings beside your scraper's; your scraper's own ratings stay. Which one Kodi shows: see [Rating source](settings.md#source-priority). |
+| Rating and votes | Movies, shows, episodes | TMDB and IMDb, as **Rating source** says | Adds or refreshes its own TMDB and IMDb ratings beside your scraper's; your scraper's own ratings stay. Which one Kodi shows: see [Rating source](libraries.md). |
 | Plot | Movies | TMDB in the folder language, then TMDB in the fallback | Replaces a different plot. The fallback only fills an empty plot. |
 | Plot | Shows, episodes | TMDB and TheTVDB in the folder language (order: **Text source order**), then both in the fallback (**Fallback language order**) | As for movies. |
 | Episode title | Episodes | As episode plots | As plots. A generic title such as "Episode 3" counts as no title: it is never written, and one in Kodi counts as empty. |

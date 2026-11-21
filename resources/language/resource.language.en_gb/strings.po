@@ -1626,3 +1626,11 @@ msgstr ""
 msgctxt "#32702"
 msgid "MetaMender could not read the stored library settings. If you continue and save, every library starts afresh: not included, nothing switched on. Continue?"
 msgstr ""
+
+msgctxt "#32703"
+msgid "Libraries"
+msgstr ""
+
+msgctxt "#32704"
+msgid "Open the library list: choose which libraries MetaMender updates and what it fills, which ratings it shows and where plots and titles come from, for each library."
+msgstr ""
