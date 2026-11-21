@@ -1,6 +1,20 @@
 MetaMender Changelog
 ====================
 
+v1.1.1 (unreleased)
+-------------------
+Bug Fixes:
+  - Fixed: the service and the add-on failed to start on Kodi builds
+    that run Python 3.9, such as OSMC's Kodi 21 (TypeError: unsupported
+    operand type(s) for |). The certification module's Candidate type
+    alias used an X | None union, which Python evaluates at import and
+    only supports from 3.10.
+
+Internal:
+  - The Python floor is 3.9: ruff and pyright target it, and
+    tests/test_python_floor.py parses every shipped file with the 3.9
+    grammar and rejects X | Y type unions outside annotations.
+
 v1.1.0 (2026-11-13)
 -------------------
 New Features:
