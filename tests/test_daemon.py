@@ -113,8 +113,6 @@ class _AbortMonitor:
 
 
 def test_prepare_imdb_ratings_passes_abort_on_shutdown_or_playback(kodi_stubs):
-    from unittest.mock import patch
-
     monitor = _AbortMonitor()
     with patch.object(daemon.imdb_ratings, "prepare", return_value=True) as prep:
         assert daemon._prepare_imdb_ratings(_prepare_libs(), monitor) is True
@@ -129,8 +127,6 @@ def test_prepare_imdb_ratings_passes_abort_on_shutdown_or_playback(kodi_stubs):
 
 
 def test_prepare_imdb_ratings_skipped_when_imdb_not_consulted(kodi_stubs):
-    from unittest.mock import patch
-
     with patch.object(daemon.imdb_ratings, "prepare") as prep:
         assert daemon._prepare_imdb_ratings(
             _prepare_libs(rating_source=2), _AbortMonitor()
@@ -142,8 +138,6 @@ def test_prepare_imdb_ratings_skipped_when_imdb_not_consulted(kodi_stubs):
 
 
 def test_prepare_imdb_ratings_exception_yields_not_ready(kodi_stubs):
-    from unittest.mock import patch
-
     with patch.object(daemon.imdb_ratings, "prepare", side_effect=RuntimeError("boom")), \
             patch.object(daemon.log, "exception") as log_exc:
         assert daemon._prepare_imdb_ratings(_prepare_libs(), _AbortMonitor()) is False
@@ -152,8 +146,6 @@ def test_prepare_imdb_ratings_exception_yields_not_ready(kodi_stubs):
 
 
 def test_run_scan_passes_imdb_ready_to_every_pass(kodi_stubs):
-    from unittest.mock import patch
-
     tracker = MagicMock()
     tracker.get_show_id_map.return_value = {}
     settings = {"tmdb_api_key": "k"}
@@ -194,8 +186,6 @@ def _run_daemon_ticks(monkeypatch, scan_side_effect, ticks=5):
 
     Returns the mock standing in for _run_scan.
     """
-    from unittest.mock import patch
-
     scan_mock = MagicMock(side_effect=scan_side_effect)
     monitor = _FakeMonitor(ticks)
 
@@ -251,8 +241,6 @@ def _run_one_cycle(all_stats, resume_interrupted=True):
 
     Returns the TrackerDB instance mock so cycle calls can be asserted.
     """
-    from unittest.mock import patch
-
     monitor = _FakeMonitor(1)
     tracker_instance = MagicMock()
 
@@ -314,8 +302,6 @@ def test_aborted_scan_does_not_prune_orphans(kodi_stubs):
 
 def _notified_ids(all_stats):
     """Run one daemon cycle; return the string ids passed to notify."""
-    from unittest.mock import patch
-
     notify = MagicMock()
     with patch.object(daemon, "notify", notify), \
             patch.object(daemon, "lang", side_effect=lambda i: "s{}".format(i)):
@@ -337,8 +323,6 @@ def _run_daemon_locked(ticks=5):
 
     Returns (acquire mock, clear_file_lock mock).
     """
-    from unittest.mock import patch
-
     acquire = MagicMock(return_value=False)
     clear = MagicMock()
     with patch.object(daemon, "MetaMendMonitor", return_value=_FakeMonitor(ticks)), \
@@ -418,8 +402,6 @@ class _PendingMonitor(_FakeMonitor):
 
 
 def _run_gated(setup_complete, ticks):
-    from unittest.mock import patch
-
     monitor = _PendingMonitor(ticks)
     scan = MagicMock(return_value=_complete_stats())
     notify = MagicMock()

@@ -6007,6 +6007,38 @@ class TestKeepOriginalTitle:
         assert fs["title"]["fetch_count"] == 0
         assert fs["title"]["last_reason"] == "unchecked"
 
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_original_mode_transient_tmdb_show_keeps_the_clock(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        mock_fetch.side_effect = TransientProviderError("http 503")
+        item = _make_tvshow_item(title="Old")
+        tracker = _make_tracker(tmp_path)
+        run_scan(TVSHOW, tracker, self._lib(), "k", _make_settings(), items=[item])
+        fs = _fs(tracker, TVSHOW, item)
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        assert fs["title"]["fetch_count"] == 0
+        assert fs["title"]["last_reason"] == "unchecked"
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_original_mode_show_without_original_name_writes_nothing(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        # fetch_tvshow gives "" when TMDB has no original_name.
+        mock_fetch.return_value = _tmdb_tvshow_response(title="Tummy Tom", original_title="")
+        item = _make_tvshow_item(title="Old")
+        tracker = _make_tracker(tmp_path)
+        run_scan(TVSHOW, tracker, self._lib(), "k", _make_settings(), items=[item])
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+
 
 class TestCertifications:
     """mpaa for movies and TV shows: TMDB first, sites only when due, the

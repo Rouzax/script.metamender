@@ -8,14 +8,23 @@ from typing import Any, ClassVar
 
 import pytest
 
+from resources.lib.constants import COUNTRY_CODES
 from resources.lib.data.libraries import (
     FIELD_TOGGLES,
+    FILE_DAMAGED,
+    FILE_LEGACY,
+    FILE_MISSING,
+    FILE_OK,
     TITLE_LANGUAGE,
     TITLE_ORIGINAL,
     LibraryConfig,
     new_library,
+    read_libraries,
+    save_libraries,
 )
+from resources.lib.data.tracker import TrackerDB
 from resources.lib.providers.tmdb import KEY_OK, KEY_REFUSED, KEY_UNCHECKED
+from resources.lib.service import attention, daemon
 from resources.lib.ui import setup_window
 from resources.lib.ui.setup_model import TOGGLES, initial_state
 from resources.lib.ui.setup_window import (
@@ -641,9 +650,6 @@ def test_libraries_mode_saves_only_libraries(ids):
 
 
 def test_first_setup_writes_v2_and_raises_no_conversion_notice(tmp_path, monkeypatch):
-    from resources.lib.data.libraries import FILE_OK, read_libraries, save_libraries
-    from resources.lib.data.tracker import TrackerDB
-    from resources.lib.service import attention, daemon
 
     path = str(tmp_path / "sources.json")
     c, rec = _controller(key="abc", save=save_libraries)
@@ -801,7 +807,6 @@ def _messages():
 
 @pytest.mark.parametrize("mode", ["wizard", "libraries"])
 def test_unconverted_1_1_file_after_setup_refuses_to_open(run, mode):
-    from resources.lib.data.libraries import FILE_LEGACY
     assert run(FILE_LEGACY, True, mode) is False
     assert _messages() == ["#32696"] and _Window.opened == []
 
@@ -810,7 +815,6 @@ def test_first_run_with_a_1_1_file_starts_from_kodi_sources(run):
     """Before the first setup the service never converts (and open_setup
     has already converted a file with folder languages): the wizard opens
     on the discovered libraries, none included."""
-    from resources.lib.data.libraries import FILE_LEGACY
     assert run(FILE_LEGACY, False, "wizard") is False
     assert _messages() == []
     (c,) = _Window.opened
@@ -820,7 +824,6 @@ def test_first_run_with_a_1_1_file_starts_from_kodi_sources(run):
 
 @pytest.mark.parametrize("mode", ["wizard", "libraries"])
 def test_damaged_file_opens_only_when_the_user_starts_afresh(run, mode):
-    from resources.lib.data.libraries import FILE_DAMAGED
     assert run(FILE_DAMAGED, True, mode, answer=False) is False
     assert _messages() == ["#32702"] and _Window.opened == []
 
@@ -832,14 +835,12 @@ def test_damaged_file_opens_only_when_the_user_starts_afresh(run, mode):
 
 
 def test_readable_file_opens_without_asking(run):
-    from resources.lib.data.libraries import FILE_MISSING, FILE_OK
     run(FILE_OK, True)
     run(FILE_MISSING, False, "wizard")
     assert _messages() == [] and len(_Window.opened) == 2
 
 
 def test_failed_discovery_opens_on_the_stored_libraries(run, monkeypatch):
-    from resources.lib.data.libraries import FILE_OK
     stored = LibraryConfig([_films(included=True)])
     monkeypatch.setattr(setup_window, "discover_folders", lambda: None)
     monkeypatch.setattr(setup_window, "read_libraries", lambda path: (stored, FILE_OK))
@@ -853,7 +854,6 @@ def test_country_labels_follow_country_codes():
     # cert_country is an index into COUNTRY_CODES, so the picker's labels
     # must be in the same order or one country is shown while another's
     # certifications are written.
-    from resources.lib.constants import COUNTRY_CODES
 
     po = Path("resources/language/resource.language.en_gb/strings.po").read_text(encoding="utf-8")
     strings = {int(k): v for k, v in re.findall(r'msgctxt "#(\d+)"\nmsgid "(.*)"', po)}
