@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
+from resources.lib.data.libraries import FIELD_TOGGLES
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.service import daemon
 
@@ -362,7 +363,7 @@ def test_service_start_clears_a_lock_file_left_by_a_killed_kodi(kodi_stubs):
 def test_every_backfill_field_has_a_toggle():
     """A field no toggle enables is never in enabled_fields, so the scan
     never manages it. Votes are written with the rating."""
-    toggled = frozenset().union(*daemon._FIELD_TOGGLES.values())
+    toggled = frozenset().union(*FIELD_TOGGLES.values())
     for media_type in (MOVIE, TVSHOW, EPISODE):
         # A movie or show title has its own toggle, apart from episode titles.
         own = {"title": "main_title"} if media_type is not EPISODE else {}

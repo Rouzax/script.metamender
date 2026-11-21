@@ -43,6 +43,7 @@ from resources.lib.constants import (
     SERVICE_SLEEP_INTERVAL_SEC,
     SOURCES_CONFIG_FILENAME,
 )
+from resources.lib.data.libraries import FIELD_TOGGLES
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.presets import country_for_setting
 from resources.lib.data.sources import (
@@ -122,20 +123,6 @@ class MetaMendMonitor(xbmc.Monitor):
 # Settings helpers
 # ---------------------------------------------------------------------------
 
-_FIELD_TOGGLES = {
-    "enable_ratings": frozenset({"rating"}),
-    "enable_plots": frozenset({"plot"}),
-    "enable_episode_titles": frozenset({"title"}),
-    # Show and movie titles: "main_title" stands for their "title" field, so
-    # the episode-title toggle does not switch them (see candidate_fields).
-    "enable_main_titles": frozenset({"main_title"}),
-    "enable_certifications": frozenset({"mpaa"}),
-    "enable_credits": frozenset({"director", "writer"}),
-    "enable_trailers": frozenset({"trailer"}),
-    "enable_taglines": frozenset({"tagline"}),
-    "enable_details": frozenset({"genre", "studio", "country", "runtime", "firstaired"}),
-}
-
 
 def _load_settings() -> dict[str, Any]:
     """Read all settings needed by the scan engine.
@@ -148,8 +135,8 @@ def _load_settings() -> dict[str, Any]:
     """
     # Build enabled fields from individual toggles
     fields: set = set()
-    for setting_id, field_names in _FIELD_TOGGLES.items():
-        if get_bool_setting(setting_id):
+    for name, field_names in FIELD_TOGGLES.items():
+        if get_bool_setting("enable_" + name):
             fields.update(field_names)
 
     return {
