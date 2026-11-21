@@ -108,6 +108,14 @@ class LibraryConfig:
             return enabled, str(best["language"]), str(best.get("fallback_language", ""))
         return enabled, lib.language, lib.fallback_language
 
+    def included_for(self, file_path: str) -> Optional[Library]:
+        """The library of file_path when both it and the subfolder the file
+        is in are included; None otherwise."""
+        lib = self.for_file(file_path)
+        if lib is None or not lib.included or not self.folder_settings(file_path, lib)[0]:
+            return None
+        return lib
+
     def by_path(self, path: str) -> Optional[Library]:
         for lib in self.libraries:
             if lib.path == path:
@@ -169,33 +177,61 @@ def _from_dict(raw: dict[str, Any]) -> Library:
     )
 
 
-def load_libraries(path: str) -> Optional[LibraryConfig]:
-    """The v2 config, or None when the file is missing, unreadable or not
-    version 2 (a 1.1 file is converted elsewhere)."""
+# What read_libraries found in sources.json.
+FILE_OK = "ok"
+FILE_MISSING = "missing"
+FILE_LEGACY = "legacy"
+FILE_DAMAGED = "damaged"
+
+
+def read_libraries(path: str) -> tuple[Optional[LibraryConfig], str]:
+    """(the v2 config or None, what the file is). A file without a version
+    is a 1.1 file (FILE_LEGACY); one that cannot be read, has another
+    version or a broken entry is FILE_DAMAGED. Only a missing or 1.1 file
+    may be converted: converting over a damaged v2 file would reset every
+    library."""
     if not os.path.exists(path):
-        return None
+        return None, FILE_MISSING
     try:
         with open(path, encoding="utf-8") as fh:
             raw = json.load(fh)
+        if isinstance(raw, dict) and "version" not in raw:
+            return None, FILE_LEGACY
         if not isinstance(raw, dict) or raw.get("version") != VERSION:
-            return None
-        return LibraryConfig([_from_dict(e) for e in raw.get("libraries", [])])
-    except (OSError, ValueError, KeyError, TypeError):
+            log.error("Libraries file has an unknown shape", event="libraries.load_fail",
+                      path=path)
+            return None, FILE_DAMAGED
+        return LibraryConfig([_from_dict(e) for e in raw.get("libraries", [])]), FILE_OK
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         log.exception("Failed to read libraries", event="libraries.load_fail", path=path)
-        return None
+        return None, FILE_DAMAGED
+
+
+def load_libraries(path: str) -> Optional[LibraryConfig]:
+    """The v2 config, or None when the file is missing, unreadable or not
+    version 2 (see read_libraries)."""
+    return read_libraries(path)[0]
 
 
 def save_libraries(path: str, config: LibraryConfig) -> bool:
-    """Write the v2 file, creating parent directories. False on failure."""
+    """Write the v2 file, creating parent directories. False on failure.
+    The file is written beside the old one and swapped in, so a failed
+    write leaves the old file whole."""
     data = {"version": VERSION, "libraries": [_to_dict(lib) for lib in config.libraries]}
+    parent = os.path.dirname(path)
+    temp = path + ".tmp"
     try:
-        parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(temp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
-    except OSError:
+        os.replace(temp, path)
+    except (OSError, TypeError, ValueError):
         log.exception("Failed to save libraries", event="libraries.save_fail", path=path)
+        try:
+            os.remove(temp)
+        except OSError:
+            pass
         return False
     log.info("Libraries saved", event="libraries.save", path=path,
              library_count=len(config.libraries))
@@ -256,31 +292,3 @@ def library_from_legacy_settings(
         cert_not_found=settings.get("cert_not_found"),
         subfolders=subfolders,
     )
-
-
-def legacy_config(source_config: dict[str, Any], settings: dict[str, Any],
-                  ui_language: str) -> LibraryConfig:
-    """The libraries a 1.1 sources.json and global settings describe: one per
-    source entry, each with the global options. An entry without a language
-    takes the config's default_language, or "" when that is unset too, so
-    the scan treats the folder as one without a configured language. Items
-    under no entry belong to no library.
-
-    ui_language is not consulted: the old settings carry the certification
-    country already resolved, and an unconfigured language stays "".
-    """
-    default_language = str(source_config.get("default_language") or "")
-    default_fallback = str(source_config.get("fallback_language") or "")
-    libraries = [
-        library_from_legacy_settings(
-            settings,
-            path=str(entry["path"]),
-            label="",
-            included=entry.get("enabled", True) is not False,
-            language=str(entry.get("language") or default_language),
-            fallback_language=str(entry.get("fallback_language", default_fallback) or ""),
-        )
-        for entry in source_config.get("sources") or []
-        if entry.get("path")
-    ]
-    return LibraryConfig(libraries)

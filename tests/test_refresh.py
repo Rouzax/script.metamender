@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from resources.lib.data.libraries import Library, LibraryConfig
 from resources.lib.data.media_types import EPISODE, TVSHOW
 from resources.lib.service import refresh
 from resources.lib.service.refresh import (
@@ -16,18 +17,21 @@ from resources.lib.service.refresh import (
     show_id_of,
 )
 
-_SHOW = {"tvshowid": 7, "title": "Lost"}
+_LOST = "smb://nas/Series/Lost/"
+_SHOW = {"tvshowid": 7, "title": "Lost", "file": _LOST}
+_SERIES = Library(path="smb://nas/Series/", label="Series", included=True, language="en-US",
+                  fallback_language="", toggles=frozenset({"plots"}))
 
 
 def test_resolve_scope_for_a_show():
     with patch.object(refresh, "get_item_by_id", return_value=_SHOW):
-        assert resolve_scope("tvshow", 7) == Scope(7, None, "Lost")
+        assert resolve_scope("tvshow", 7) == Scope(7, None, "Lost", _LOST)
 
 
 def test_resolve_scope_for_a_season():
     with patch.object(refresh, "get_season_info", return_value=(7, 2)), \
             patch.object(refresh, "get_item_by_id", return_value=_SHOW):
-        assert resolve_scope("season", 31) == Scope(7, 2, "Lost")
+        assert resolve_scope("season", 31) == Scope(7, 2, "Lost", _LOST)
 
 
 def test_resolve_scope_unknown_or_missing():
@@ -136,11 +140,12 @@ def test_stop_request_crosses_threads():
 
 # --- runner ------------------------------------------------------------------
 
-_SETTINGS = {"enabled_fields": frozenset({"plot"}), "tmdb_api_key": "k"}
+_SETTINGS = {"tmdb_api_key": "k"}
 
 
 def _episode(n, season=1):
-    return {"episodeid": 100 + n, "title": "Ep %d" % n, "season": season, "episode": n}
+    return {"episodeid": 100 + n, "title": "Ep %d" % n, "season": season, "episode": n,
+            "file": "{}S{:02d}/e{:02d}.mkv".format(_LOST, season, n)}
 
 
 class FakeScan:
@@ -184,14 +189,16 @@ class Monitor:
         return self.abort
 
 
-def _run(scope, scan, episodes, monitor=None, progress=None, strings_ok=True):
+def _run(scope, scan, episodes, monitor=None, progress=None, strings_ok=True,
+         libraries=None):
     progress = progress or RefreshProgress()
     with patch.object(refresh, "run_scan", scan), \
             patch.object(refresh, "get_all_items", return_value=episodes) as listing, \
-            patch.object(refresh, "get_item_by_id", return_value={"tvshowid": 7, "title": "Lost"}), \
+            patch.object(refresh, "get_item_by_id", return_value=_SHOW), \
             patch.object(refresh, "lang", lambda i: {32472: "Show details",
                                                      32473: "Season {}, episode {}: {}"}.get(i, "")):
-        outcome = run_refresh(scope, progress, _SETTINGS, {"sources": []},
+        outcome = run_refresh(scope, progress, _SETTINGS,
+                              libraries or LibraryConfig([_SERIES]),
                               FakeTracker(scan), monitor or Monitor())
     return outcome, progress, listing
 
@@ -363,7 +370,7 @@ def flow(monkeypatch):
     state = {"outcome": refresh.RefreshOutcome(), "raise": None, "lock": True,
              "running_seen": None}
     monkeypatch.setattr(refresh, "_home_window", lambda: home)
-    monkeypatch.setattr(refresh, "resolve_scope", lambda d, i: Scope(7, None, "Lost"))
+    monkeypatch.setattr(refresh, "resolve_scope", lambda d, i: Scope(7, None, "Lost", _LOST))
     monkeypatch.setattr(refresh, "acquire_scan_lock", lambda: state["lock"])
     monkeypatch.setattr(refresh, "release_scan_lock", lambda: released.append(True))
     monkeypatch.setattr(refresh, "notify", notes.append)
@@ -383,15 +390,17 @@ def flow(monkeypatch):
 
     monkeypatch.setattr(refresh, "TrackerDB", lambda path: _Tracker())
     monkeypatch.setattr(refresh, "_get_db_path", lambda: ":memory:")
-    monkeypatch.setattr(refresh, "load_source_config", lambda p: {"sources": []})
+    monkeypatch.setattr(refresh, "load_libraries", lambda p: state["libraries"])
+    state["libraries"] = LibraryConfig([_SERIES])
     monkeypatch.setattr(refresh, "_get_sources_config_path", lambda: "x")
     monkeypatch.setattr(refresh, "_prepare_imdb_ratings", lambda s, m: False)
     monkeypatch.setattr(refresh.xbmc, "Monitor", lambda: Monitor())
     monkeypatch.setattr(refresh.StructuredLogger, "start_scan_log", lambda: None)
     monkeypatch.setattr(refresh.StructuredLogger, "stop_scan_log", lambda: None)
 
-    def fake_run(scope, progress, settings, source_config, tracker, monitor, prepare=None):
+    def fake_run(scope, progress, settings, libraries, tracker, monitor, prepare=None):
         state["running_seen"] = home.getProperty(refresh._RUNNING_SHOW)
+        state["libraries_passed"] = libraries
         if state["raise"]:
             raise state["raise"]
         return state["outcome"]
@@ -443,7 +452,7 @@ def test_flow_window_failure_stops_the_worker_before_releasing_the_lock(flow, mo
     home, notes, released, state = flow
     events = []
 
-    def slow_run(scope, progress, settings, source_config, tracker, monitor, prepare=None):
+    def slow_run(scope, progress, settings, libraries, tracker, monitor, prepare=None):
         for _ in range(200):
             if progress.stop_requested:
                 break
@@ -502,7 +511,7 @@ def test_preparation_shows_the_real_count_and_honours_stop():
             patch.object(refresh, "get_item_by_id", return_value={"tvshowid": 7, "title": "Lost"}), \
             patch.object(refresh, "lang", lambda i: {32486: "Preparing IMDb ratings"}.get(i, "")):
         settings = dict(_SETTINGS)
-        outcome = run_refresh(Scope(7, None, "Lost"), progress, settings, {"sources": []},
+        outcome = run_refresh(Scope(7, None, "Lost"), progress, settings, LibraryConfig([_SERIES]),
                               FakeTracker(scan), Monitor(), prepare=prepare)
     assert seen == {"total": 2, "current": "Preparing IMDb ratings"}
     assert settings["imdb_ready"] is True
@@ -530,7 +539,7 @@ def test_flow_after_stop_says_it_is_stopping(flow, monkeypatch):
     home, notes, released, state = flow
     gate = threading.Event()
 
-    def slow_run(scope, progress, settings, source_config, tracker, monitor, prepare=None):
+    def slow_run(scope, progress, settings, libraries, tracker, monitor, prepare=None):
         gate.wait(2)
         return refresh.RefreshOutcome(stopped=True)
 
@@ -607,3 +616,35 @@ def test_tmdb_answer_is_part_of_the_outcome():
     assert outcome.tmdb_answered is True
     outcome, _, _ = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)])
     assert outcome.tmdb_answered is False
+
+
+@pytest.mark.parametrize("libraries", [
+    LibraryConfig([Library(**{**_SERIES.__dict__, "included": False})]),
+    LibraryConfig([Library(**{**_SERIES.__dict__, "subfolders": (
+        {"path": _LOST, "enabled": False},)})]),
+    LibraryConfig([]),
+    None,
+], ids=["library_left_out", "subfolder_left_out", "no_library", "no_file"])
+def test_update_now_on_excluded_library_shows_message_and_changes_nothing(flow, libraries):
+    home, notes, released, state = flow
+    state["libraries"] = libraries
+    refresh.open_refresh("tvshow", 7)
+    assert notes == ["#32650 {}"]
+    assert state["running_seen"] is None  # no refresh ran
+    assert released == [] and home.props == {}
+
+
+def test_flow_refreshes_with_the_show_library(flow):
+    home, notes, released, state = flow
+    refresh.open_refresh("tvshow", 7)
+    assert state["libraries_passed"] == LibraryConfig([_SERIES])
+
+
+def test_episodes_in_an_excluded_subfolder_are_left_out():
+    libraries = LibraryConfig([Library(**{**_SERIES.__dict__, "subfolders": (
+        {"path": _LOST + "S02/", "enabled": False},)})])
+    scan = FakeScan()
+    _, progress, _ = _run(Scope(7, None, "Lost"), scan,
+                          [_episode(1), _episode(1, season=2)], libraries=libraries)
+    assert scan.calls[1][1] == ["Ep 1"]
+    assert progress.total == 1

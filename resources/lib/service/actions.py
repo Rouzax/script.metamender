@@ -19,23 +19,19 @@ Logging:
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 import xbmc
 import xbmcgui
 
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.kodi import get_item_by_id
-from resources.lib.data.libraries import legacy_config
+from resources.lib.data.libraries import LibraryConfig
 from resources.lib.data.media_types import EPISODE, MOVIE, MediaType
-from resources.lib.data.sources import kodi_ui_language, load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
 from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
-    _get_sources_config_path,
     _load_settings,
     _prepare_imdb_ratings,
     tvdb_auth_failed,
@@ -43,6 +39,7 @@ from resources.lib.service.daemon import (
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
 from resources.lib.service.refresh import (
     bring_back_or_busy,
+    included_library,
     open_refresh,
     request_reopen,
     show_id_of,
@@ -63,7 +60,7 @@ from resources.lib.utils import (
 log = get_logger('actions')
 
 # Map a Kodi ListItem.DBType string to its MediaType.
-_DBTYPE_TO_MEDIA_TYPE: Dict[str, MediaType] = {
+_DBTYPE_TO_MEDIA_TYPE: dict[str, MediaType] = {
     "movie": MOVIE,
     "episode": EPISODE,
 }
@@ -118,14 +115,15 @@ def reset_tracker() -> None:
 def update_now(dbtype: str, dbid: str) -> None:
     """Force a fresh single-item correction (D3 "Update now" context action).
 
-    Runs a reset scan of one library item: it bypasses the disabled-source
-    gate, the playback yield, and the cycle-processed skip, treats every
+    Runs a reset scan of one library item with its library's settings: it
+    bypasses the playback yield and the cycle-processed skip, treats every
     enabled field as due, and leaves each field's refresh schedule as it was
     (a manual refresh is not a sample of the item's ageing). A show or a
     season refreshes everything under it with a progress window
     (service/refresh.py). Acquires the shared scan lock so it never runs
     concurrently with another scan; while one runs, a click inside the show
-    being refreshed brings its window back.
+    being refreshed brings its window back. An item outside the included
+    libraries is left alone, with a message.
 
     Args:
         dbtype: Kodi ListItem.DBTYPE ("movie", "tvshow", "season" or
@@ -155,7 +153,7 @@ def update_now(dbtype: str, dbid: str) -> None:
         open_refresh(dbtype, show_or_season)
         return
 
-    media_type: Optional[MediaType] = _DBTYPE_TO_MEDIA_TYPE.get(dbtype)
+    media_type: MediaType | None = _DBTYPE_TO_MEDIA_TYPE.get(dbtype)
     if media_type is None:
         log.warning(
             "Update now called with unknown dbtype",
@@ -204,6 +202,9 @@ def update_now(dbtype: str, dbid: str) -> None:
             )
             notify(lang(32345))  # Item not found
             return
+        lib = included_library(item.get("file", ""))
+        if lib is None:
+            return
 
         settings = _load_settings()
         tmdb_api_key = settings["tmdb_api_key"]
@@ -216,18 +217,17 @@ def update_now(dbtype: str, dbid: str) -> None:
             return
 
         tracker = TrackerDB(_get_db_path())
-        source_config = load_source_config(_get_sources_config_path())
 
-        show_id_map: Optional[Dict[int, str]] = None
+        show_id_map: dict[int, str] | None = None
         if media_type.name == "episode":
             show_id_map = tracker.get_show_id_map()
 
         monitor = xbmc.Monitor()
-        settings["imdb_ready"] = _prepare_imdb_ratings(settings, monitor)
+        settings["imdb_ready"] = _prepare_imdb_ratings([lib], monitor)
         stats = run_scan(
             media_type=media_type,
             tracker=tracker,
-            libraries=legacy_config(source_config, settings, kodi_ui_language()),
+            libraries=LibraryConfig([lib]),
             tmdb_api_key=tmdb_api_key,
             settings=settings,
             monitor=monitor,

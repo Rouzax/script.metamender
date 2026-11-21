@@ -9,8 +9,11 @@ import pytest
 from resources.lib.service.attention import (
     FOLDER_OFFLINE,
     KEY_REJECTED,
+    LIBRARIES_CONVERTED,
+    NEW_LIBRARY,
     NO_KEY,
     SETUP,
+    UNMATCHED,
     WINDOW_KINDS,
     Problem,
 )
@@ -71,3 +74,15 @@ def test_window_xml_reads_every_property():
     xml = (_ROOT / "resources/skins/Default/1080i/script-metamender-attention.xml").read_text()
     for key in attention_properties(Problem(SETUP, ""), []):
         assert "Window.Property(%s)" % key in xml, key
+
+
+def test_new_kinds_offer_open_libraries():
+    for kind, detail in ((NEW_LIBRARY, "Kids, Sport"), (UNMATCHED, "4"),
+                         (LIBRARIES_CONVERTED, "")):
+        props = attention_properties(Problem(kind, detail), [])
+        assert props["MM.Action"] == "Open Libraries", kind
+        assert detail in props["MM.Problem"], kind
+        assert attention_window.fix_for(kind) == "libraries"
+    assert attention_window.fix_for(SETUP) == "setup"
+    assert attention_window.fix_for(FOLDER_OFFLINE) == ""
+

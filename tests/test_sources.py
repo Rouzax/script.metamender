@@ -12,7 +12,6 @@ from resources.lib.data.sources import (
     kodi_ui_language,
     library_folders,
     load_source_config,
-    match_source,
     save_source_config,
     source_paths,
 )
@@ -46,51 +45,14 @@ def test_save_creates_parent_dirs(tmp_path):
     assert os.path.exists(path)
 
 
-def test_match_source_exact_prefix():
-    sources = [
-        {"path": "smb://server/movies/", "enabled": True, "language": "en-US"},
-        {"path": "smb://server/tv/nl/", "enabled": True, "language": "nl-NL"},
-    ]
-    result = match_source("smb://server/tv/nl/show/s01e01.mkv", sources)
-    assert result["language"] == "nl-NL"
-
-
-def test_match_source_longest_prefix():
-    sources = [
-        {"path": "smb://server/tv/", "enabled": True, "language": "en-US"},
-        {"path": "smb://server/tv/nl/", "enabled": True, "language": "nl-NL"},
-    ]
-    result = match_source("smb://server/tv/nl/show/file.mkv", sources)
-    assert result["language"] == "nl-NL"
-
-
-def test_match_source_no_match():
-    sources = [
-        {"path": "smb://server/movies/", "enabled": True, "language": "en-US"},
-    ]
-    result = match_source("smb://other/tv/file.mkv", sources)
-    assert result == {"enabled": True}
-
-
-def test_match_source_disabled():
-    sources = [
-        {"path": "smb://server/sports/", "enabled": False, "language": "en-US"},
-    ]
-    result = match_source("smb://server/sports/game.mkv", sources)
-    assert result["enabled"] is False
-
-
-def test_match_source_respects_path_boundary():
-    # A source "/media/movies" (no trailing slash) must NOT match a sibling
+def test_path_matches_respects_the_path_boundary():
+    # A folder "/media/movies" (no trailing slash) must NOT match a sibling
     # directory "/media/movies_extra"; it must match "/media/movies/...".
-    sources = [
-        {"path": "/media/movies", "enabled": True, "language": "fr-FR"},
-    ]
-    sibling = match_source("/media/movies_extra/film.mkv", sources)
-    assert "language" not in sibling  # fell through to the default
+    from resources.lib.data.sources import _path_matches
 
-    inside = match_source("/media/movies/film.mkv", sources)
-    assert inside["language"] == "fr-FR"
+    assert not _path_matches("/media/movies_extra/film.mkv", "/media/movies")
+    assert _path_matches("/media/movies/film.mkv", "/media/movies")
+    assert _path_matches("smb://s/m/film.mkv", "smb://s/m/")
 
 
 def test_kodi_ui_language_with_region():
@@ -244,21 +206,31 @@ def test_discover_folders_empty_library():
         assert discover_folders() == []
 
 
-def test_library_folders_in_use_expands_multipath_and_skips_empty_and_disabled(monkeypatch):
+def test_offline_check_uses_included_libraries(monkeypatch):
     from urllib.parse import quote
 
     from resources.lib.data import sources
+    from resources.lib.data.libraries import Library, LibraryConfig, new_library
+
+    def lib(path, included=True, subfolders=()):
+        return Library(path=path, label="", included=included, language="en-US",
+                       fallback_language="", toggles=frozenset({"plots"}),
+                       subfolders=subfolders)
+
     multi = "multipath://{}/{}/".format(
         quote("smb://user:secret@nas/Series/", safe=""), quote("smb://nas/Docs/", safe=""))
-    monkeypatch.setattr(sources, "discover_folders", lambda: [
-        {"path": multi, "label": "TV"},
-        {"path": "smb://nas/Movies/", "label": "Movies"},
-        {"path": "/media/usb/", "label": "USB stick"},
-    ])
-    files = {"movies": ["smb://nas/Movies/Alien (1979)/Alien.mkv"],
+    files = {"movies": ["smb://nas/Movies/Alien (1979)/Alien.mkv",
+                        "smb://nas/Kids/Up (2009)/Up.mkv",
+                        "smb://nas/Sport/Final.mkv"],
              "tvshows": ["smb://user:secret@nas/Series/Lost/"]}
     monkeypatch.setattr(sources, "_library_files", lambda method, key: files[key])
-    config = [{"path": "smb://nas/Movies/", "enabled": False}]
-    assert sources.library_folders_in_use(config) == ["smb://user:secret@nas/Series/"]
-    assert sources.library_folders_in_use([]) == [
+    config = LibraryConfig([
+        lib(multi),
+        lib("smb://nas/Movies/"),
+        lib("smb://nas/Kids/", included=False),
+        lib("/media/usb/"),
+        new_library("smb://nas/New/", "New", "en-US"),
+        lib("smb://nas/Sport/", subfolders=({"path": "smb://nas/Sport/", "enabled": False},)),
+    ])
+    assert sources.library_folders_in_use(config) == [
         "smb://user:secret@nas/Series/", "smb://nas/Movies/"]

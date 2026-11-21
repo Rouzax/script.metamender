@@ -2,7 +2,7 @@
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
-from resources.lib.data.libraries import FIELD_TOGGLES
+from resources.lib.data.libraries import FIELD_TOGGLES, Library, LibraryConfig
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.service import daemon
 
@@ -77,22 +77,31 @@ def test_maybe_prune_orphans_retention_zero_never_prunes():
     tracker.prune_orphans.assert_not_called()
 
 
-def test_load_settings_has_new_keys_not_old(kodi_stubs, settings_mock):
-    """_load_settings carries the text-source keys with their defaults and the
-    raw refetch_schedule string; the replaced and retired keys are gone."""
-    s = daemon._load_settings()
+def test_load_settings_has_general_keys_only(kodi_stubs, settings_mock):
+    """_load_settings carries the general settings and the interface
+    language; what a library does comes from the library."""
+    with patch.object(daemon, "kodi_ui_language", return_value="nl-NL"):
+        s = daemon._load_settings()
 
-    assert s["text_source_order"] == 2  # follow the scraper
-    assert s["fallback_order"] == 0
     assert isinstance(s["refetch_schedule"], str)
-
+    assert s["ui_language"] == "nl-NL"
+    for moved in ("rating_source", "text_source_order", "fallback_order", "enabled_fields",
+                  "cert_country", "cert_prefix_override", "cert_replace_foreign",
+                  "cert_not_found"):
+        assert moved not in s
     for retired in ("plot_source", "default_source", "max_retries", "fallback_language",
                     "min_votes_movie", "min_votes_episode"):
         assert retired not in s
 
 
-def _prepare_settings(rating_source=0, fields=("rating",)):
-    return {"rating_source": rating_source, "enabled_fields": frozenset(fields)}
+def _lib(path="/m/", rating_source=0, toggles=("ratings",), included=True, **kw):
+    return Library(path=path, label=kw.pop("label", "L"), included=included,
+                   language="en-US", fallback_language="", toggles=frozenset(toggles),
+                   rating_source=rating_source, **kw)
+
+
+def _prepare_libs(rating_source=0, toggles=("ratings",)):
+    return [_lib(rating_source=rating_source, toggles=toggles)]
 
 
 class _AbortMonitor:
@@ -108,7 +117,7 @@ def test_prepare_imdb_ratings_passes_abort_on_shutdown_or_playback(kodi_stubs):
 
     monitor = _AbortMonitor()
     with patch.object(daemon.imdb_ratings, "prepare", return_value=True) as prep:
-        assert daemon._prepare_imdb_ratings(_prepare_settings(), monitor) is True
+        assert daemon._prepare_imdb_ratings(_prepare_libs(), monitor) is True
     abort = prep.call_args[0][0]
     with patch.object(daemon.xbmc, "getCondVisibility", return_value=False):
         assert abort() is False
@@ -124,10 +133,10 @@ def test_prepare_imdb_ratings_skipped_when_imdb_not_consulted(kodi_stubs):
 
     with patch.object(daemon.imdb_ratings, "prepare") as prep:
         assert daemon._prepare_imdb_ratings(
-            _prepare_settings(rating_source=2), _AbortMonitor()
+            _prepare_libs(rating_source=2), _AbortMonitor()
         ) is False
         assert daemon._prepare_imdb_ratings(
-            _prepare_settings(fields=("plot",)), _AbortMonitor()
+            _prepare_libs(toggles=("plots",)), _AbortMonitor()
         ) is False
     prep.assert_not_called()
 
@@ -137,7 +146,7 @@ def test_prepare_imdb_ratings_exception_yields_not_ready(kodi_stubs):
 
     with patch.object(daemon.imdb_ratings, "prepare", side_effect=RuntimeError("boom")), \
             patch.object(daemon.log, "exception") as log_exc:
-        assert daemon._prepare_imdb_ratings(_prepare_settings(), _AbortMonitor()) is False
+        assert daemon._prepare_imdb_ratings(_prepare_libs(), _AbortMonitor()) is False
     log_exc.assert_called_once()
     assert log_exc.call_args.kwargs["event"] == "service.imdb_prepare_failed"
 
@@ -147,12 +156,14 @@ def test_run_scan_passes_imdb_ready_to_every_pass(kodi_stubs):
 
     tracker = MagicMock()
     tracker.get_show_id_map.return_value = {}
-    settings = {"tmdb_api_key": "k", "enabled_fields": frozenset({"rating"}),
-                "rating_source": 0}
+    settings = {"tmdb_api_key": "k"}
+    libraries = LibraryConfig([_lib("/m/"), _lib("/k/", included=False)])
     with patch.object(daemon, "_prepare_imdb_ratings", return_value=True) as prep, \
             patch.object(daemon, "run_scan", return_value={}) as scan:
-        daemon._run_scan(tracker, {}, settings, _AbortMonitor())
+        daemon._run_scan(tracker, libraries, settings, _AbortMonitor())
     prep.assert_called_once()
+    assert [lib.path for lib in prep.call_args.args[0]] == ["/m/"]
+    assert all(c.kwargs["libraries"] is libraries for c in scan.call_args_list)
     assert [c.kwargs["settings"]["imdb_ready"] for c in scan.call_args_list] == [True] * 3
     assert "imdb_ready" not in settings
 
@@ -195,8 +206,9 @@ def _run_daemon_ticks(monkeypatch, scan_side_effect, ticks=5):
                          return_value={"tmdb_api_key": "k",
                                        "resume_interrupted": True,
                                        "show_notifications": False,
-                                       "orphan_retention_days": 30}), \
-            patch.object(daemon, "load_source_config", return_value={}), \
+                                       "orphan_retention_days": 30,
+                                       "ui_language": "en-US"}), \
+            patch.object(daemon, "_sync_libraries", return_value=LibraryConfig()), \
             patch.object(daemon, "acquire_scan_lock", return_value=True), \
             patch.object(daemon, "release_scan_lock"), \
             patch.object(daemon, "get_int_setting", return_value=24), \
@@ -251,8 +263,9 @@ def _run_one_cycle(all_stats, resume_interrupted=True):
                          return_value={"tmdb_api_key": "k",
                                        "resume_interrupted": resume_interrupted,
                                        "show_notifications": False,
-                                       "orphan_retention_days": 30}), \
-            patch.object(daemon, "load_source_config", return_value={}), \
+                                       "orphan_retention_days": 30,
+                                       "ui_language": "en-US"}), \
+            patch.object(daemon, "_sync_libraries", return_value=LibraryConfig()), \
             patch.object(daemon, "acquire_scan_lock", return_value=True), \
             patch.object(daemon, "release_scan_lock"), \
             patch.object(daemon, "get_int_setting", return_value=24), \
@@ -335,8 +348,9 @@ def _run_daemon_locked(ticks=5):
                          return_value={"tmdb_api_key": "k",
                                        "resume_interrupted": True,
                                        "show_notifications": False,
-                                       "orphan_retention_days": 30}), \
-            patch.object(daemon, "load_source_config", return_value={}), \
+                                       "orphan_retention_days": 30,
+                                       "ui_language": "en-US"}), \
+            patch.object(daemon, "_sync_libraries", return_value=LibraryConfig()), \
             patch.object(daemon, "acquire_scan_lock", acquire), \
             patch.object(daemon, "release_scan_lock"), \
             patch.object(daemon, "clear_file_lock", clear), \
@@ -385,27 +399,10 @@ def test_certification_settings_shipped():
         assert ids[sid].findtext("visible") is None
 
 
-def test_load_settings_cert_keys(kodi_stubs, settings_mock):
-    values = {
-        "country": "3", "override_prefix": "true", "rating_prefix": "FSK ",
-        "enable_fsk": "true", "enable_bbfc": "false", "enable_medieraadet": "true",
-        "replace_incorrect": "false", "enable_fallback": "true", "fallback_rating": "NR",
-    }
+def test_load_settings_cert_sites(kodi_stubs, settings_mock):
+    values = {"enable_fsk": "true", "enable_bbfc": "false", "enable_medieraadet": "true"}
     settings_mock.side_effect = lambda sid: values.get(sid, "")
-    s = daemon._load_settings()
-    assert s["cert_country"] == "DE"
-    assert s["cert_prefix_override"] == "FSK "
-    assert s["cert_sites"] == frozenset({"fsk", "medieraadet"})
-    assert s["cert_replace_foreign"] is False
-    assert s["cert_not_found"] == "NR"
-
-
-def test_load_settings_cert_defaults(kodi_stubs, settings_mock):
-    settings_mock.side_effect = lambda sid: ""
-    with patch("resources.lib.service.daemon.kodi_ui_language", return_value="nl-NL"):
-        s = daemon._load_settings()
-    assert s["cert_country"] == "NL"  # Automatic
-    assert s["cert_prefix_override"] is None and s["cert_not_found"] is None
+    assert daemon._load_settings()["cert_sites"] == frozenset({"fsk", "medieraadet"})
 
 
 class _PendingMonitor(_FakeMonitor):
@@ -435,8 +432,9 @@ def _run_gated(setup_complete, ticks):
                          return_value={"tmdb_api_key": "k",
                                        "resume_interrupted": True,
                                        "show_notifications": False,
-                                       "orphan_retention_days": 30}), \
-            patch.object(daemon, "load_source_config", return_value={}), \
+                                       "orphan_retention_days": 30,
+                                       "ui_language": "en-US"}), \
+            patch.object(daemon, "_sync_libraries", return_value=LibraryConfig()), \
             patch.object(daemon, "acquire_scan_lock", return_value=True), \
             patch.object(daemon, "release_scan_lock"), \
             patch.object(daemon, "get_int_setting", return_value=24), \
@@ -516,6 +514,10 @@ class _Service:
         self.builtin = MagicMock()
         self.check_folders = MagicMock(return_value={})
         self.window_ticks = []
+        # None: no sources.json at all, the libraries are an empty config.
+        # A list: the real sources.json in addon_data, with these sources
+        # discovered in Kodi.
+        self.discovered = None
 
     def run(self, ticks=2, scan=None, setup=True, key="k", notifications=False,
             playing=lambda svc: False, monitor=None, aborting=lambda: False):
@@ -543,8 +545,12 @@ class _Service:
                              return_value={"tmdb_api_key": key,
                                            "resume_interrupted": True,
                                            "show_notifications": notifications,
-                                           "orphan_retention_days": 30}), \
-                patch.object(daemon, "load_source_config", return_value={}), \
+                                           "orphan_retention_days": 30,
+                                           "ui_language": "en-US"}), \
+                (patch.object(daemon, "_sync_libraries", return_value=LibraryConfig())
+                 if self.discovered is None else
+                 patch.object(daemon, "discover_folders",
+                              side_effect=lambda: list(self.discovered))), \
                 patch.object(daemon, "acquire_scan_lock", return_value=True), \
                 patch.object(daemon, "release_scan_lock"), \
                 patch.object(daemon, "get_int_setting", return_value=24), \
@@ -681,12 +687,12 @@ def test_folders_checked_after_full_scan_only(kodi_stubs):
 
 
 def test_check_folders_asks_the_folders_in_use(kodi_stubs):
-    config = {"sources": [{"path": "smb://b/", "enabled": False}]}
+    config = LibraryConfig([_lib("smb://a/"), _lib("smb://b/", included=False)])
     with patch.object(daemon, "library_folders_in_use",
                       return_value=["smb://a/"]) as in_use, \
             patch.object(daemon.xbmcvfs, "exists", return_value=False):
         assert daemon._check_folders(config) == {"smb://a/": False}
-    in_use.assert_called_once_with(config["sources"])
+    in_use.assert_called_once_with(config)
 
 
 def test_a_cycle_that_never_asked_tmdb_keeps_the_key_problem(kodi_stubs):
@@ -761,3 +767,328 @@ def test_updated_text_singular_and_plural():
                                                              32504: "1 item updated"}[i]):
         assert daemon.updated_text(1) == "1 item updated"
         assert daemon.updated_text(12) == "12 items updated"
+
+
+# --- libraries: conversion, new libraries, items in no library ---------------
+
+import pytest  # noqa: E402
+
+from resources.lib.data.libraries import (  # noqa: E402
+    load_libraries,
+    save_libraries,
+    scan_settings,
+)
+from resources.lib.data.upgrade import COPY_FILE_NAME  # noqa: E402
+from resources.lib.engine.scan import settings_fingerprint  # noqa: E402
+
+MOVIES = {"path": "smb://nas/Movies/", "label": "Movies"}
+SERIES = {"path": "smb://nas/Series/", "label": "Series"}
+
+# A 1.1 install: one folder with its own language, the rest on the default.
+_OLD_SOURCES = {"default_language": "nl-NL", "fallback_language": "en-US",
+                "sources": [{"path": "smb://nas/Movies/", "language": "de-DE"}]}
+_OLD_SETTINGS = {"enable_plots": "true", "enable_ratings": "false",
+                 "enable_certifications": "false", "rating_source": "1",
+                 "country": "3", "replace_incorrect": "false"}
+
+
+@pytest.fixture
+def addon_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(daemon, "_addon_data_file", lambda name: str(tmp_path / name))
+    monkeypatch.setattr(daemon, "kodi_ui_language", lambda: "en-US")
+    return tmp_path
+
+
+def _write_v11(addon_data, sources=None, settings=None):
+    (addon_data / "sources.json").write_text(json.dumps(sources or _OLD_SOURCES))
+    values = _OLD_SETTINGS if settings is None else settings
+    (addon_data / "settings.xml").write_text("<settings version=\"2\">{}</settings>".format(
+        "".join('<setting id="{}">{}</setting>'.format(k, v) for k, v in values.items())))
+
+
+def _libraries_file(addon_data):
+    return str(addon_data / "sources.json")
+
+
+def test_scan_cycle_passes_libraries_to_run_scan(kodi_stubs, addon_data):
+    config = LibraryConfig([_lib("smb://nas/Movies/", label="Movies")])
+    save_libraries(_libraries_file(addon_data), config)
+    svc = _Service()
+    svc.discovered = [MOVIES]
+    scan = MagicMock(return_value=_complete_stats())
+    svc.run(ticks=1, scan=scan)
+    assert scan.call_args.args[1] == config
+
+
+def test_conversion_runs_once_and_notifies(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    svc = _Service()
+    svc.discovered = [MOVIES, SERIES]
+    scan = MagicMock(return_value=_complete_stats())
+    with patch.object(daemon, "convert", wraps=daemon.convert) as conv:
+        svc.run(ticks=1, scan=scan)
+        svc.run(ticks=1, scan=scan)
+    assert conv.call_count == 1
+    assert scan.call_count == 2
+    assert json.loads((addon_data / "sources.json").read_text())["version"] == 2
+    assert not (addon_data / COPY_FILE_NAME).exists()
+    assert svc.window.call_count == 1
+    assert svc.window.call_args.args[0].kind == attention.LIBRARIES_CONVERTED
+    movies, series = scan.call_args.args[1].libraries
+    assert (movies.included, movies.language, movies.toggles) == (True, "de-DE", {"plots"})
+    # A library 1.1 had no entry for is included on the old default language.
+    assert (series.included, series.language, series.fallback_language) == (
+        True, "nl-NL", "en-US")
+
+
+def test_conversion_deferred_when_discovery_empty(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    svc = _Service()
+    svc.discovered = []
+    scan = MagicMock(return_value=_complete_stats())
+    svc.run(ticks=3, scan=scan)
+    assert scan.call_count == 0
+    assert "version" not in json.loads((addon_data / "sources.json").read_text())
+    assert (addon_data / COPY_FILE_NAME).exists()
+    assert svc.window.call_count == 0
+    assert svc.store.get("attention") is None or svc.streak() == 0
+
+    svc.discovered = [MOVIES]
+    svc.run(ticks=1, scan=scan)
+    assert scan.call_count == 1
+    assert load_libraries(_libraries_file(addon_data)) is not None
+    assert not (addon_data / COPY_FILE_NAME).exists()
+
+
+def test_conversion_reads_the_copy_when_kodi_dropped_the_ids(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    svc = _Service()
+    svc.discovered = []
+    svc.run(ticks=1)
+    (addon_data / "settings.xml").write_text("<settings version=\"2\"></settings>")
+    svc.discovered = [MOVIES]
+    scan = MagicMock(return_value=_complete_stats())
+    svc.run(ticks=1, scan=scan)
+    (movies,) = scan.call_args.args[1].libraries
+    assert movies.toggles == {"plots"} and movies.rating_source == 1
+
+
+def test_failed_save_keeps_the_copy_and_converts_again(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    svc = _Service()
+    svc.discovered = [MOVIES]
+    scan = MagicMock(return_value=_complete_stats())
+    with patch.object(daemon, "save_libraries", return_value=False):
+        svc.run(ticks=1, scan=scan)
+    assert scan.call_count == 0
+    assert (addon_data / COPY_FILE_NAME).exists()
+    assert svc.window.call_count == 0
+    svc.run(ticks=1, scan=scan)
+    assert scan.call_count == 1
+    assert not (addon_data / COPY_FILE_NAME).exists()
+
+
+def test_fresh_install_without_setup_does_not_convert(kodi_stubs, addon_data):
+    svc = _Service()
+    svc.discovered = [MOVIES]
+    scan = MagicMock(return_value=_complete_stats())
+    with patch.object(daemon, "convert") as conv:
+        svc.run(ticks=3, setup=False, scan=scan)
+        with patch.object(daemon, "is_setup_complete", return_value=False):
+            assert daemon._load_libraries(MagicMock()) is None
+    conv.assert_not_called()
+    scan.assert_not_called()
+    assert not (addon_data / "sources.json").exists()
+    assert not (addon_data / COPY_FILE_NAME).exists()
+    assert svc.window.call_args.args[0].kind == attention.SETUP
+
+
+def test_setup_finished_without_changed_settings_converts_with_defaults(
+        kodi_stubs, addon_data):
+    svc = _Service()
+    svc.discovered = [MOVIES]
+    scan = MagicMock(return_value=_complete_stats())
+    svc.run(ticks=1, scan=scan)
+    (movies,) = scan.call_args.args[1].libraries
+    assert movies.included and movies.toggles == {"ratings", "plots", "certifications"}
+
+
+def test_damaged_libraries_file_is_never_converted_over(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    damaged = json.dumps({"version": 2, "libraries": [{"label": "no path"}]})
+    (addon_data / "sources.json").write_text(damaged)
+    svc = _Service()
+    svc.discovered = [MOVIES]
+    scan = MagicMock(return_value=_complete_stats())
+    with patch.object(daemon, "convert") as conv, \
+            patch.object(daemon, "log") as log:
+        svc.run(ticks=3, scan=scan)
+    conv.assert_not_called()
+    scan.assert_not_called()
+    assert (addon_data / "sources.json").read_text() == damaged
+    assert [c.kwargs["event"] for c in log.error.call_args_list] == ["libraries.damaged"]
+    assert svc.streak() == 1  # one attempt: retried after a pause, not every tick
+
+
+def test_new_library_added_not_included_and_notified(kodi_stubs, addon_data):
+    save_libraries(_libraries_file(addon_data),
+                   LibraryConfig([_lib("smb://nas/Movies/", label="Movies")]))
+    svc = _Service()
+    svc.discovered = [MOVIES, SERIES]
+    scan = MagicMock(return_value=_complete_stats())
+    svc.run(ticks=1, scan=scan)
+    stored = load_libraries(_libraries_file(addon_data))
+    series = stored.by_path("smb://nas/Series/")
+    assert series is not None and not series.included and series.toggles == frozenset()
+    assert series.label == "Series" and series.language == "en-US"
+    assert svc.window.call_args.args[0] == attention.Problem(attention.NEW_LIBRARY, "Series")
+    # Known now: no second notice, and a source inside a library is not a
+    # library of its own.
+    svc.discovered = [MOVIES, SERIES, {"path": "smb://nas/Movies/Kids/", "label": "Kids"}]
+    svc.run(ticks=1, scan=scan)
+    assert svc.window.call_count == 1
+    assert len(load_libraries(_libraries_file(addon_data)).libraries) == 2
+
+
+def test_add_new_libraries_skips_known_paths_however_spelled():
+    config = LibraryConfig([_lib("smb://nas/Movies/")])
+    added = daemon._add_new_libraries(
+        config, [{"path": "smb://nas/Movies", "label": "M"},
+                 {"path": "smb://nas/TV/", "label": "TV"},
+                 {"path": "smb://nas/TV/", "label": "TV again"}], "nl-NL")
+    assert [(lib.path, lib.included, lib.language) for lib in added] == [
+        ("smb://nas/TV/", False, "nl-NL")]
+    assert config.libraries[-1] is added[0]
+
+
+def test_unmatched_count_raises_notice(kodi_stubs):
+    stats = _complete_stats()
+    stats["movie"]["unmatched"] = 2
+    stats["episode"]["unmatched"] = 3
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=stats))
+    assert svc.window.call_args.args[0] == attention.Problem(attention.UNMATCHED, "5")
+    svc.run(ticks=1)
+    assert attention.UNMATCHED not in json.loads(svc.store["attention"])["open"]
+
+
+def test_unmatched_not_judged_from_a_partial_scan(kodi_stubs):
+    stats = _complete_stats()
+    stats["movie"]["unmatched"] = 2
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=stats))
+    svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(aborted=True)))
+    assert json.loads(svc.store["attention"])["open"][attention.UNMATCHED] == "2"
+
+
+def test_open_libraries_answer_opens_the_library_list(kodi_stubs):
+    stats = _complete_stats()
+    stats["movie"]["unmatched"] = 1
+    svc = _Service()
+    svc.window.return_value = "libraries"
+    svc.run(ticks=1, scan=MagicMock(return_value=stats))
+    svc.builtin.assert_called_once_with("RunScript(script.metamender,folders)")
+
+
+@pytest.mark.parametrize("country, ui_language, code", [("3", "en-US", "DE"),
+                                                        ("0", "nl-NL", "NL")])
+def test_conversion_does_not_change_fingerprints(
+        kodi_stubs, addon_data, monkeypatch, country, ui_language, code):
+    """Every field's fingerprint under the converted library equals the one
+    1.1 recorded, so the first scan after the upgrade re-fetches nothing."""
+    monkeypatch.setattr(daemon, "kodi_ui_language", lambda: ui_language)
+    _write_v11(addon_data, settings={
+        "enable_plots": "true", "enable_ratings": "true", "enable_certifications": "true",
+        "enable_main_titles": "true", "enable_details": "true", "rating_source": "1",
+        "text_source_order": "1", "fallback_order": "1", "country": country,
+        "override_prefix": "true", "rating_prefix": "FSK ", "replace_incorrect": "false",
+        "enable_fallback": "true", "fallback_rating": "NR"})
+    sites = frozenset({"fsk"})
+    # The settings dict 1.1's _load_settings built from those values.
+    old = {"rating_source": 1, "text_source_order": 1, "fallback_order": 1,
+           "cert_country": code, "cert_prefix_override": "FSK ", "cert_sites": sites,
+           "cert_replace_foreign": False, "cert_not_found": "NR"}
+    with patch.object(daemon, "discover_folders", return_value=[MOVIES, SERIES]), \
+            patch.object(daemon, "is_setup_complete", return_value=True):
+        config = daemon._load_libraries(MagicMock())
+    assert config is not None
+    # 1.1 languages: the folder's own entry, else the default.
+    for file, old_language in (("smb://nas/Movies/a.mkv", "de-DE"),
+                               ("smb://nas/Series/Show/s01e01.mkv", "nl-NL")):
+        lib = config.for_file(file)
+        _included, language, fallback = config.folder_settings(file, lib)
+        new = scan_settings(lib, {"cert_sites": sites}, ui_language)
+        for media_type in (MOVIE, TVSHOW, EPISODE):
+            for field in sorted(media_type.backfill_fields | {"mpaa"}):
+                assert settings_fingerprint(field, new, language, media_type.name, fallback) \
+                    == settings_fingerprint(field, old, old_language, media_type.name,
+                                            "en-US"), (file, media_type.name, field)
+
+
+def test_item_in_a_library_without_old_entry_is_scanned_after_conversion(
+        kodi_stubs, addon_data, tmp_path):
+    from resources.lib.data.nfo import NO_NFO
+    from resources.lib.data.tracker import TrackerDB
+
+    _write_v11(addon_data)
+    with patch.object(daemon, "discover_folders", return_value=[MOVIES, SERIES]), \
+            patch.object(daemon, "is_setup_complete", return_value=True):
+        libraries = daemon._load_libraries(MagicMock())
+    movie = {"movieid": 7, "title": "Docu", "plot": "", "rating": 0, "votes": "0",
+             "uniqueid": {"tmdb": "42"}, "file": "smb://nas/Series/Docu/docu.mkv",
+             "dateadded": "2026-01-01 12:00:00", "premiered": "2025-06-15"}
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    try:
+        with patch("resources.lib.data.kodi.get_all_items",
+                   side_effect=lambda mt, **kw: [movie] if mt is MOVIE else []), \
+                patch("resources.lib.engine.scan.nfo_state", return_value=NO_NFO), \
+                patch("resources.lib.providers.tmdb.resolve_id", return_value=None), \
+                patch("resources.lib.providers.tmdb.fetch_movie",
+                      return_value={"plot": "Ein Film", "original_title": "Docu"}), \
+                patch("resources.lib.data.kodi.update_item", return_value=True) as update:
+            stats = daemon._run_scan(tracker, libraries, {"tmdb_api_key": "k",
+                                                          "rate_limit": 0.0,
+                                                          "ui_language": "en-US"},
+                                     _AbortMonitor())
+    finally:
+        tracker.close()
+    assert stats["movie"]["unmatched"] == 0 and stats["movie"]["excluded"] == 0
+    update.assert_called_once()
+    assert update.call_args.kwargs == {"plot": "Ein Film"}
+
+
+def test_prune_keeps_items_of_excluded_library(kodi_stubs, tmp_path):
+    from resources.lib.data.identity import compute_identity
+    from resources.lib.data.tracker import TrackerDB
+
+    kept = {"movieid": 1, "title": "Kept", "uniqueid": {"tmdb": "1"},
+            "file": "smb://nas/Kids/kept.mkv"}
+    libraries = LibraryConfig([_lib("smb://nas/Kids/", included=False,
+                                    toggles=("plots",))])
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    try:
+        for identity in (compute_identity(kept, MOVIE), "gone"):
+            tracker.upsert_item("movie", identity, kodi_id=1)
+            tracker.update_last_seen("movie", identity, "2020-01-01")
+        tracker.commit()
+        with patch("resources.lib.data.kodi.get_all_items",
+                   side_effect=lambda mt, **kw: [kept] if mt is MOVIE else []):
+            stats = daemon._run_scan(tracker, libraries, {"tmdb_api_key": "k",
+                                                          "ui_language": "en-US"},
+                                     _AbortMonitor())
+        tracker.commit()
+        daemon._maybe_prune_orphans(tracker, {"orphan_retention_days": 30}, targeted=False)
+        assert stats["movie"]["excluded"] == 1
+        assert tracker.get_item("movie", compute_identity(kept, MOVIE)) is not None
+        assert tracker.get_item("movie", "gone") is None
+    finally:
+        tracker.close()
+
+
+def test_unwritable_copy_leaves_the_old_settings_and_waits(kodi_stubs, addon_data):
+    _write_v11(addon_data)
+    with patch.object(daemon, "ensure_copy", return_value=None), \
+            patch.object(daemon, "discover_folders", return_value=[MOVIES]), \
+            patch.object(daemon, "is_setup_complete", return_value=True), \
+            patch.object(daemon, "convert") as conv:
+        assert daemon._load_libraries(MagicMock()) is None
+    conv.assert_not_called()
+    assert "version" not in json.loads((addon_data / "sources.json").read_text())

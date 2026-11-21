@@ -10,7 +10,6 @@ Logging:
         - sources.load (INFO): Source config loaded
         - sources.discover (INFO): Video sources discovered from Kodi
         - sources.save (INFO): Source config saved
-        - sources.match (DEBUG): Item matched to a source
 """
 from __future__ import annotations
 
@@ -19,13 +18,16 @@ import json
 import os
 from collections import Counter
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote
 
 import xbmc
 
 from resources.lib.providers.languages import tmdb_language
 from resources.lib.utils import get_logger, log_timing
+
+if TYPE_CHECKING:
+    from resources.lib.data.libraries import LibraryConfig
 
 log = get_logger('sources')
 
@@ -41,11 +43,6 @@ def _default_config() -> dict[str, Any]:
     default_language: without one, a folder no source entry covers has no
     known language (see the scan's fill-only rule)."""
     return {"sources": []}
-
-
-def _default_match() -> dict[str, Any]:
-    """Return a fresh default match result: enabled, with no language."""
-    return {"enabled": True}
 
 
 def kodi_ui_language() -> str:
@@ -343,19 +340,21 @@ def discover_folders() -> list[dict[str, str]]:
     return folders
 
 
-def library_folders_in_use(sources: list[dict[str, Any]]) -> list[str]:
+def library_folders_in_use(libraries: LibraryConfig) -> list[str]:
     """The folders worth watching for being offline: every folder of the
-    video sources (a multipath source split into its folders) that holds
-    library items and that sources.json does not disable. A source without
+    included libraries (a multipath library split into its folders) that
+    holds library items and is not an excluded subfolder. A library without
     library items (a USB stick, a downloads folder) is left out: it being
     gone says nothing about the library."""
     files = (_library_files("VideoLibrary.GetMovies", "movies")
              + _library_files("VideoLibrary.GetTVShows", "tvshows"))
     folders: list[str] = []
-    for source in discover_folders():
-        for folder in source_paths(source.get("path", "")):
+    for lib in libraries.libraries:
+        if not lib.included:
+            continue
+        for folder in source_paths(lib.path):
             if (folder and folder not in folders
-                    and match_source(folder, sources).get("enabled", True)
+                    and libraries.folder_settings(folder, lib)[0]
                     and any(_path_matches(f, folder) for f in files)):
                 folders.append(folder)
     return folders
@@ -376,47 +375,3 @@ def _path_matches(file_path: str, source_path: str) -> bool:
     if not file_path.startswith(source_path):
         return False
     return source_path[-1] in "/\\" or file_path[len(source_path)] in "/\\"
-
-
-def match_source(
-    file_path: str,
-    sources: list[dict[str, Any]],
-) -> dict[str, Any]:
-    """Match a file path to the most specific configured source.
-
-    Uses longest-prefix matching: the source whose path is the longest
-    prefix of file_path wins.
-
-    Args:
-        file_path: The Kodi file path for a library item.
-        sources: List of source config dicts with at least "path" key.
-
-    Returns:
-        The matching source config dict, or a default dict with
-        enabled=True and no language if no source matches.
-    """
-    best_match: Any = None
-    best_length = 0
-
-    for source in sources:
-        source_path = source.get("path", "")
-        if _path_matches(file_path, source_path) and len(source_path) > best_length:
-            best_match = source
-            best_length = len(source_path)
-
-    if best_match is not None:
-        log.debug(
-            "Item matched to source",
-            event="sources.match",
-            file_path=file_path,
-            source_path=best_match.get("path", ""),
-            language=best_match.get("language", ""),
-        )
-        return best_match
-
-    log.debug(
-        "No source match, using defaults",
-        event="sources.match",
-        file_path=file_path,
-    )
-    return _default_match()

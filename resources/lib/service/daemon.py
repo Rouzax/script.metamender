@@ -20,6 +20,15 @@ Logging:
         - service.prune_skip (DEBUG): Prune skipped (targeted scan or disabled)
         - service.imdb_prepare_failed (ERROR): Preparing the IMDb ratings store
           raised; IMDb ratings are transient for the cycle
+        - libraries.damaged (ERROR): sources.json is not a readable v2 file;
+          the cycle is skipped and the file left alone
+        - service.libraries_converted (INFO): 1.1 settings became libraries
+        - service.convert_deferred (INFO): conversion waits, Kodi listed no
+          libraries
+        - service.convert_failed (ERROR): the converted libraries could not
+          be saved; the old settings stay and conversion retries
+        - service.libraries_added (INFO): libraries new to Kodi were added,
+          not included
 """
 from __future__ import annotations
 
@@ -28,7 +37,7 @@ import time
 from collections.abc import Iterable
 from datetime import date, timedelta
 from functools import partial
-from typing import Any
+from typing import Any, Optional
 
 import xbmc
 import xbmcvfs
@@ -43,18 +52,34 @@ from resources.lib.constants import (
     SERVICE_SLEEP_INTERVAL_SEC,
     SOURCES_CONFIG_FILENAME,
 )
-from resources.lib.data.libraries import FIELD_TOGGLES, legacy_config
+from resources.lib.data.libraries import (
+    FILE_DAMAGED,
+    FILE_OK,
+    Library,
+    LibraryConfig,
+    new_library,
+    read_libraries,
+    save_libraries,
+)
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
-from resources.lib.data.presets import country_for_setting
 from resources.lib.data.sources import (
+    discover_folders,
     kodi_ui_language,
     library_folders_in_use,
     load_source_config,
+    source_paths,
 )
 from resources.lib.data.tracker import TrackerDB
+from resources.lib.data.upgrade import (
+    COPY_FILE_NAME,
+    MOVED_IDS,
+    convert,
+    ensure_copy,
+    read_user_settings,
+)
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import SiteGate
-from resources.lib.engine.resolve import FOLLOW_SCRAPER, rating_sources
+from resources.lib.engine.resolve import rating_sources
 from resources.lib.engine.scan import run_scan
 from resources.lib.providers import imdb_ratings
 from resources.lib.service import attention
@@ -68,6 +93,7 @@ from resources.lib.utils import (
     ApiKeyError,
     KodiQueryError,
     StructuredLogger,
+    display_path,
     get_addon,
     get_bool_setting,
     get_float_setting,
@@ -125,26 +151,11 @@ class MetaMendMonitor(xbmc.Monitor):
 
 
 def _load_settings() -> dict[str, Any]:
-    """Read all settings needed by the scan engine.
-
-    Returns:
-        Dict with tmdb_api_key, rating_source, text_source_order,
-        fallback_order, enabled_fields (FrozenSet),
-        stale_threshold_days, refetch_schedule, rate_limit, scan_interval,
-        show_notifications, resume_interrupted and orphan_retention_days.
-    """
-    # Build enabled fields from individual toggles
-    fields: set = set()
-    for name, field_names in FIELD_TOGGLES.items():
-        if get_bool_setting("enable_" + name):
-            fields.update(field_names)
-
+    """The general settings the scan engine and the service read, plus
+    Kodi's interface language (read once here rather than per pass). What a
+    library does comes from its own settings (_load_libraries)."""
     return {
         "tmdb_api_key": get_setting("tmdb_api_key"),
-        "rating_source": get_int_setting("rating_source", FOLLOW_SCRAPER),
-        "text_source_order": get_int_setting("text_source_order", 2),
-        "fallback_order": get_int_setting("fallback_order", 0),
-        "enabled_fields": frozenset(fields),
         "stale_threshold_days": get_int_setting("stale_threshold_days", 365),
         "refetch_schedule": get_setting("refetch_schedule"),
         "rate_limit": get_float_setting("rate_limit", 0.25),
@@ -152,21 +163,20 @@ def _load_settings() -> dict[str, Any]:
         "show_notifications": get_bool_setting("show_notifications"),
         "resume_interrupted": get_bool_setting("resume_interrupted"),
         "orphan_retention_days": get_int_setting("orphan_retention_days", 30),
-        # Certifications (Certifications tab); see scan._cert_config.
-        "cert_country": country_for_setting(get_int_setting("country", 0), kodi_ui_language()),
-        "cert_prefix_override": (
-            get_setting("rating_prefix") if get_bool_setting("override_prefix") else None
-        ),
+        # Which certification websites may be asked; see scan._cert_config.
         "cert_sites": frozenset(
             site for site in ("fsk", "bbfc", "medieraadet")
             if get_bool_setting("enable_" + site)
         ),
-        "cert_replace_foreign": get_bool_setting("replace_incorrect"),
-        "cert_not_found": (
-            get_setting("fallback_rating").strip() or None
-            if get_bool_setting("enable_fallback") else None
-        ),
+        "ui_language": kodi_ui_language(),
     }
+
+
+def _addon_data_file(name: str) -> str:
+    addon_data = xbmcvfs.translatePath(
+        "special://profile/addon_data/{}/".format(DEFAULT_ADDON_ID)
+    )
+    return os.path.join(addon_data, name)
 
 
 def _get_db_path() -> str:
@@ -181,25 +191,128 @@ def _get_db_path() -> str:
 
 def _get_sources_config_path() -> str:
     """Build the absolute path to the sources configuration file."""
-    addon_data = xbmcvfs.translatePath(
-        "special://profile/addon_data/{}/".format(DEFAULT_ADDON_ID)
-    )
-    return os.path.join(addon_data, SOURCES_CONFIG_FILENAME)
+    return _addon_data_file(SOURCES_CONFIG_FILENAME)
 
 
+def _norm(path: str) -> str:
+    return path.rstrip("/\\")
 
 
-def _prepare_imdb_ratings(settings: dict[str, Any], monitor: Any) -> bool:
+def _add_new_libraries(
+    config: LibraryConfig, found: list[dict[str, str]], ui_language: str,
+) -> list[Library]:
+    """Append a new, not included library for every found source the
+    config does not hold yet; the added ones are returned. A source inside
+    a library's folder is not added: as a library of its own it would take
+    its items out of the library that covers them now."""
+    known = [_norm(f) for lib in config.libraries for f in source_paths(lib.path)]
+    added: list[Library] = []
+    for source in found:
+        path = str(source.get("path") or "")
+        folders = [_norm(f) for f in source_paths(path)]
+        if not path or not folders:
+            continue
+        if any(k and (f == k or f.startswith((k + "/", k + "\\")))
+               for f in folders for k in known):
+            continue
+        lib = new_library(path, str(source.get("label") or ""), ui_language)
+        config.libraries.append(lib)
+        known.extend(folders)
+        added.append(lib)
+    return added
+
+
+def _convert_libraries(tracker: TrackerDB, path: str) -> Optional[LibraryConfig]:
+    """Turn the 1.1 settings into libraries, once. The moved settings are
+    read from a copy of their own, which is deleted only after the new
+    file is written, so a failure at any step converts again next time.
+    None when the conversion waits or failed."""
+    copy_path = _addon_data_file(COPY_FILE_NAME)
+    user_path = _addon_data_file("settings.xml")
+    legacy = ensure_copy(user_path, copy_path)
+    if legacy is None:
+        if any(key in read_user_settings(user_path) for key in MOVED_IDS):
+            # The copy could not be written (ensure_copy logged it); the
+            # old settings stay where they are until it can.
+            return None
+        # Nothing was ever changed from the 1.1 defaults.
+        legacy = {}
+    discovered = discover_folders()
+    if not discovered:
+        # Kodi listed no sources and the library no folders (an error, or
+        # a shared database without sources): converting now would lose
+        # every per-folder language.
+        log.info("Library conversion deferred, no libraries found",
+                 event="service.convert_deferred")
+        return None
+    # The 1.1 sources.json, or an empty one when there is none.
+    old_sources = load_source_config(path)
+    config = convert(legacy, old_sources, discovered, kodi_ui_language())
+    if not save_libraries(path, config):
+        log.error("Converted libraries could not be saved", event="service.convert_failed",
+                  path=path)
+        return None
+    try:
+        os.remove(copy_path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        log.exception("Settings copy could not be deleted", event="service.convert_failed",
+                      path=copy_path)
+    log.info("Settings converted to libraries", event="service.libraries_converted",
+             library_count=len(config.libraries),
+             included=sum(1 for lib in config.libraries if lib.included))
+    attention.update(tracker, lambda a: a.raise_problem(attention.LIBRARIES_CONVERTED))
+    return config
+
+
+def _load_libraries(tracker: TrackerDB) -> Optional[LibraryConfig]:
+    """The libraries, converting the 1.1 settings when there is no v2 file
+    yet and setup was finished. None skips the cycle: setup is not
+    finished, the conversion waits or failed, or the file is damaged.
+
+    A damaged v2 file is never converted over: the 1.1 copy is gone by
+    then, so a conversion would reset every library to the defaults."""
+    path = _get_sources_config_path()
+    config, state = read_libraries(path)
+    if state == FILE_OK:
+        return config
+    if state == FILE_DAMAGED:
+        log.error("Library settings unreadable, scan skipped", event="libraries.damaged",
+                  path=path)
+        attention.update(tracker, lambda a: a.attempt(True, time.time()))
+        return None
+    if not is_setup_complete():
+        return None
+    return _convert_libraries(tracker, path)
+
+
+def _sync_libraries(tracker: TrackerDB, ui_language: str) -> Optional[LibraryConfig]:
+    """_load_libraries, plus the sources Kodi gained since: added as not
+    included, with the new-library notice."""
+    libraries = _load_libraries(tracker)
+    if libraries is None:
+        return None
+    added = _add_new_libraries(libraries, discover_folders(), ui_language)
+    if added and save_libraries(_get_sources_config_path(), libraries):
+        labels = [lib.label or display_path(lib.path) for lib in added]
+        log.info("New libraries added, not included", event="service.libraries_added",
+                 libraries=labels)
+        attention.update(tracker, lambda a: a.add_new_libraries(labels))
+    return libraries
+
+
+def _prepare_imdb_ratings(libraries: Iterable[Library], monitor: Any) -> bool:
     """Load or refresh the IMDb ratings store once per cycle; True when ready.
 
-    Skipped (False) when ratings are off or rating_source never consults IMDb.
-    The download yields to shutdown and to video playback. Any failure means
-    "not ready": IMDb ratings are then transient for the cycle while every
-    other field proceeds, and the service keeps running.
+    Skipped (False) when none of ``libraries`` (those the run scans) has
+    ratings on with a rating source that consults IMDb. The download yields
+    to shutdown and to video playback. Any failure means "not ready": IMDb
+    ratings are then transient for the cycle while every other field
+    proceeds, and the service keeps running.
     """
-    if "rating" not in settings["enabled_fields"]:
-        return False
-    if not rating_sources(settings.get("rating_source", FOLLOW_SCRAPER))[1]:
+    if not any("rating" in lib.fields() and rating_sources(lib.rating_source)[1]
+               for lib in libraries):
         return False
 
     def abort() -> bool:
@@ -227,7 +340,7 @@ def tvdb_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
 
 def _run_scan(
     tracker: TrackerDB,
-    source_config: dict[str, Any],
+    libraries: LibraryConfig,
     settings: dict[str, Any],
     monitor: MetaMendMonitor,
     new_only: bool = False,
@@ -242,8 +355,8 @@ def _run_scan(
         Dict keyed by media type name with stats dicts as values.
     """
     tmdb_api_key = settings["tmdb_api_key"]
-    libraries = legacy_config(source_config, settings, kodi_ui_language())
-    settings = dict(settings, imdb_ready=_prepare_imdb_ratings(settings, monitor))
+    included = [lib for lib in libraries.libraries if lib.included]
+    settings = dict(settings, imdb_ready=_prepare_imdb_ratings(included, monitor))
 
     all_stats: dict[str, dict[str, int]] = {}
 
@@ -377,11 +490,11 @@ def _playing() -> bool:
     return bool(xbmc.getCondVisibility("Player.HasMedia"))
 
 
-def _check_folders(source_config: dict[str, Any]) -> dict[str, bool]:
+def _check_folders(libraries: LibraryConfig) -> dict[str, bool]:
     """Whether each library folder answers, for the offline-folder
     problem (see library_folders_in_use for which folders count)."""
     reachable: dict[str, bool] = {}
-    for path in library_folders_in_use(source_config.get("sources", [])):
+    for path in library_folders_in_use(libraries):
         try:
             reachable[path] = bool(xbmcvfs.exists(path))
         except Exception:
@@ -393,11 +506,12 @@ def _check_folders(source_config: dict[str, Any]) -> dict[str, bool]:
 def _record_cycle(
     record: attention.Attention, *, shutdown: bool, aborted: bool,
     tvdb_rejected: bool, tmdb_answered: bool, tvdb_answered: bool,
-    folders: dict[str, bool] | None, now: float,
+    folders: dict[str, bool] | None, now: float, unmatched: int | None = None,
 ) -> None:
     """What a finished background cycle tells the problem record: the
     attempt for the failure streak (not when Kodi shut down), TheTVDB's
-    credentials, and the folders when they were checked. A key or
+    credentials, and, after a full pass over the library, the folders and
+    the number of items in no library. A key or
     credential problem clears only when that provider answered: a cycle
     that never asked it proves nothing, and clearing would show the problem
     again the next time it is hit."""
@@ -411,6 +525,10 @@ def _record_cycle(
         record.clear(attention.TVDB_AUTH)
     if folders is not None:
         record.folders_checked(folders, now)
+    if unmatched:
+        record.raise_problem(attention.UNMATCHED, str(unmatched))
+    elif unmatched == 0:
+        record.clear(attention.UNMATCHED)
 
 
 def updated_text(count: int) -> str:
@@ -451,6 +569,8 @@ def _attention_tick(
                     attention.update(tracker, lambda a: a.mark_window_shown(displayed))
                 if answer == "setup":
                     xbmc.executebuiltin("RunScript(script.metamender,wizard)")
+                elif answer == "libraries":
+                    xbmc.executebuiltin("RunScript(script.metamender,folders)")
         toast = (attention.TVDB_AUTH, "")
         if record.pending_toast(attention.TVDB_AUTH) and toast not in shown:
             shown.add(toast)
@@ -571,6 +691,12 @@ def run() -> None:
                     # Lock acquired above; release on EVERY exit path
                     # (success, KodiQueryError continue, unexpected error).
                     try:
+                        libraries = _sync_libraries(tracker, settings["ui_language"])
+                        if libraries is None:
+                            # Retried after a pause rather than every tick.
+                            next_retry_after = time.time() + SCAN_FAILURE_BACKOFF_SEC
+                            continue
+
                         StructuredLogger.start_scan_log()
 
                         # A library event scans only the items new to the
@@ -586,16 +712,12 @@ def run() -> None:
                             targeted=targeted,
                         )
 
-                        source_config = load_source_config(
-                            _get_sources_config_path()
-                        )
-
                         tracker.begin_cycle(settings["resume_interrupted"])
 
                         scan_start = time.perf_counter()
                         try:
                             all_stats = _run_scan(
-                                tracker, source_config, settings, monitor,
+                                tracker, libraries, settings, monitor,
                                 new_only=targeted,
                             )
                         except KodiQueryError:
@@ -696,16 +818,18 @@ def run() -> None:
                             s.get("tmdb_answered") for s in all_stats.values())
                         tvdb_answered = any(
                             s.get("tvdb_answered") for s in all_stats.values())
-                        folders = (
-                            _check_folders(source_config)
-                            if not targeted and not cycle_aborted else None
+                        full_pass = not targeted and not cycle_aborted
+                        folders = _check_folders(libraries) if full_pass else None
+                        unmatched = (
+                            sum(int(s.get("unmatched", 0)) for s in all_stats.values())
+                            if full_pass else None
                         )
 
                         attention.update(tracker, partial(
                             _record_cycle, shutdown=shutdown, aborted=cycle_aborted,
                             tvdb_rejected=tvdb_rejected, tmdb_answered=tmdb_answered,
                             tvdb_answered=tvdb_answered, folders=folders,
-                            now=time.time(),
+                            now=time.time(), unmatched=unmatched,
                         ))
 
                         total_updated = (

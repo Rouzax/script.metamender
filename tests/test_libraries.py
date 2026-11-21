@@ -8,10 +8,15 @@ from resources.lib.data.libraries import (
     FIELD_TOGGLES,
     Library,
     LibraryConfig,
-    legacy_config,
+    FILE_DAMAGED,
+    FILE_LEGACY,
+    FILE_MISSING,
+    FILE_OK,
+    library_from_legacy_settings,
     load_libraries,
     new_library,
     resolve_country,
+    read_libraries,
     save_libraries,
     scan_settings,
 )
@@ -153,31 +158,65 @@ def _legacy_settings(**kw):
     return settings
 
 
-def test_legacy_config_one_library_per_entry():
-    config = legacy_config({
-        "default_language": "nl-NL", "fallback_language": "en-US",
-        "sources": [
-            {"path": "/m/", "language": "de-DE"},
-            {"path": "/s/", "enabled": False},
-            {"path": "/k/", "language": "fr-FR", "fallback_language": ""},
-        ],
-    }, _legacy_settings(), "en-US")
-    m, s, k = config.libraries
-    assert [lib.path for lib in config.libraries] == ["/m/", "/s/", "/k/"]
-    assert (m.included, m.language, m.fallback_language) == (True, "de-DE", "en-US")
-    assert (s.included, s.language) == (False, "nl-NL")
-    assert (k.language, k.fallback_language) == ("fr-FR", "")
+def test_library_from_legacy_settings_carries_the_global_options():
+    m = library_from_legacy_settings(
+        _legacy_settings(), path="/m/", label="M", included=True,
+        language="de-DE", fallback_language="en-US")
+    assert (m.path, m.label, m.included, m.language, m.fallback_language) == (
+        "/m/", "M", True, "de-DE", "en-US")
     assert m.toggles == {"ratings", "plots", "credits"}
     assert (m.rating_source, m.text_source_order, m.fallback_order) == (2, 1, 1)
     assert (m.cert_prefix_override, m.cert_replace_foreign, m.cert_not_found) == (
         "FSK ", False, "NR")
     assert scan_settings(m, {}, "en-US")["cert_country"] == "DE"
-    assert config.for_file("/elsewhere/a.mkv") is None
 
 
-def test_legacy_config_keeps_an_unconfigured_language_and_no_country():
-    config = legacy_config({"sources": [{"path": "/m/"}]},
-                           _legacy_settings(cert_country=None), "nl-NL")
-    lib = config.libraries[0]
-    assert lib.language == ""
+def test_library_from_legacy_settings_without_country_stays_off():
+    lib = library_from_legacy_settings(
+        _legacy_settings(cert_country=None), path="/m/", label="", included=True,
+        language="", fallback_language="")
     assert scan_settings(lib, {}, "nl-NL")["cert_country"] is None
+
+
+def test_read_libraries_tells_the_file_states_apart(tmp_path):
+    p = tmp_path / "sources.json"
+    assert read_libraries(str(p)) == (None, FILE_MISSING)
+    p.write_text(json.dumps({"sources": [{"path": "/m/"}]}))
+    assert read_libraries(str(p)) == (None, FILE_LEGACY)
+    for damaged in ("{not json", "[]", json.dumps({"version": 3, "libraries": []}),
+                    json.dumps({"version": 2, "libraries": [{"label": "no path"}]}),
+                    json.dumps({"version": 2, "libraries": ["x"]})):
+        p.write_text(damaged)
+        assert read_libraries(str(p)) == (None, FILE_DAMAGED), damaged
+    cfg = LibraryConfig([new_library("/m/", "M", "en-US")])
+    assert save_libraries(str(p), cfg)
+    assert read_libraries(str(p)) == (cfg, FILE_OK)
+
+
+def test_failed_save_leaves_the_old_file_whole(tmp_path, monkeypatch):
+    p = str(tmp_path / "sources.json")
+    old = LibraryConfig([new_library("/m/", "M", "en-US")])
+    assert save_libraries(p, old)
+
+    real_dump = json.dump
+
+    def dump_then_fail(data, fh, **kw):
+        real_dump({"version": 2, "partial": True}, fh, **kw)
+        raise OSError("disk full")
+
+    monkeypatch.setattr(json, "dump", dump_then_fail)
+    assert save_libraries(p, LibraryConfig([new_library("/t/", "T", "en-US")])) is False
+    monkeypatch.undo()
+    assert load_libraries(p) == old
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["sources.json"]
+
+
+def test_included_for_needs_library_and_subfolder_included():
+    config = LibraryConfig([
+        _lib("/m/", subfolders=({"path": "/m/kids/", "enabled": False},)),
+        Library(**{**_lib("/t/").__dict__, "included": False}),
+    ])
+    assert config.included_for("/m/a.mkv") is config.libraries[0]
+    assert config.included_for("/m/kids/a.mkv") is None
+    assert config.included_for("/t/a.mkv") is None
+    assert config.included_for("/x/a.mkv") is None

@@ -56,7 +56,9 @@ def launcher(monkeypatch: pytest.MonkeyPatch):
         "run_setup": MagicMock(return_value=True),
         "manual_run": MagicMock(),
         "is_setup_complete": MagicMock(return_value=False),
+        "libraries_seen": MagicMock(),
     }
+    monkeypatch.setattr(setup, "_libraries_seen", mocks["libraries_seen"])
     monkeypatch.setattr(setup, "run_setup", mocks["run_setup"])
     monkeypatch.setattr(setup.manual, "run", mocks["manual_run"])
     monkeypatch.setattr(setup, "is_setup_complete", mocks["is_setup_complete"])
@@ -85,3 +87,33 @@ def test_cancelled_first_setup_starts_no_scan(launcher):
 def test_folder_dialog_starts_no_scan(launcher):
     setup.open_setup("folders")
     launcher["manual_run"].assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["wizard", "folders"])
+def test_opening_the_libraries_clears_their_notices(launcher, mode):
+    launcher["is_setup_complete"].return_value = True
+    setup.open_setup(mode)
+    launcher["libraries_seen"].assert_called_once_with()
+
+
+def test_first_setup_has_no_notices_to_clear(launcher):
+    setup.open_setup("wizard")
+    launcher["libraries_seen"].assert_not_called()
+
+
+def test_libraries_seen_clears_the_notices(monkeypatch, tmp_path):
+    from resources.lib.data.tracker import TrackerDB
+    from resources.lib.service import attention
+
+    db = str(tmp_path / "t.db")
+    tracker = TrackerDB(db)
+    attention.update(tracker, lambda a: a.add_new_libraries(["Kids"]))
+    attention.update(tracker, lambda a: a.raise_problem(attention.LIBRARIES_CONVERTED))
+    tracker.close()
+    monkeypatch.setattr(setup, "_get_db_path", lambda: db)
+    setup._libraries_seen()
+    tracker = TrackerDB(db)
+    try:
+        assert attention.load(tracker).pending_window() is None
+    finally:
+        tracker.close()

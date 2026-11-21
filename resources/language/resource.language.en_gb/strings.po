@@ -1414,3 +1414,35 @@ msgstr ""
 msgctxt "#32649"
 msgid "Plots and titles"
 msgstr ""
+
+msgctxt "#32650"
+msgid "This library isn't included in MetaMender. Include it under Libraries."
+msgstr ""
+
+msgctxt "#32651"
+msgid "Open Libraries"
+msgstr ""
+
+msgctxt "#32652"
+msgid "MetaMender found a new library, {}. It stays out until you include it."
+msgstr ""
+
+msgctxt "#32653"
+msgid "New library found: {}"
+msgstr ""
+
+msgctxt "#32654"
+msgid "{} items are in no MetaMender library, so they are not being updated."
+msgstr ""
+
+msgctxt "#32655"
+msgid "{} items are in no MetaMender library"
+msgstr ""
+
+msgctxt "#32656"
+msgid "MetaMender now has settings per library. Your settings were copied to each library."
+msgstr ""
+
+msgctxt "#32657"
+msgid "Settings are now per library"
+msgstr ""

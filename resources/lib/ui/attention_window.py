@@ -14,9 +14,12 @@ import xbmcgui
 from resources.lib.service.attention import (
     FOLDER_OFFLINE,
     KEY_REJECTED,
+    LIBRARIES_CONVERTED,
+    NEW_LIBRARY,
     NO_KEY,
     SCANS_FAILING,
     SETUP,
+    UNMATCHED,
     Problem,
 )
 from resources.lib.ui.theme import theme_colours
@@ -29,13 +32,26 @@ _ACTION_PREVIOUS_MENU = 10
 _ACTION_NAV_BACK = 92
 
 # The main problem's sentence, and its short form on an "Also:" line; a
-# "{}" takes the problem's detail (the offline folders).
+# "{}" takes the problem's detail (the offline folders, the new libraries'
+# labels, the number of items in no library).
 FULL_TEXT = {SETUP: 32491, NO_KEY: 32493, KEY_REJECTED: 32495,
-             SCANS_FAILING: 32497, FOLDER_OFFLINE: 32499}
+             SCANS_FAILING: 32497, FOLDER_OFFLINE: 32499,
+             NEW_LIBRARY: 32652, UNMATCHED: 32654, LIBRARIES_CONVERTED: 32656}
 ALSO_TEXT = {SETUP: 32492, NO_KEY: 32494, KEY_REJECTED: 32496,
-             SCANS_FAILING: 32498, FOLDER_OFFLINE: 32500}
-# Only these problems can be fixed from Kodi: by running setup.
-_FIXED_BY_SETUP = frozenset({SETUP, NO_KEY, KEY_REJECTED})
+             SCANS_FAILING: 32498, FOLDER_OFFLINE: 32500,
+             NEW_LIBRARY: 32653, UNMATCHED: 32655, LIBRARIES_CONVERTED: 32657}
+# The problems the fix button answers, the answer it gives and its label;
+# the others cannot be fixed from Kodi.
+_FIXES = {SETUP: "setup", NO_KEY: "setup", KEY_REJECTED: "setup",
+          NEW_LIBRARY: "libraries", UNMATCHED: "libraries",
+          LIBRARIES_CONVERTED: "libraries"}
+_FIX_LABEL = {"setup": 32502, "libraries": 32651}
+
+
+def fix_for(kind: str) -> str:
+    """What the fix button does for a main problem of this kind: "setup",
+    "libraries", or "" when there is no button."""
+    return _FIXES.get(kind, "")
 
 
 def attention_properties(main: Problem, others: list[Problem]) -> dict[str, str]:
@@ -46,7 +62,7 @@ def attention_properties(main: Problem, others: list[Problem]) -> dict[str, str]
         "MM.Also": "\n".join(
             lang(32501).format(lang(ALSO_TEXT[p.kind]).format(p.detail)) for p in others
         ),
-        "MM.Action": lang(32502) if main.kind in _FIXED_BY_SETUP else "",
+        "MM.Action": lang(_FIX_LABEL[fix_for(main.kind)]) if fix_for(main.kind) else "",
         "MM.Later": lang(32503),
     }
     props.update(theme_colours())
@@ -54,10 +70,11 @@ def attention_properties(main: Problem, others: list[Problem]) -> dict[str, str]
 
 
 class AttentionWindow(xbmcgui.WindowXMLDialog):
-    """``result`` is "setup" when the fix button was pressed, else "later".
-    The properties are set before doModal()."""
+    """``result`` is ``fix`` (see fix_for) when the fix button was pressed,
+    else "later". The properties and ``fix`` are set before doModal()."""
 
     props: dict[str, str]
+    fix: str = ""
     result: str = "later"
 
     def onInit(self) -> None:
@@ -68,8 +85,8 @@ class AttentionWindow(xbmcgui.WindowXMLDialog):
         self.setFocusId(FIX if self.props["MM.Action"] else LATER)
 
     def onClick(self, controlId: int) -> None:
-        if controlId == FIX:
-            self.result = "setup"
+        if controlId == FIX and self.fix:
+            self.result = self.fix
         self.close()
 
     def onAction(self, action: Any) -> None:
@@ -78,9 +95,11 @@ class AttentionWindow(xbmcgui.WindowXMLDialog):
 
 
 def show_attention_window(main: Problem, others: list[Problem]) -> str:
-    """Show the window until the user answers: "setup" or "later"."""
+    """Show the window until the user answers: "setup", "libraries" or
+    "later"."""
     window = AttentionWindow(_XML, get_addon().getAddonInfo("path"), "Default", "1080i")
     window.props = attention_properties(main, others)
+    window.fix = fix_for(main.kind)
     for key, value in window.props.items():
         window.setProperty(key, value)
     window.doModal()
