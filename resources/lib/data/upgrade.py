@@ -154,8 +154,8 @@ def _folders(path: str) -> list[str]:
 
 def _owner(entry_path: str, discovered: list[dict[str, str]]) -> tuple[Optional[int], bool]:
     """(index of the library the old entry belongs to, whether the entry is
-    that library's own folder). An exact folder match beats containment;
-    among containing folders the longest wins."""
+    one of that library's own folders). An exact folder match beats
+    containment; among containing folders the longest wins."""
     target = _norm(entry_path)
     for i, src in enumerate(discovered):
         if target in _folders(src["path"]):
@@ -180,6 +180,7 @@ def convert(legacy: dict[str, str], old_sources: dict[str, Any],
 
     own: dict[int, dict[str, Any]] = {}
     subs: dict[int, list[dict[str, Any]]] = {i: [] for i in range(len(discovered))}
+    folder_entries: dict[int, list[dict[str, Any]]] = {}
     for entry in old_sources.get("sources") or []:
         path = str(entry.get("path") or "")
         if not path:
@@ -188,22 +189,33 @@ def convert(legacy: dict[str, str], old_sources: dict[str, Any],
         if idx is None:
             log.warning("Old source entry matches no library",
                         event="upgrade.dropped_entry", path=path)
-        elif is_own:
+        elif is_own and len(_folders(discovered[idx]["path"])) == 1:
             own.setdefault(idx, entry)
         else:
             sub = dict(entry)
             if sub.get("language") and "fallback_language" not in sub:
                 sub["fallback_language"] = default_fallback
+            if is_own:
+                # A multipath library has one 1.1 entry per folder; each
+                # stays a subfolder entry so the folders keep their own
+                # language and enabled state.
+                sub["path"] = next(f for f in source_paths(discovered[idx]["path"])
+                                   if _norm(f) == _norm(path))
+                folder_entries.setdefault(idx, []).append(sub)
             subs[idx].append(sub)
 
     libraries = []
     for i, src in enumerate(discovered):
         entry = own.get(i, {})
+        # Included unless 1.1 disabled every folder of a multipath library.
+        multi = folder_entries.get(i, [])
+        all_off = (len(multi) == len(_folders(src["path"]))
+                   and all(e.get("enabled", True) is False for e in multi))
         libraries.append(library_from_legacy_settings(
             settings,
             path=src["path"],
             label=src.get("label", ""),
-            included=entry.get("enabled", True) is not False,
+            included=entry.get("enabled", True) is not False and not all_off,
             language=str(entry.get("language") or default_language),
             fallback_language=str(entry.get("fallback_language", default_fallback) or ""),
             subfolders=tuple(subs[i]),

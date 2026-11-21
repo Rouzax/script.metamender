@@ -81,7 +81,36 @@ def test_convert_subfolder_entries_become_subfolders():
 def test_convert_multipath_folder_matches_entry():
     disc = [{"path": "multipath://%2fa%2fone%2f/%2fb%2ftwo%2f/", "label": "Both"}]
     old = {"sources": [{"path": "/b/two/", "language": "de-DE"}]}
-    assert convert(_legacy(), old, disc, "nl-NL").libraries[0].language == "de-DE"
+    config = convert(_legacy(), old, disc, "nl-NL")
+    assert config.folder_settings("/b/two/x.mkv", config.libraries[0])[1] == "de-DE"
+
+
+MULTI = [{"path": "multipath://%2fa%2fone%2f/%2fb%2ftwo%2f/", "label": "Both"}]
+
+
+def test_convert_multipath_keeps_each_folder_entry():
+    old = {"sources": [{"path": "/a/one/", "language": "en-US"},
+                       {"path": "/b/two/", "language": "de-DE"}]}
+    config = convert(_legacy(), old, MULTI, "nl-NL")
+    lib = config.libraries[0]
+    assert config.folder_settings("/a/one/x.mkv", lib)[:2] == (True, "en-US")
+    assert config.folder_settings("/b/two/x.mkv", lib)[:2] == (True, "de-DE")
+
+
+def test_convert_multipath_one_folder_disabled():
+    old = {"sources": [{"path": "/a/one/", "enabled": False},
+                       {"path": "/b/two/", "language": "de-DE"}]}
+    config = convert(_legacy(), old, MULTI, "nl-NL")
+    lib = config.libraries[0]
+    assert lib.included
+    assert config.folder_settings("/a/one/x.mkv", lib)[0] is False
+    assert config.folder_settings("/b/two/x.mkv", lib)[0] is True
+
+
+def test_convert_multipath_all_folders_disabled_not_included():
+    old = {"sources": [{"path": "/a/one/", "enabled": False},
+                       {"path": "/b/two/", "enabled": False}]}
+    assert not convert(_legacy(), old, MULTI, "nl-NL").libraries[0].included
 
 
 def test_convert_uses_prefix_and_not_found():
