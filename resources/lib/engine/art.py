@@ -29,7 +29,7 @@ GATE_CHANGED = "changed"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
 _IMAGE_PREFIX = "image://"
 _FRAME_GRAB_PREFIX = "image://video@"
-_LOCAL_PREFIXES = ("smb:", "nfs:", "special:", "/")
+_LOCAL_PREFIXES = ("smb:", "nfs:", "special:", "/", "\\\\")
 
 # A poster only displaces the one already set when it leads by more than this
 # on the provider's own first score (TMDB: the weighted score; fanart.tv:
@@ -195,17 +195,21 @@ def pick_poster(
     if pick is None:
         return None
 
-    if not _is_rated(pick) and current_url:
+    if not _is_rated(pick) and current_url and pick.url != current_url:
         # An unrated poster says nothing against the rated one already set.
         for poster in tmdb:
             if poster.url == current_url and _is_rated(poster):
                 return pick_from(poster)
-        pool = fanart_posters()
-        if pool is TRANSIENT:
-            return TRANSIENT
-        for poster in pool:
-            if poster.url == current_url and _is_rated(poster):
-                return pick_from(poster)
+        # Fanart is consulted only when it already answered or the current
+        # poster could be one of its images; otherwise its failure must not
+        # unsettle a pick that does not depend on it.
+        if fetched or classify(current_url) == WEB_FANART:
+            pool = fanart_posters()
+            if pool is TRANSIENT:
+                return TRANSIENT
+            for poster in pool:
+                if poster.url == current_url and _is_rated(poster):
+                    return pick_from(poster)
     return pick_from(pick)
 
 

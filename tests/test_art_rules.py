@@ -115,12 +115,50 @@ def test_unwrap_empty_and_plain():
 
 def test_pick_poster_unrated_pick_keeps_rated_fanart_current():
     tm = [Poster("t_en", "tmdb", "en", (0.0, 0))]
-    fa = lambda: [Poster("f_en", "fanart", "en", (4,))]
-    pick = pick_poster(tm, fa, "tmdb", "en", None, "f_en")
-    assert pick.url == "f_en" and pick.provider == "fanart"
+    cur = "https://assets.fanart.tv/fanart/f_en.jpg"
+    fa = lambda: [Poster(cur, "fanart", "en", (4,))]
+    pick = pick_poster(tm, fa, "tmdb", "en", None, cur)
+    assert pick.url == cur and pick.provider == "fanart"
 
 
 def test_pick_poster_fanart_margin_keeps_incumbent():
     fa = lambda: [Poster("a", "fanart", "nl", (5,)), Poster("b", "fanart", "nl", (4,))]
     assert pick_poster([], fa, "fanart", "nl", None, "b").url == "b"
     assert pick_poster([], fa, "fanart", "nl", None, "").url == "a"
+
+
+def _transient_fanart(calls):
+    def fanart():
+        calls.append(1)
+        return TRANSIENT
+    return fanart
+
+
+def test_pick_poster_unrated_pick_equal_to_current_ignores_fanart_failure():
+    calls = []
+    tm = [Poster("t_nl", "tmdb", "nl", (0.0, 0))]
+    pick = pick_poster(tm, _transient_fanart(calls), "tmdb", "nl", None, "t_nl")
+    assert pick.url == "t_nl" and calls == []
+
+
+def test_pick_poster_unrated_pick_replaces_gone_tmdb_current_without_fanart():
+    calls = []
+    tm = [Poster("t_nl", "tmdb", "nl", (0.0, 0))]
+    pick = pick_poster(tm, _transient_fanart(calls), "tmdb", "nl", None,
+                       "https://image.tmdb.org/t/p/original/gone.jpg")
+    assert pick.url == "t_nl" and calls == []
+
+
+def test_classify_unc_path_is_local():
+    assert classify("\\\\server\\share\\poster.jpg") == LOCAL
+
+
+def test_pick_poster_fanart_called_once_for_tier_and_unrated_check():
+    calls = []
+
+    def fanart():
+        calls.append(1)
+        return [Poster("f_nl", "fanart", "nl", (0,))]
+    pick = pick_poster([], fanart, "tmdb", "nl", None,
+                       "https://assets.fanart.tv/fanart/x.jpg")
+    assert pick.url == "f_nl" and calls == [1]
