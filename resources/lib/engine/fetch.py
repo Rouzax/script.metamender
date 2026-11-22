@@ -92,6 +92,10 @@ def _fetch_movie_or_show(
             ctx, identity,
         )
 
+    if ctx.media_type.name == "tvshow" and tmdb_id and tmdb_data is not TRANSIENT:
+        # The season pass reads its air dates from this record.
+        ctx.show_cache[str(tmdb_id)] = tmdb_data
+
     if (not imdb_id and tmdb_data is not TRANSIENT and tmdb_data
             and tmdb_data.get("imdb_id")):
         imdb_id = tmdb_data["imdb_id"]
@@ -259,7 +263,8 @@ def _fetch_episode(
 
 def _show_record(ctx: _ScanCtx, show_tmdb_id: str, language: str, identity: str) -> Any:
     """The show's TMDB record (None when TMDB has no such show), fetched once
-    per show in the pass, or TRANSIENT."""
+    per show in the cycle (the show pass may already have it), or
+    TRANSIENT."""
     if show_tmdb_id in ctx.show_cache:
         return ctx.show_cache[show_tmdb_id]
     record = _call_provider(

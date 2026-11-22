@@ -32,7 +32,7 @@ from resources.lib.data.libraries import Library, LibraryConfig, load_libraries
 from resources.lib.data.media_types import EPISODE, SEASON, TVSHOW, MediaType
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
-from resources.lib.engine.scan import run_scan
+from resources.lib.engine.scan import run_scan, scans_seasons
 from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
@@ -226,7 +226,8 @@ def _label(media_type: MediaType, item: dict[str, Any]) -> str:
     if media_type is TVSHOW:
         return lang(32472)
     if media_type is SEASON:
-        return lang(32718).format(item.get("season", ""))
+        # Kodi's own season title, so specials read "Specials" in Kodi's language.
+        return lang(32718).format(item.get("title") or item.get("season", ""))
     return lang(32473).format(item.get("season", ""), item.get("episode", ""),
                               item.get("title", ""))
 
@@ -241,6 +242,7 @@ def _pass(
     monitor: Any,
     breaker: CircuitBreaker,
     show_id_map: dict[int, str] | None = None,
+    caches: tuple[dict[tuple[str, str], Any], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """One run_scan pass over ``items``, counting each finished item into
     ``progress``: an item is counted when the next one starts or the pass
@@ -263,6 +265,8 @@ def _pass(
         media_type, tracker, libraries,
         settings["tmdb_api_key"], settings, monitor=monitor, items=items,
         reset=True, breaker=breaker, show_id_map=show_id_map, progress=on_item,
+        fanart_cache=caches[0] if caches else None,
+        show_cache=caches[1] if caches else None,
     )
     if pending:
         progress.item_finished(pending.pop(), stats, counted)
@@ -311,6 +315,9 @@ def run_refresh(
         # Progress counts from the first item, not from the download.
         progress.begin(len(episodes), now=time.monotonic())
     breaker = CircuitBreaker()
+    # Shared by the passes like the breaker: the show's fanart.tv answer and
+    # TMDB record serve its season posters.
+    caches: tuple[dict[tuple[str, str], Any], dict[str, Any]] = ({}, {})
     passes: list[dict[str, Any]] = []
 
     def halted() -> bool:
@@ -318,8 +325,8 @@ def run_refresh(
 
     if show:
         passes.append(_pass(TVSHOW, [show], progress, settings, libraries,
-                            tracker, monitor, breaker))
-    if not halted():
+                            tracker, monitor, breaker, caches=caches))
+    if scans_seasons(libraries) and not halted():
         show_id_map = tracker.get_show_id_map()
         seasons = [
             s for s in get_seasons_for_scan(show_id_map, tvshowid=scope.tvshowid,
@@ -329,10 +336,10 @@ def run_refresh(
         ]
         if seasons:
             passes.append(_pass(SEASON, seasons, progress, settings, libraries,
-                                tracker, monitor, breaker, show_id_map))
+                                tracker, monitor, breaker, show_id_map, caches))
     if episodes and not halted():
         passes.append(_pass(EPISODE, episodes, progress, settings, libraries,
-                            tracker, monitor, breaker, tracker.get_show_id_map()))
+                            tracker, monitor, breaker, tracker.get_show_id_map(), caches))
     shutdown = bool(monitor is not None and monitor.abortRequested())
     outcome = RefreshOutcome(
         stopped=any(s.get("stopped") for s in passes),

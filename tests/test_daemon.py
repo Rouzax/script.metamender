@@ -156,7 +156,7 @@ def test_run_scan_passes_imdb_ready_to_every_pass(kodi_stubs):
     prep.assert_called_once()
     assert [lib.path for lib in prep.call_args.args[0]] == ["/m/"]
     assert all(c.kwargs["libraries"] is libraries for c in scan.call_args_list)
-    assert [c.kwargs["settings"]["imdb_ready"] for c in scan.call_args_list] == [True] * 4
+    assert [c.kwargs["settings"]["imdb_ready"] for c in scan.call_args_list] == [True] * 3
     assert "imdb_ready" not in settings
 
 
@@ -171,13 +171,17 @@ def test_daemon_scans_seasons_between_shows_and_episodes(kodi_stubs):
     tracker.get_show_id_map.side_effect = lambda: order.append("show_id_map") or {7: "4607"}
     with patch.object(daemon, "_prepare_imdb_ratings", return_value=True), \
             patch.object(daemon, "run_scan", side_effect=scan) as run:
-        stats = daemon._run_scan(tracker, LibraryConfig([_lib("/m/")]), {"tmdb_api_key": "k"},
-                                 _AbortMonitor(), new_only=True)
+        stats = daemon._run_scan(tracker, LibraryConfig([_lib("/m/", toggles=("posters",))]),
+                                 {"tmdb_api_key": "k"}, _AbortMonitor(), new_only=True)
     assert order == [MOVIE, TVSHOW, "show_id_map", SEASON, EPISODE]
     by_type = {c.kwargs["media_type"]: c.kwargs for c in run.call_args_list}
     assert by_type[SEASON]["show_id_map"] == {7: "4607"}
     assert by_type[SEASON]["new_only"] is True
     assert by_type[SEASON]["breaker"] is by_type[EPISODE]["breaker"]
+    # One cache per cycle: the show pass's answers serve the season pass.
+    for cache in ("fanart_cache", "show_cache"):
+        assert by_type[SEASON][cache] is by_type[TVSHOW][cache]
+        assert by_type[MOVIE][cache] is by_type[EPISODE][cache] is by_type[TVSHOW][cache]
     assert list(stats) == ["movie", "tvshow", "season", "episode"]
 
 
@@ -186,6 +190,34 @@ def test_prune_includes_seasons():
     tracker.prune_orphans.return_value = 0
     daemon._maybe_prune_orphans(tracker, {"orphan_retention_days": 30}, targeted=False)
     assert "season" in [c.args[0] for c in tracker.prune_orphans.call_args_list]
+
+
+def test_prune_keeps_the_rows_of_a_type_not_scanned():
+    tracker = MagicMock()
+    tracker.prune_orphans.return_value = 0
+    daemon._maybe_prune_orphans(tracker, {"orphan_retention_days": 30}, targeted=False,
+                                scanned=["movie", "tvshow", "episode"])
+    assert [c.args[0] for c in tracker.prune_orphans.call_args_list] == [
+        "movie", "tvshow", "episode"]
+
+
+def test_no_season_listing_without_a_poster_library(kodi_stubs, tmp_path):
+    from resources.lib.data.tracker import TrackerDB
+
+    listed = []
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    try:
+        with patch("resources.lib.data.kodi.get_all_items",
+                   side_effect=lambda mt, **kw: listed.append(mt) or []), \
+                patch("resources.lib.data.kodi.get_seasons_for_scan") as seasons:
+            stats = daemon._run_scan(tracker, LibraryConfig([_lib("/m/")]),
+                                     {"tmdb_api_key": "k", "ui_language": "en-US"},
+                                     _AbortMonitor())
+    finally:
+        tracker.close()
+    seasons.assert_not_called()
+    assert listed == [MOVIE, TVSHOW, EPISODE]
+    assert "season" not in stats
 
 
 class _FakeMonitor:

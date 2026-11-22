@@ -212,11 +212,26 @@ def test_manual_scans_with_the_libraries(monkeypatch, patched):
     manual.run()
     patched["sync"].assert_called_once_with(patched["tracker"], "en-US")
     calls = patched["run_scan"].call_args_list
-    assert [c.kwargs["libraries"] for c in calls] == [_LIBRARIES] * 4
-    # Seasons after the shows, whose ids they use, and before the episodes.
-    assert [c.kwargs["media_type"] for c in calls] == [MOVIE, TVSHOW, SEASON, EPISODE]
+    assert [c.kwargs["libraries"] for c in calls] == [_LIBRARIES] * 3
+    # No library manages posters: no season pass.
+    assert [c.kwargs["media_type"] for c in calls] == [MOVIE, TVSHOW, EPISODE]
     prepared = manual._prepare_imdb_ratings.call_args.args[0]
     assert [lib.path for lib in prepared] == ["smb://nas/Movies/"]
+
+
+def test_manual_scans_seasons_between_shows_and_episodes(monkeypatch, patched):
+    libraries = LibraryConfig([Library(
+        path="smb://nas/Series/", label="Series", included=True, language="en-US",
+        fallback_language="", toggles=frozenset({"posters"}))])
+    patched["sync"].return_value = libraries
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    manual.run()
+    calls = patched["run_scan"].call_args_list
+    # Seasons after the shows, whose ids they use, and before the episodes.
+    assert [c.kwargs["media_type"] for c in calls] == [MOVIE, TVSHOW, SEASON, EPISODE]
+    # One cache per cycle: a show's answers serve its season posters.
+    assert len({id(c.kwargs["fanart_cache"]) for c in calls}) == 1
+    assert len({id(c.kwargs["show_cache"]) for c in calls}) == 1
 
 
 def test_manual_without_libraries_scans_nothing(monkeypatch, patched):

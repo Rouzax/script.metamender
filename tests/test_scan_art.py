@@ -884,3 +884,132 @@ def test_season_listing_new_only_skips_known_seasons(
     assert listing.call_args.args == ({10: "55555"},)
     assert listing.call_args.kwargs == {"show_tvdb_map": {10: "777"}}
     assert [c.args[0] for c in mock_update.call_args_list] == [52]
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_show_posters")
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_show_and_season_passes_share_one_fanart_call(
+    mock_show, mock_posters, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    show = _make_tvshow_item(tmdb_id="55555")
+    show["uniqueid"]["tvdb"] = "777"
+    show["poster"] = ""
+    mock_show.return_value = dict(_tmdb_tvshow_response(), posters=[],
+                                  season_air_dates={1: "2025-01-01"})
+    mock_posters.return_value = []
+    mock_fanart.return_value = {
+        "show": [_fanart("https://assets.fanart.tv/show.jpg", "en")],
+        "seasons": {1: [_fanart(FANART_SEASON, "en")]},
+    }
+    tracker = _make_tracker(tmp_path)
+    libs = one_library(frozenset({"poster"}), poster_source=POSTER_SOURCE_FANART)
+    caches = {"fanart_cache": {}, "show_cache": {}}
+
+    run_scan(TVSHOW, tracker, libs, "k", _make_settings(), items=[show], **caches)
+    _scan_seasons(tracker, [_season(1)], libs=libs, **caches)
+    premiered = tracker.get_item("season", "tmdb:55555/S01")["premiered"]
+    tracker.close()
+
+    assert mock_fanart.call_count == 1
+    assert mock_show.call_count == 1
+    assert premiered == "2025-01-01"
+    assert [c.kwargs for c in mock_update.call_args_list] == [
+        {"poster": "https://assets.fanart.tv/show.jpg"}, {"poster": FANART_SEASON}]
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_seasons_of_two_copies_of_a_show_both_written(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    mock_show.return_value = dict(_tmdb_tvshow_response(), season_air_dates={})
+    mock_posters.return_value = [_tmdb(SEASON_POSTER, "en")]
+    first = _season(1)
+    second = _season(1, seasonid=61, tvshowid=11, file="smb://server/shows/copy/")
+    holder = {k: first[k] for k in ("seasonid", "season", "showtitle", "tvshowid", "title")}
+    tracker = _make_tracker(tmp_path)
+
+    with patch("resources.lib.engine.scan.get_item_by_id", return_value=dict(holder)):
+        for _ in range(2):  # the second cycle meets both rows again
+            run_scan(SEASON, tracker, _libs(frozenset({"poster"})), "k", _make_settings(),
+                     items=[dict(first), dict(second)],
+                     show_id_map={10: "55555", 11: "55555"})
+            tracker.start_new_cycle()
+    rows = sorted(r[0] for r in tracker._conn.execute(
+        "SELECT identity FROM items WHERE media_type = 'season'"))
+    tracker.close()
+
+    assert rows == ["tmdb:55555/S01", "tmdb:55555/S01|smb://server/shows/copy/"]
+    assert [c.args[0] for c in mock_update.call_args_list][:2] == [51, 61]
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_season_posters_transient_after_show_record_leaves_clock_alone(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    mock_show.return_value = dict(_tmdb_tvshow_response(), season_air_dates={1: "2025-01-01"})
+    mock_posters.side_effect = TransientProviderError("down")
+    tracker = _make_tracker(tmp_path)
+
+    stats = _scan_seasons(tracker, [_season(1)])
+    fs_map = _season_fs(tracker, 1)
+    premiered = tracker.get_item("season", "tmdb:55555/S01")["premiered"]
+    tracker.close()
+
+    mock_update.assert_not_called()
+    assert stats["transient"] == 1
+    assert _count(fs_map, "poster") == 0
+    assert _reason(fs_map, "poster") == REASON_UNCHECKED
+    # The air date is a real answer and is kept.
+    assert premiered == "2025-01-01"
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow", return_value=None)
+def test_season_of_a_show_tmdb_does_not_have_is_answered_empty(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    tracker = _make_tracker(tmp_path)
+
+    _scan_seasons(tracker, [_season(1)])
+    fs_map = _season_fs(tracker, 1)
+    tracker.close()
+
+    mock_posters.assert_not_called()
+    mock_update.assert_not_called()
+    assert _count(fs_map, "poster") == 1
+    assert _reason(fs_map, "poster") == REASON_NOTHING
+
+
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_fetch_season_with_tmdb_disabled_is_transient(mock_show, mock_posters):
+    from unittest.mock import MagicMock
+
+    from resources.lib.engine.chain import TRANSIENT
+    from resources.lib.engine.fetch import _fetch_season
+    from resources.lib.engine.ids import _Ids
+    from resources.lib.engine.scanctx import _Pacer, _ScanCtx
+
+    breaker = CircuitBreaker()
+    breaker.disable("tmdb")
+    ctx = _ScanCtx(
+        media_type=SEASON, tracker=MagicMock(), breaker=breaker, pacer=_Pacer(0.0),
+        tmdb_api_key="k", enabled_fields=frozenset({"poster"}), show_id_map={},
+        show_tvdb_map={}, checked_shows=frozenset(), season_cache={}, tvdb_cache={},
+        logged_once=set(), counts={}, schedule=(7,), rating_pref=0, text_order=0,
+        fallback_order=0, imdb_ready=True,
+    )
+    primary = _fetch_season(ctx, _season(1), 51, "Test Show S01", "tmdb:55555/S01",
+                            _Ids("55555", None, "777", False), "en-US")
+
+    assert primary.tmdb is TRANSIENT
+    mock_show.assert_not_called()
+    mock_posters.assert_not_called()
+    ctx.tracker.upsert_item.assert_not_called()

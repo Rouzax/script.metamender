@@ -87,7 +87,7 @@ from resources.lib.data.upgrade import (
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import SiteGate
 from resources.lib.engine.resolve import rating_sources
-from resources.lib.engine.scan import run_scan
+from resources.lib.engine.scan import run_scan, scans_seasons
 from resources.lib.providers import imdb_ratings
 from resources.lib.service import attention
 from resources.lib.service.lock import (
@@ -416,7 +416,8 @@ def _run_scan(
     ``new_only`` only the items new to the tracker (run_scan's new_only).
 
     TV shows are scanned before seasons and episodes so their TMDB IDs are
-    available for the season lookups.
+    available for the season lookups. The season pass runs only when an
+    included library manages season posters (scan.scans_seasons).
 
     Returns:
         Dict keyed by media type name with stats dicts as values.
@@ -433,6 +434,10 @@ def _run_scan(
     # One certification site gate per cycle too: its request cap and memo
     # span the movie and TV show passes.
     cert_gate = SiteGate(settings.get("cert_sites", frozenset()), breaker, monitor)
+    # And one set of answer caches: a show's fanart.tv answer and TMDB record
+    # serve its season posters in the season pass.
+    fanart_cache: dict[tuple[str, str], Any] = {}
+    show_cache: dict[str, Any] = {}
 
     for media_type in (MOVIE, TVSHOW):
         stats = run_scan(
@@ -445,6 +450,8 @@ def _run_scan(
             new_only=new_only,
             breaker=breaker,
             cert_gate=cert_gate,
+            fanart_cache=fanart_cache,
+            show_cache=show_cache,
         )
         all_stats[media_type.name] = stats
 
@@ -455,7 +462,8 @@ def _run_scan(
         shows=len(show_id_map),
     )
 
-    for media_type in (SEASON, EPISODE):
+    later = (SEASON, EPISODE) if scans_seasons(libraries) else (EPISODE,)
+    for media_type in later:
         all_stats[media_type.name] = run_scan(
             media_type=media_type,
             tracker=tracker,
@@ -466,6 +474,8 @@ def _run_scan(
             show_id_map=show_id_map,
             new_only=new_only,
             breaker=breaker,
+            fanart_cache=fanart_cache,
+            show_cache=show_cache,
         )
 
     return all_stats
@@ -475,6 +485,7 @@ def _maybe_prune_orphans(
     tracker: TrackerDB,
     settings: dict[str, Any],
     targeted: bool,
+    scanned: Iterable[str] | None = None,
 ) -> None:
     """Prune orphaned tracker rows, but ONLY after a full scan.
 
@@ -505,7 +516,13 @@ def _maybe_prune_orphans(
         return
     cutoff = (date.today() - timedelta(days=retention)).isoformat()
     total_removed = 0
+    # Only a type whose pass ran refreshed its last_seen stamps: seasons are
+    # not scanned while no library manages their poster, and their rows
+    # (kept originals included) must outlive that.
+    names = None if scanned is None else set(scanned)
     for mt in (MOVIE, TVSHOW, SEASON, EPISODE):
+        if names is not None and mt.name not in names:
+            continue
         total_removed += tracker.prune_orphans(mt.name, cutoff=cutoff)
     if total_removed:
         log.info(
@@ -881,7 +898,8 @@ def run() -> None:
                             # after a FULL scan (not targeted); see
                             # _maybe_prune_orphans for why a targeted scan must
                             # never prune.
-                            _maybe_prune_orphans(tracker, settings, targeted)
+                            _maybe_prune_orphans(tracker, settings, targeted,
+                                                 scanned=all_stats.keys())
 
                         # A pass stopped by Kodi shutting down says nothing
                         # about whether scans work; any other early stop

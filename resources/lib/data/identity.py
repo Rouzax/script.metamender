@@ -22,13 +22,15 @@ def compute_identity(item: Dict[str, Any], media_type: MediaType) -> str:
 
     Movies/shows: "tmdb:<id>", else "imdb:<id>", else "title (year)" or "title".
     Episodes: "{showtitle} S{season:02d}E{episode:02d}".
-    Seasons: "tmdb:{show_tmdb_id}/S{season:02d}"; run_scan skips a season
-    whose show has no TMDB id.
+    Seasons: "tmdb:{show_tmdb_id}/S{season:02d}", or "" when the show has
+    no TMDB id: such a season has no identity and is skipped.
     """
     if media_type.name == "season":
+        show = item.get("show_tmdb_id")
+        if not show:
+            return ""
         return "tmdb:{show}/S{season:02d}".format(
-            show=item.get("show_tmdb_id") or "",
-            season=int(item.get("season", 0) or 0),
+            show=show, season=int(item.get("season", 0) or 0),
         )
     if media_type.name == "episode":
         return "{showtitle} S{season:02d}E{episode:02d}".format(

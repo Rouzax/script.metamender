@@ -73,3 +73,9 @@ def test_season_identity():
     assert compute_identity(item, SEASON) == "tmdb:4607/S01"
     # Specials are season 0; a renamed show keeps its seasons' rows.
     assert compute_identity(dict(item, season=0, showtitle="LOST"), SEASON) == "tmdb:4607/S00"
+
+
+def test_season_without_show_tmdb_id_has_no_identity():
+    item = {"season": 1, "showtitle": "Lost", "tvshowid": 7}
+    assert compute_identity(item, SEASON) == ""
+    assert compute_identity(dict(item, show_tmdb_id=None), SEASON) == ""

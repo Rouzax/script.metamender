@@ -15,6 +15,7 @@ Logging:
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import xbmc
 
@@ -22,7 +23,7 @@ from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
-from resources.lib.engine.scan import run_scan
+from resources.lib.engine.scan import run_scan, scans_seasons
 from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
@@ -107,6 +108,11 @@ def run() -> None:
         settings["imdb_ready"] = _prepare_imdb_ratings(
             [lib for lib in libraries.libraries if lib.included], monitor)
 
+        # One set of answer caches for the cycle, like the breaker: a show's
+        # fanart.tv answer and TMDB record serve its season posters.
+        fanart_cache: dict[tuple[str, str], Any] = {}
+        show_cache: dict[str, Any] = {}
+
         for media_type in (MOVIE, TVSHOW):
             stats = run_scan(
                 media_type=media_type,
@@ -116,12 +122,15 @@ def run() -> None:
                 settings=settings,
                 monitor=monitor,
                 breaker=breaker,
+                fanart_cache=fanart_cache,
+                show_cache=show_cache,
             )
             all_stats[media_type.name] = stats
 
         # Seasons and episodes use the show ids the show pass found.
         show_id_map = tracker.get_show_id_map()
-        for media_type in (SEASON, EPISODE):
+        later = (SEASON, EPISODE) if scans_seasons(libraries) else (EPISODE,)
+        for media_type in later:
             all_stats[media_type.name] = run_scan(
                 media_type=media_type,
                 tracker=tracker,
@@ -131,6 +140,8 @@ def run() -> None:
                 monitor=monitor,
                 show_id_map=show_id_map,
                 breaker=breaker,
+                fanart_cache=fanart_cache,
+                show_cache=show_cache,
             )
 
         duration_ms = int((time.perf_counter() - scan_start) * 1000)

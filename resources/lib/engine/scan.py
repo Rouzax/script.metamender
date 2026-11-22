@@ -919,6 +919,7 @@ def _needed_providers(media_type: MediaType, candidates: list[str]) -> list[str]
 
 def _tracker_identity(
     tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: Any,
+    show_id_map: dict[int, str] | None = None,
 ) -> str:
     """The tracker key for this Kodi item: compute_identity's, unless another
     Kodi item in the library holds that row.
@@ -930,7 +931,9 @@ def _tracker_identity(
     The holder is the item whose Kodi id the row records. Whether that item
     still exists is asked from Kodi, and only when the ids differ: after a
     file is replaced or the library rebuilt, the recorded id is gone or
-    names another item, and this item takes the row over.
+    names another item, and this item takes the row over. Kodi gives a
+    season no ids, so the holder season gets its show's TMDB id from
+    ``show_id_map``, as the listing did for this one.
     """
     identity = compute_identity(item, media_type)
     own = "{}|{}".format(identity, item.get("file", ""))
@@ -944,6 +947,8 @@ def _tracker_identity(
     if holder is None or holder == kodi_id:
         return identity
     other = get_item_by_id(media_type, holder)
+    if other and media_type is SEASON:
+        other["show_tmdb_id"] = (show_id_map or {}).get(int(other.get("tvshowid", -1)))
     if other and compute_identity(other, media_type) == identity:
         log.debug(
             "Duplicate identity, item tracked under its file",
@@ -952,6 +957,15 @@ def _tracker_identity(
         )
         return own
     return identity
+
+
+def scans_seasons(libraries: LibraryConfig) -> bool:
+    """Whether an included library manages a season field (the poster). The
+    callers skip the season pass otherwise, and with it the season listing."""
+    return any(
+        lib.included and candidate_fields(SEASON, lib.fields())
+        for lib in libraries.libraries
+    )
 
 
 def _season_items(
@@ -1060,6 +1074,8 @@ def run_scan(
     new_only: bool = False,
     cert_gate: SiteGate | None = None,
     progress: Callable[[int, dict[str, Any], dict[str, Any]], bool] | None = None,
+    fanart_cache: dict[tuple[str, str], Any] | None = None,
+    show_cache: dict[str, Any] | None = None,
 ) -> dict[str, int]:
     """Run a single scan cycle for one media type.
 
@@ -1111,6 +1127,11 @@ def run_scan(
         progress: Called before each item with its index, the item and the
             live stats dict. Returning False stops the pass before that item
             (stats["stopped"]); an item is never stopped half-way.
+        fanart_cache, show_cache: fanart.tv answers and TMDB show records
+            already fetched. A caller running several passes in one cycle
+            passes the same dicts to each, like ``breaker``, so the show
+            pass and the season pass ask once per show (fanart.tv's terms
+            allow one call per show). A fresh dict each when None.
 
     Returns:
         Stats dict with processed, skipped, updated, errors, excluded,
@@ -1160,7 +1181,8 @@ def run_scan(
             if media_type.name == "episode" else frozenset()
         ),
         fanart_client_key=str(settings.get("fanart_client_key") or ""),
-        fanart_cache={},
+        fanart_cache={} if fanart_cache is None else fanart_cache,
+        show_cache={} if show_cache is None else show_cache,
     )
     # Built on a library's first item, so a library the pass never meets
     # costs nothing (and logs no certification error).
@@ -1226,7 +1248,7 @@ def run_scan(
 
         # A season is keyed on its show's TMDB id, so without one it has no
         # identity; it is picked up once its show is resolved.
-        if media_type is SEASON and not item.get("show_tmdb_id"):
+        if media_type is SEASON and not compute_identity(item, media_type):
             log.debug(
                 "Skipping season of a show without a TMDB id",
                 event="scan.season_no_show_id", title=title,
@@ -1236,7 +1258,8 @@ def run_scan(
             continue
 
         kodi_id = item.get(media_type.kodi_id_field, 0)
-        identity = _tracker_identity(tracker, media_type, item, kodi_id)
+        identity = _tracker_identity(tracker, media_type, item, kodi_id,
+                                     shared.show_id_map)
         if media_type is SEASON and not item.get(media_type.date_field):
             # Kodi has no date on a season: its TMDB air date, once a fetch
             # found it, is kept as the row's premiered.

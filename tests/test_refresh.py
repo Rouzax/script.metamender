@@ -231,6 +231,10 @@ def test_season_refresh_runs_only_its_episodes():
     assert progress.current == "Season 2, episode 1: Ep 1"
 
 
+_POSTERS = LibraryConfig([Library(**{**_SERIES.__dict__,
+                                     "toggles": frozenset({"plots", "posters"})})])
+
+
 def _season(n):
     return {"seasonid": 40 + n, "season": n, "tvshowid": 7, "title": "Season %d" % n,
             "file": _LOST, "show_tmdb_id": "4607"}
@@ -239,7 +243,8 @@ def _season(n):
 def test_update_now_on_season_scans_that_season_poster():
     scan = FakeScan()
     listing = MagicMock(return_value=[_season(1), _season(2)])
-    _, progress, _ = _run(Scope(7, 2, "Lost"), scan, [_episode(1, 2)], seasons=listing)
+    _, progress, _ = _run(Scope(7, 2, "Lost"), scan, [_episode(1, 2)], seasons=listing,
+                          libraries=_POSTERS)
     assert [c[0] for c in scan.calls] == [SEASON, EPISODE]
     assert scan.calls[0][1] == ["Season 2"]
     assert scan.calls[0][3] is True
@@ -254,7 +259,8 @@ def test_update_now_on_season_scans_that_season_poster():
 def test_update_now_on_show_scans_its_season_posters():
     scan = FakeScan()
     listing = MagicMock(return_value=[_season(0), _season(1)])
-    _, progress, _ = _run(Scope(7, None, "Lost"), scan, [_episode(1)], seasons=listing)
+    _, progress, _ = _run(Scope(7, None, "Lost"), scan, [_episode(1)], seasons=listing,
+                          libraries=_POSTERS)
     assert [c[0] for c in scan.calls] == [TVSHOW, SEASON, EPISODE]
     assert scan.calls[1][1] == ["Season 0", "Season 1"]
     # The season pass uses the ids the show pass found.
@@ -265,8 +271,22 @@ def test_update_now_on_show_scans_its_season_posters():
 def test_seasons_outside_the_included_libraries_are_left_out():
     scan = FakeScan()
     elsewhere = dict(_season(1), file="smb://nas/Other/Lost/")
-    _run(Scope(7, None, "Lost"), scan, [_episode(1)], seasons=[elsewhere])
+    _run(Scope(7, None, "Lost"), scan, [_episode(1)], seasons=[elsewhere], libraries=_POSTERS)
     assert [c[0] for c in scan.calls] == [TVSHOW, EPISODE]
+
+
+def test_no_season_pass_without_a_poster_library():
+    scan = FakeScan()
+    listing = MagicMock(return_value=[_season(1)])
+    _run(Scope(7, 1, "Lost"), scan, [_episode(1)], seasons=listing)
+    listing.assert_not_called()
+    assert [c[0] for c in scan.calls] == [EPISODE]
+
+
+def test_season_label_is_kodis_season_title(monkeypatch):
+    monkeypatch.setattr(refresh, "lang", {32718: "Poster: {}"}.get)
+    assert refresh._label(SEASON, {"season": 0, "title": "Specials"}) == "Poster: Specials"
+    assert refresh._label(SEASON, {"season": 2}) == "Poster: 2"
 
 
 def test_stop_ends_the_refresh_between_items():
