@@ -46,6 +46,9 @@ REASON_FILL_ONLY = "fill_only"  # Kodi had a value and the field only fills gaps
 REASON_NOTHING = "nothing"      # the provider had nothing to offer
 REASON_UNCHECKED = "unchecked"  # not answered yet (transient failure, never reached)
 REASON_LOCKED = "locked"        # the user locked the field
+REASON_LOCAL_ART = "local_art"  # the art is a local file, never replaced
+REASON_OTHER_ART = "other_art"  # the art came from a scraper or the user, not MetaMender
+REASON_CHANGED_OUTSIDE = "changed_outside"  # the art changed outside MetaMender; locked
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS items (
@@ -114,6 +117,19 @@ CREATE TABLE IF NOT EXISTS field_keep (
     -- written_value, but surviving clear_field_status: it tells whether
     -- Kodi still holds metamender's own value after a tracker reset.
     written_fp TEXT,
+    PRIMARY KEY (media_type, identity, field)
+);
+
+-- The fingerprint of the art URL MetaMender first saw in a slot. A poster
+-- whose URL is neither this nor MetaMender's own write was changed by the
+-- user or another tool (engine/art.art_gate). Like field_keep it outlives
+-- Reset tracker, and a table of its own reaches existing databases through
+-- CREATE TABLE IF NOT EXISTS without a schema bump.
+CREATE TABLE IF NOT EXISTS art_seen (
+    media_type TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    field TEXT NOT NULL,
+    first_fp TEXT,
     PRIMARY KEY (media_type, identity, field)
 );
 
@@ -473,7 +489,7 @@ class TrackerDB:
         """Delete items of this type whose last_seen is older than `cutoff`.
 
         Items with a NULL last_seen are kept (never confirmed present yet).
-        Associated field_status and field_keep rows are deleted too.
+        Associated field_status, field_keep and art_seen rows are deleted too.
         `cutoff` is an ISO date string (callers pass today minus the
         retention window). Returns the number of items removed.
         """
@@ -486,10 +502,11 @@ class TrackerDB:
             ids = [r["id"] for r in doomed]
             if not ids:
                 return 0
-            self._conn.executemany(
-                "DELETE FROM field_keep WHERE media_type = ? AND identity = ?",
-                [(media_type, r["identity"]) for r in doomed],
-            )
+            for table in ("field_keep", "art_seen"):
+                self._conn.executemany(
+                    "DELETE FROM {} WHERE media_type = ? AND identity = ?".format(table),
+                    [(media_type, r["identity"]) for r in doomed],
+                )
             placeholders = ", ".join(["?"] * len(ids))
             self._conn.execute(
                 "DELETE FROM field_status WHERE item_id IN ({})".format(placeholders), ids
@@ -515,14 +532,16 @@ class TrackerDB:
     # ------------------------------------------------------------------
 
     def _move_keep(self, media_type: str, old: str, new: str) -> None:
-        """Re-key an item's field_keep rows with its items row (no commit)."""
+        """Re-key an item's field_keep and art_seen rows with its items row
+        (no commit)."""
         # A row already at ``new`` is a stray of an item that left; the
         # moved rows belong to the item now at that identity, so they win.
-        self._conn.execute(
-            "UPDATE OR REPLACE field_keep SET identity = ? "
-            "WHERE media_type = ? AND identity = ?",
-            (new, media_type, old),
-        )
+        for table in ("field_keep", "art_seen"):
+            self._conn.execute(
+                "UPDATE OR REPLACE {} SET identity = ? "
+                "WHERE media_type = ? AND identity = ?".format(table),
+                (new, media_type, old),
+            )
 
     def _get_item_id(self, media_type: str, identity: str) -> int | None:
         """Look up the row id for an item by (media_type, identity)."""
@@ -883,6 +902,51 @@ class TrackerDB:
                 (media_type, identity),
             )
         )
+
+    # ------------------------------------------------------------------
+    # First-seen art (survives clear_field_status)
+    # ------------------------------------------------------------------
+
+    def get_first_fp(self, media_type: str, identity: str, field: str) -> str | None:
+        """Fingerprint of the art URL first seen in this slot, or None when
+        MetaMender has not looked at it yet."""
+        row = self._conn.execute(
+            "SELECT first_fp FROM art_seen WHERE media_type = ? AND identity = ? "
+            "AND field = ?",
+            (media_type, identity, field),
+        ).fetchone()
+        return None if row is None else row["first_fp"]
+
+    def set_first_fp(
+        self, media_type: str, identity: str, field: str, first_fp: str
+    ) -> None:
+        """Record the fingerprint of the art URL first seen in a slot (no
+        commit)."""
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO art_seen (media_type, identity, field, first_fp) "
+                "VALUES (?, ?, ?, ?)",
+                (media_type, identity, field, first_fp),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record first-seen art", event="tracker.error",
+                media_type=media_type, identity=identity, field=field,
+            )
+
+    def forget_first_fp(self, media_type: str, identity: str, field: str) -> None:
+        """Forget the first-seen art of a slot (no commit), so the next scan
+        takes the URL it finds as first seen."""
+        try:
+            self._conn.execute(
+                "DELETE FROM art_seen WHERE media_type = ? AND identity = ? AND field = ?",
+                (media_type, identity, field),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to forget first-seen art", event="tracker.error",
+                media_type=media_type, identity=identity, field=field,
+            )
 
     def clear_field_status(self) -> int:
         """Delete all field_status rows (the Reset-tracker action). Returns count.

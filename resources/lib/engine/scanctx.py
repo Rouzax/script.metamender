@@ -26,8 +26,8 @@ from resources.lib.engine.protect import fingerprint, is_blank
 from resources.lib.providers import tmdb
 from resources.lib.utils import (
     ApiKeyError,
+    ProviderAuthError,
     TransientProviderError,
-    TvdbAuthError,
     get_logger,
 )
 
@@ -49,6 +49,9 @@ _TMDB_TO_KODI = {
     "runtime": "runtime",
     "firstaired": "firstaired",
     "title": "title",
+    # Art: the URLs engine/artsources.py picks, under the Kodi field names.
+    "poster": "poster",
+    "thumb": "thumb",
 }
 
 _KODI_TO_TMDB = {v: k for k, v in _TMDB_TO_KODI.items()}
@@ -254,6 +257,17 @@ class _ScanCtx:
     tracked_shows: frozenset[int] = frozenset()
     # The library's title mode for shows and movies (libraries.TITLE_*).
     title_mode: str = TITLE_LANGUAGE
+    # The library's poster source, "tmdb" or "fanart" (scan_settings).
+    poster_source: str = "tmdb"
+    # Bare ISO 639-1 codes the primary TMDB fetch asks posters in: the
+    # folder language, then its fallback when different. Empty when the
+    # item's poster is not being fetched, so no images are requested.
+    image_languages: tuple[str, ...] = ()
+    # The user's personal fanart.tv key; "" when not set.
+    fanart_client_key: str = ""
+    # (kind, id) -> fanart.tv's answer (see artsources). Only real answers
+    # are cached, as in tvdb_cache.
+    fanart_cache: dict[tuple[str, str], Any] = field(default_factory=dict)
 
 
 def _get_season_data(
@@ -284,9 +298,9 @@ def _call_provider(
     """Pace, run a provider fn, and apply circuit-breaker bookkeeping.
 
     Records breaker success on any non-raising return (including None, a real
-    "nothing"). On ApiKeyError re-raises (terminal, TMDB only). On
-    TvdbAuthError disables TVDB for the cycle, logs once, and returns
-    ``TRANSIENT``. On TransientProviderError records a breaker failure, logs
+    "nothing"). On ApiKeyError re-raises (terminal, TMDB only). On a
+    ProviderAuthError (TheTVDB, fanart.tv) disables that provider for the
+    cycle, logs once, and returns ``TRANSIENT``; the scan goes on without it. On TransientProviderError records a breaker failure, logs
     the trip once, and returns ``TRANSIENT``. When ``best_effort`` is True
     (episode ID enrichment) both TMDB exceptions are logged at scan.error and
     yield ``TRANSIENT`` without touching the breaker.
@@ -294,11 +308,12 @@ def _call_provider(
     ctx.pacer.wait()
     try:
         result = fn()
-    except TvdbAuthError:
-        if ctx.breaker.disable("tvdb", auth=True):
+    except ProviderAuthError as exc:
+        if ctx.breaker.disable(exc.provider, auth=True):
             log.exception(
-                "TheTVDB rejected the add-on's credentials, TVDB disabled for this cycle",
-                event="scan.tvdb_auth", identity=identity,
+                "Provider rejected the add-on's credentials, disabled for this cycle",
+                event="scan.{}_auth".format(exc.provider), provider=exc.provider,
+                identity=identity,
             )
         return TRANSIENT
     except ApiKeyError:

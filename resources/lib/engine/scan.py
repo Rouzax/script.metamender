@@ -41,8 +41,11 @@ Logging:
         - scan.updated (INFO): Item metadata written to Kodi
         - scan.breaker (WARNING): A provider tripped, or every provider the
           enabled fields need is down so the pass stops (scope="all")
-        - scan.tvdb_auth (ERROR): TVDB rejected the add-on's credentials;
-          TVDB is disabled for the cycle, the scan continues
+        - scan.tvdb_auth, scan.fanart_auth (ERROR): TheTVDB or fanart.tv
+          rejected the add-on's credentials; that provider is disabled for
+          the cycle, the scan continues
+        - scan.art_gated (DEBUG): An art field is left alone before any fetch
+          (verdict: local, other, changed; see art.art_gate)
         - scan.imdb_lookup_failed (ERROR): The IMDb ratings store raised
           unexpectedly; the rating is transient for that item. Logged with
           the traceback once per scan, at DEBUG after that
@@ -98,15 +101,25 @@ from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import load_preset
 from resources.lib.data.sources import kodi_ui_language
 from resources.lib.data.tracker import (
+    REASON_CHANGED_OUTSIDE,
     REASON_FILL_ONLY,
+    REASON_LOCAL_ART,
     REASON_LOCKED,
     REASON_NFO,
     REASON_NOTHING,
+    REASON_OTHER_ART,
     REASON_UNCHANGED,
     REASON_UNCHECKED,
     REASON_UPDATED,
     TrackerDB,
 )
+from resources.lib.engine.art import (
+    ART_FIELDS,
+    GATE_CHANGED,
+    GATE_LOCAL,
+    art_gate,
+)
+from resources.lib.engine.artsources import image_language, resolve_art
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import (
     DERIVED,
@@ -198,8 +211,9 @@ def settings_fingerprint(
     for ratings; for title and plot the folder's language and fallback
     language ("" when it has none), plus the provider and fallback orders on
     shows and episodes (movies ask TMDB only), plus the library's title mode
-    for a show's or movie's title; for every other field, one TMDB step, the
-    folder language.
+    for a show's or movie's title; an episode thumb depends on no setting; a
+    poster on the poster source, the folder language and the fallback
+    language; for every other field, one TMDB step, the folder language.
     """
     if field in RATING_FIELDS:
         inputs: dict[str, Any] = {
@@ -228,6 +242,14 @@ def settings_fingerprint(
         title_mode = settings.get("title_mode", TITLE_LANGUAGE)
         if field == "title" and media_type != "episode" and title_mode != TITLE_LANGUAGE:
             inputs["title_mode"] = title_mode
+    elif field == "thumb":
+        inputs = {}
+    elif field == "poster":
+        inputs = {
+            "poster_source": settings.get("poster_source", "tmdb"),
+            "folder_language": folder_language,
+            "fallback_language": fallback_language.strip(),
+        }
     else:
         inputs = {"folder_language": folder_language}
     return json.dumps(inputs, sort_keys=True)
@@ -514,6 +536,10 @@ def _resolve_fields(
         elif f in _CHAIN_FIELDS:
             current = None if f in reopened else item.get(f)
             outcome, provider = _text_chain(ctx, text, f, folder_lang, fallback_lang, current)
+        elif f in ART_FIELDS:
+            outcome, provider = resolve_art(
+                ctx, text, primary, ids, identity, f, folder_lang, fallback_lang,
+            )
         else:
             value = None if tmdb_transient else tmdb_data.get(key)
             outcome = FieldOutcome(transient=tmdb_transient, value=value, from_fallback=False)
@@ -598,6 +624,93 @@ def _field_reason(
     if f in RATING_FIELDS and item.get("ratings"):
         return REASON_UNCHANGED
     return REASON_NOTHING
+
+
+def _image_languages(language: str, fallback_lang: str) -> tuple[str, ...]:
+    """The languages to ask posters in: the folder's, then its fallback when
+    different (textless ones always come along)."""
+    codes = [image_language(language)]
+    if fallback_lang.strip():
+        fallback = image_language(fallback_lang)
+        if fallback not in codes:
+            codes.append(fallback)
+    return tuple(codes)
+
+
+def _art_reason(
+    tracker: TrackerDB, media_type: str, identity: str, field: str,
+    fs_map: dict[str, dict[str, Any]], reason: str,
+) -> None:
+    """Record why an art field is left alone, unless already recorded: a
+    gated field is met again on every scan."""
+    if (fs_map.get(field) or {}).get("last_reason") != reason:
+        tracker.record_field_reason(media_type, identity, field, reason)
+
+
+def _gate_art(
+    tracker: TrackerDB,
+    media_type: str,
+    identity: str,
+    item: dict[str, Any],
+    fs_map: dict[str, dict[str, Any]],
+    decisions: dict[str, str],
+) -> None:
+    """Take the art fields MetaMender may not touch out of ``decisions``
+    (art.art_gate) before anything is fetched, and record why.
+
+    The URL Kodi holds at MetaMender's first look is stored as first seen,
+    so a poster changed since, and not by MetaMender, is recognised as the
+    user's choice and locked for good. A gated field is never sampled, so
+    it does not settle into FINAL and is met here on every scan. A FINAL
+    field is not looked at: nothing would be fetched for it anyway.
+    """
+    gated = [f for f in sorted(ART_FIELDS & decisions.keys()) if decisions[f] != FINAL]
+    if not gated:
+        return
+    keep = tracker.get_keep(media_type, identity)
+    for f in gated:
+        current = kodi_form(item.get(f) or "")
+        current_fp = fingerprint(current)
+        first_fp = tracker.get_first_fp(media_type, identity, f)
+        if first_fp is None:
+            tracker.set_first_fp(media_type, identity, f, current_fp)
+        written_fp = ((keep.get(f) or {}).get("written_fp")
+                      or (fs_map.get(f) or {}).get("written_value"))
+        verdict = art_gate(f, current, current_fp, first_fp, written_fp)
+        if verdict is None:
+            continue
+        del decisions[f]
+        if verdict == GATE_CHANGED:
+            tracker.set_locked(media_type, identity, f, True)
+            reason = REASON_CHANGED_OUTSIDE
+        else:
+            reason = REASON_LOCAL_ART if verdict == GATE_LOCAL else REASON_OTHER_ART
+        _art_reason(tracker, media_type, identity, f, fs_map, reason)
+        log.debug(
+            "Art left as it is", event="scan.art_gated", identity=identity,
+            field=f, verdict=verdict,
+        )
+
+
+def _drop_nfo_art(
+    tracker: TrackerDB,
+    media_type: str,
+    identity: str,
+    item: dict[str, Any],
+    fs_map: dict[str, dict[str, Any]],
+    decisions: dict[str, str],
+) -> None:
+    """On an NFO item, take out the art fields the NFO rule would refuse to
+    write (protect.may_write: neither empty nor a placeholder, nor
+    MetaMender's own), so no request is made for them."""
+    for f in sorted(ART_FIELDS & decisions.keys()):
+        if decisions[f] == FINAL:
+            continue
+        current = kodi_form(item.get(f) or "")
+        if may_write(True, current, (fs_map.get(f) or {}).get("written_value")):
+            continue
+        del decisions[f]
+        _art_reason(tracker, media_type, identity, f, fs_map, REASON_NFO)
 
 
 def _keep_originals(
@@ -878,6 +991,7 @@ def _library_pass(
         fallback_order=lib_settings["fallback_order"],
         cert=_cert_config(base.media_type, fields, lib_settings, base.breaker, monitor, gate),
         title_mode=lib.title_mode,
+        poster_source=lib_settings["poster_source"],
     )
     candidates = candidate_fields(base.media_type, fields)
     if ctx.cert is not None:
@@ -1018,6 +1132,8 @@ def run_scan(
             tracker.get_tracked_show_ids()
             if media_type.name == "episode" else frozenset()
         ),
+        fanart_client_key=str(settings.get("fanart_client_key") or ""),
+        fanart_cache={},
     )
     # Built on a library's first item, so a library the pass never meets
     # costs nothing (and logs no certification error).
@@ -1128,9 +1244,10 @@ def run_scan(
             continue
 
         # A folder without a configured language is fetched in Kodi's
-        # interface language, a guess, so its text only fills empty fields.
+        # interface language, a guess, so its text and posters only fill
+        # empty fields.
         language = folder_language or ui_language
-        fill_only = frozenset() if folder_language else LANGUAGE_FIELDS
+        fill_only = frozenset() if folder_language else LANGUAGE_FIELDS | {"poster"}
         if fill_only and "language_unconfigured" not in ctx.logged_once:
             ctx.logged_once.add("language_unconfigured")
             log.info(
@@ -1184,12 +1301,14 @@ def run_scan(
         fields = item_fields(candidates, media_type, identity)
         # A locked field is the user's: never fetched, written or sampled,
         # on Update now and after a settings change too. Its reason is
-        # recorded each scan it would have been considered.
+        # recorded each scan it would have been considered, except art the
+        # scan itself locked: "changed outside MetaMender" says more.
         locked = (tracker.locked_fields(media_type.name, identity) - RATING_FIELDS) & set(fields)
         if locked:
             fields = [f for f in fields if f not in locked]
             for f in sorted(locked):
-                tracker.record_field_reason(media_type.name, identity, f, REASON_LOCKED)
+                if (fs_map.get(f) or {}).get("last_reason") != REASON_CHANGED_OUTSIDE:
+                    tracker.record_field_reason(media_type.name, identity, f, REASON_LOCKED)
         # A field sampled under other settings (or before fingerprints were
         # stored) is re-checked as if never sampled, and re-baselined once it
         # answers. A transient keeps the old fingerprint, so it stays due.
@@ -1249,6 +1368,7 @@ def run_scan(
                 decisions[f] = FETCH_NOW
                 refills.add(f)
 
+        _gate_art(tracker, media_type.name, identity, item, fs_map, decisions)
         due = any(d == FETCH_NOW for d in decisions.values())
 
         # NFO detection touches the share, so it runs once, and only for an
@@ -1268,6 +1388,9 @@ def run_scan(
                 stats["unreachable"] += 1
                 continue
             nfo_managed = state == NFO
+            if nfo_managed:
+                _drop_nfo_art(tracker, media_type.name, identity, item, fs_map, decisions)
+                due = any(d == FETCH_NOW for d in decisions.values())
 
         ids = _resolve_ids(
             ctx, item, identity, kodi_ids, stored, language,
@@ -1332,14 +1455,17 @@ def run_scan(
             stats["transient"] += 1
             continue
 
+        # Non-final fields are refreshed (overwrite-on-diff); final ones are not.
+        nonfinal = [f for f, d in decisions.items() if d != FINAL]
+        if "poster" in nonfinal:
+            # The primary fetch brings the poster candidates along.
+            ctx = replace(ctx, image_languages=_image_languages(language, fallback_lang))
         tmdb_lang = tmdb_language(language)
         fetch_primary = (
             _fetch_episode if media_type.name == "episode" else _fetch_movie_or_show
         )
         primary = fetch_primary(ctx, item, kodi_id, title, identity, ids, tmdb_lang)
 
-        # Non-final fields are refreshed (overwrite-on-diff); final ones are not.
-        nonfinal = [f for f, d in decisions.items() if d != FINAL]
         reopened = _reopened_fallbacks(item, fs_map, rebaseline)
         outcomes, values, providers = _resolve_fields(
             ctx, item, identity, primary, ids, language, fallback_lang, nonfinal,

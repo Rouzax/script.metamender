@@ -20,7 +20,7 @@ Logging:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from resources.lib.constants import FANART_BASE_URL
 from resources.lib.engine.art import Poster
@@ -82,7 +82,7 @@ def _posters(items: Any) -> List[Poster]:
 
 
 def fetch_movie_posters(
-    tmdb_id: Optional[int], imdb_id: Optional[str],
+    tmdb_id: Optional[Union[int, str]], imdb_id: Optional[str],
     project_key: str, client_key: str,
 ) -> Optional[List[Poster]]:
     """Movie posters, TMDB id preferred over IMDb id. [] when fanart.tv has
@@ -107,7 +107,7 @@ def fetch_movie_posters(
 
 
 def fetch_show_posters(
-    tvdb_id: int, project_key: str, client_key: str,
+    tvdb_id: Union[int, str], project_key: str, client_key: str,
 ) -> Optional[Dict[str, Any]]:
     """Show posters as {"show": [Poster], "seasons": {season: [Poster]}}
     (season-agnostic "all" posters are dropped), or None on 404. Raises

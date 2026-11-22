@@ -84,9 +84,11 @@ def _fetch_movie_or_show(
         tmdb_data = TRANSIENT
     elif tmdb_id:
         fetch = tmdb.fetch_movie if ctx.media_type.name == "movie" else tmdb.fetch_tvshow
+        # Poster candidates ride along on the same request, only when asked.
+        images = {"image_languages": ctx.image_languages} if ctx.image_languages else {}
         tmdb_data = _call_provider(
             "tmdb",
-            lambda: fetch(tmdb_id, ctx.tmdb_api_key, language),
+            lambda: fetch(tmdb_id, ctx.tmdb_api_key, language, **images),
             ctx, identity,
         )
 
