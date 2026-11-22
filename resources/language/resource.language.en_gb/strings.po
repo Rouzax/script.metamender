@@ -1160,7 +1160,7 @@ msgid "Where plots and titles come from"
 msgstr ""
 
 msgctxt "#32639"
-msgid "The scan stops after the item it is working on. The next scan carries on from there."
+msgid "The scan stops after the current item."
 msgstr ""
 
 msgctxt "#32640"
