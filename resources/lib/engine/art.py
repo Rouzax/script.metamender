@@ -108,6 +108,18 @@ def tmdb_image_url(path: str) -> str:
     return TMDB_IMAGE_BASE + path
 
 
+def _image_key(url: str) -> str:
+    """What identifies an image: TMDB serves one file at several sizes
+    (``/t/p/w500/abc.jpg``, ``/t/p/original/abc.jpg``), so its key is the
+    file path after the size segment; any other URL is its own key."""
+    if classify(url) == WEB_TMDB:
+        parts = urllib.parse.urlparse(url).path.split("/")
+        # ["", "t", "p", "<size>", "<file path>"...]
+        if len(parts) > 4 and parts[1:3] == ["t", "p"]:
+            return "tmdb:" + "/".join(parts[4:])
+    return url
+
+
 def weighted_score(avg: float, count: int, prior_mean: float) -> float:
     return (count * avg + TMDB_PRIOR_VOTES * prior_mean) / (count + TMDB_PRIOR_VOTES)
 
@@ -157,8 +169,9 @@ def pick_poster(
 
     The first tier with candidates wins: library language before fallback
     language before textless, and within a language the chosen source before
-    the other one. ``fanart`` is called at most once, and only when a tier or
-    the unrated check needs it.
+    the other one. An unrated pick does not replace a rated current poster
+    in the same language group. ``fanart`` is called at most once, and only
+    when a tier or the unrated check needs it.
     """
     fetched: List[Any] = []
 
@@ -168,9 +181,16 @@ def pick_poster(
         return fetched[0]
 
     current_url = unwrap(current)
+    current_key = _image_key(current_url) if current_url else ""
+
+    def is_current(poster: Poster) -> bool:
+        return bool(current_key) and _image_key(poster.url) == current_key
 
     def pick_from(poster: Poster) -> PosterPick:
-        return PosterPick(poster.url, poster.provider, poster.lang != lang)
+        # The current poster at another size is still the current poster, so
+        # it is kept as Kodi holds it rather than rewritten.
+        url = current_url if is_current(poster) else poster.url
+        return PosterPick(url, poster.provider, poster.lang != lang)
 
     pick: Optional[Poster] = None
     for code, provider in _tiers(source, lang, fallback):
@@ -187,7 +207,7 @@ def pick_poster(
         best, best_score = ranked[0]
         pick = best
         for poster, score in ranked:
-            if poster.url == current_url and best_score - score <= POSTER_SWITCH_MARGIN[provider]:
+            if is_current(poster) and best_score - score <= POSTER_SWITCH_MARGIN[provider]:
                 pick = poster
                 break
         break
@@ -195,10 +215,17 @@ def pick_poster(
     if pick is None:
         return None
 
-    if not _is_rated(pick) and current_url and pick.url != current_url:
-        # An unrated poster says nothing against the rated one already set.
+    if not _is_rated(pick) and current_url and not is_current(pick):
+        # An unrated poster says nothing against a rated one already set in
+        # the same language group. A pick from a better group (library
+        # language over fallback over textless) still wins: language first.
+        group = pick.lang
+
+        def keeps_current(poster: Poster) -> bool:
+            return is_current(poster) and poster.lang == group and _is_rated(poster)
+
         for poster in tmdb:
-            if poster.url == current_url and _is_rated(poster):
+            if keeps_current(poster):
                 return pick_from(poster)
         # Fanart is consulted only when it already answered or the current
         # poster could be one of its images; otherwise its failure must not
@@ -208,7 +235,7 @@ def pick_poster(
             if pool is TRANSIENT:
                 return TRANSIENT
             for poster in pool:
-                if poster.url == current_url and _is_rated(poster):
+                if keeps_current(poster):
                     return pick_from(poster)
     return pick_from(pick)
 

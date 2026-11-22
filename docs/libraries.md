@@ -222,12 +222,15 @@ Two rules keep a good poster in place:
 - **A current poster stays** unless a better one clearly leads, so posters
   do not swap back and forth between two that are about as good.
 - **A poster nobody rated yet** (no votes on TMDB, no likes on fanart.tv)
-  never replaces one that has votes or likes. It can still fill an empty
-  poster.
+  never replaces one in the same language that has votes or likes. It can
+  still fill an empty poster.
 
-A poster in the fallback language or without text is checked again every
-month for about a year, so a poster in the library's language replaces it
-once one appears.
+Language comes before votes: a poster in the library's language replaces one
+in the fallback language, another language or without text even when nobody
+rated it yet, and a poster in the fallback language replaces one without
+text. A poster in the fallback language or without text is checked again
+every month for about a year, so a poster in the library's language replaces
+it once one appears.
 
 fanart.tv finds a movie by its TMDB or IMDb id and a show by its TheTVDB id.
 A show without a TheTVDB id only gets posters from TMDB.

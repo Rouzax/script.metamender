@@ -162,3 +162,41 @@ def test_pick_poster_fanart_called_once_for_tier_and_unrated_check():
     pick = pick_poster([], fanart, "tmdb", "nl", None,
                        "https://assets.fanart.tv/fanart/x.jpg")
     assert pick.url == "f_nl" and calls == [1]
+
+
+def test_pick_poster_library_language_beats_rated_fallback_current():
+    tm = [Poster("t_en", "tmdb", "en", (7.9, 18)), Poster("t_nl", "tmdb", "nl", (0.0, 0))]
+    pick = pick_poster(tm, list, "tmdb", "nl", "en", "t_en")
+    assert pick.url == "t_nl" and pick.from_fallback is False
+
+
+def test_pick_poster_library_language_beats_rated_other_language_current():
+    tm = [Poster("t_en", "tmdb", "en", (7.9, 18)), Poster("t_nl", "tmdb", "nl", (0.0, 0))]
+    assert pick_poster(tm, list, "tmdb", "nl", None, "t_en").url == "t_nl"
+
+
+def test_pick_poster_fallback_language_beats_rated_textless_current():
+    tm = [Poster("t_none", "tmdb", None, (7.9, 18)), Poster("t_en", "tmdb", "en", (0.0, 0))]
+    assert pick_poster(tm, list, "tmdb", "nl", "en", "t_none").url == "t_en"
+
+
+def test_pick_poster_unrated_fanart_does_not_replace_rated_tmdb_in_same_fallback_tier():
+    tm = [Poster("t_en", "tmdb", "en", (7.9, 18))]
+    fa = lambda: [Poster("f_en", "fanart", "en", (0,))]
+    assert pick_poster(tm, fa, "fanart", "nl", "en", "t_en").url == "t_en"
+
+
+_TMDB_W500 = "https://image.tmdb.org/t/p/w500/abc.jpg"
+_TMDB_ORIGINAL = "https://image.tmdb.org/t/p/original/abc.jpg"
+
+
+def test_pick_poster_same_tmdb_image_at_another_size_is_the_incumbent():
+    tm = [Poster("https://image.tmdb.org/t/p/original/top.jpg", "tmdb", "nl", (5.6, 30)),
+          Poster(_TMDB_ORIGINAL, "tmdb", "nl", (5.5, 30))]
+    assert pick_poster(tm, list, "tmdb", "nl", None, _TMDB_W500).url == _TMDB_W500
+
+
+def test_pick_poster_unrated_pick_keeps_rated_current_at_another_size():
+    tm = [Poster(_TMDB_ORIGINAL, "tmdb", "nl", (7.9, 18))]
+    fa = lambda: [Poster("f_nl", "fanart", "nl", (0,))]
+    assert pick_poster(tm, fa, "fanart", "nl", None, _TMDB_W500).url == _TMDB_W500

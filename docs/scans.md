@@ -58,7 +58,8 @@ Some exceptions:
   every month for about a year, in case the real one appears.
 - **A text from the fallback language**, and a poster in the fallback
   language or without text, is checked again every month for about a year, so
-  a version in your own language replaces it when one appears.
+  a version in your own language replaces it when one appears. A poster in
+  your own language replaces it even before anyone has rated that poster.
 - **A season's poster** follows the season's age: the air date of its first
   episode.
 - **A field MetaMender could not check** (a site did not answer) is tried
