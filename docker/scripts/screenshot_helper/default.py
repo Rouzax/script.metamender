@@ -74,11 +74,14 @@ class _FocusedSetup(sw.SetupWindow):
     """Opens with the scene's row selected. "scroll": "end" first selects
     the last row, so the list scrolls up to the focused row from below and
     shows the rows after it rather than the ones before. "question" puts
-    the save question of Cancel with changed libraries over the window."""
+    the save question of Cancel with changed libraries over the window;
+    "pick" activates the focused row as a click does, which opens
+    MetaMender's picker over the window."""
 
     focus_key: str | None = None
     scroll_end: bool = False
     question: bool = False
+    pick: bool = False
 
     def onInit(self) -> None:
         self._render()
@@ -93,6 +96,11 @@ class _FocusedSetup(sw.SetupWindow):
         if self.scroll_end:
             self._list().selectItem(len(rows) - 1)
         self._list().selectItem(index)
+        if self.pick:
+            # From a thread, as the question above. Closing the picker
+            # answers "cancelled", which changes nothing.
+            threading.Thread(target=self.controller.activate, args=(index,),
+                             daemon=True).start()
 
     def _ask(self) -> None:
         # The question on_cancel asks; its answer is thrown away.
@@ -117,6 +125,7 @@ def setup(scene: dict) -> None:
     window.focus_key = scene.get("focus")
     window.scroll_end = scene.get("scroll") == "end"
     window.question = bool(scene.get("question"))
+    window.pick = bool(scene.get("pick"))
     _watch(functools.partial(_close_setup, window))
     window.doModal()
     del window

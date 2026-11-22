@@ -11,6 +11,15 @@
     "kind": "setup",
     "step": "libraries"
   },
+  "setup-library-menu": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "active": "script-metamender-select.xml",
+    "kind": "setup",
+    "step": "libraries",
+    "focus": "smb://nas/media/Movies/",
+    "pick": true
+  },
   "setup-library-page": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
@@ -19,6 +28,16 @@
     "library": "Kids Movies",
     "focus": "title_mode",
     "scroll": "end"
+  },
+  "setup-language-picker": {
+    "group": "setup",
+    "window": "script-metamender-setup.xml",
+    "active": "script-metamender-select.xml",
+    "kind": "setup",
+    "step": "libraries",
+    "library": "Kids Movies",
+    "focus": "language",
+    "pick": true
   },
   "setup-library-page-new": {
     "group": "setup",

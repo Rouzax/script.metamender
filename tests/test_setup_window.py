@@ -61,11 +61,12 @@ class FakeDialogs:
         return self.inputs.pop(0) if self.inputs else ""
 
     def select(self, heading: str, options: list[str], preselect: int,
-               details: list[str] | None = None) -> int:
+               details: list[str] | None = None, marked: bool = True) -> int:
         self.headings.append(heading)
         self.options = options
         self.preselect = preselect
         self.details = details
+        self.marked = marked
         return self.selects.pop(0) if self.selects else -1
 
     def ok(self, heading: str, message: str) -> None:
@@ -227,6 +228,8 @@ def test_including_a_library_opens_its_page(ids):
     c.flow.current = "libraries"
     c.activate(1)
     assert dialogs.options == ["#32663", "#32664"] and dialogs.headings == ["Films"]
+    # Actions, not a choice: no option shows as the current one.
+    assert dialogs.marked is False
     assert _lib(c, "/c/").included and c.state.open_library == "/c/"
     assert c.view == PAGE and c.heading() == "Films"
 
@@ -398,27 +401,19 @@ def test_text_order_picker_lists_the_options_with_their_sub_lines(ids):
     assert dialogs.details is None
 
 
-def test_select_with_sub_lines_uses_detail_items(monkeypatch):
+def test_select_opens_metamenders_own_picker(monkeypatch):
     calls = []
 
-    class Dialog:
-        def select(self, heading, items, preselect=-1, useDetails=False):
-            calls.append((items, preselect, useDetails))
-            return 1
+    def show_select(heading, options, preselect, details=None, marked=True):
+        calls.append((heading, options, preselect, details, marked))
+        return 1
 
-    class Item:
-        def __init__(self, label, label2="", offscreen=False):
-            self.label, self.label2 = label, label2
-
-    monkeypatch.setattr(setup_window.xbmcgui, "Dialog", Dialog)
-    monkeypatch.setattr(setup_window.xbmcgui, "ListItem", Item)
+    monkeypatch.setattr(setup_window, "show_select", show_select)
     dialogs = setup_window.Dialogs()
     assert dialogs.select("h", ["a", "b"], 0, ["sub a", "sub b"]) == 1
-    items, preselect, details = calls[0]
-    assert [(i.label, i.label2) for i in items] == [("a", "sub a"), ("b", "sub b")]
-    assert details is True and preselect == 0
-    dialogs.select("h", ["a"], 0)
-    assert calls[1] == (["a"], 0, False)
+    dialogs.select("h", ["a"], 0, marked=False)
+    assert calls == [("h", ["a", "b"], 0, ["sub a", "sub b"], True),
+                     ("h", ["a"], 0, None, False)]
 
 
 def test_title_mode_rows(ids):
@@ -715,6 +710,16 @@ def test_list_position_starts_on_the_first_row_that_is_no_heading():
     assert list_position("page:/c/", "page:/c/", 2, rows) == 2
     assert list_position("page:/c/", "page:/c/", 9, rows) == 2
     assert list_position("libraries", "libraries", -1, rows) == 0
+
+
+def test_list_follows_the_explanation_whatever_its_length():
+    # The explanation box takes the height of its text, and the list sits
+    # below it in one grouplist, so a one-line explanation leaves no gap.
+    xml = _SKIN.read_text(encoding="utf-8")
+    box = re.search(r'<control type="textbox">.*?</control>', xml, re.DOTALL).group(0)
+    assert re.search(r'<height min="\d+" max="\d+">auto</height>', box)
+    column = xml[xml.index('<control type="grouplist" id="%d">' % setup_window._COLUMN):]
+    assert column.index('<control type="textbox">') < column.index('<control type="list" id="100">')
 
 
 def test_skin_has_a_dot_slot_per_wizard_step():

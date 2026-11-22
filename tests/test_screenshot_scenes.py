@@ -25,9 +25,13 @@ KINDS = {"setup", "details", "attention", "progress", "corner-bar", "context"}
 
 
 def test_every_window_has_a_scene():
+    """A window shown only over another (the picker over setup) is the
+    scene's active window; the shot is cropped to the one beneath."""
     windows = {path.name for path in WINDOWS.glob("*.xml")}
     assert windows
-    assert windows <= {scene["window"] for scene in SCENES.values()}
+    shown = {scene["window"] for scene in SCENES.values()}
+    shown |= {scene["active"] for scene in SCENES.values() if scene.get("active")}
+    assert windows <= shown
 
 
 def test_every_scene_names_a_shipped_window_or_a_native_one():
@@ -89,6 +93,18 @@ def test_question_scenes_wait_for_kodis_question_over_setup():
         assert scene["kind"] == "setup", name
         assert scene["window"] == "script-metamender-setup.xml", name
         assert scene.get("active") == "yesnodialog", name
+
+
+def test_picker_scenes_open_the_picker_from_a_row_over_setup():
+    """The helper activates the focused row, which opens MetaMender's
+    picker the way a click does."""
+    picking = [name for name, scene in SCENES.items() if scene.get("pick")]
+    assert picking
+    for name in picking:
+        scene = SCENES[name]
+        assert scene["kind"] == "setup" and scene.get("focus"), name
+        assert scene["window"] == "script-metamender-setup.xml", name
+        assert scene.get("active") == "script-metamender-select.xml", name
 
 
 def test_a_scene_shows_the_notice_for_unread_1_1_settings():

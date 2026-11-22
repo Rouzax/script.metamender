@@ -48,6 +48,8 @@ Choose a library to change it:
 - **Leave out** stops MetaMender working there. See
   [Leaving a library out](#leaving-a-library-out).
 
+![The choices for an included library](screenshots/setup/setup-library-menu.png)
+
 Including a library changes nothing by itself: a library you include for the
 first time has every field switched off, so MetaMender does not write to it
 until you tick something on its page. Its settings are saved when you choose **Finish** in
@@ -74,6 +76,8 @@ has a short page. **Done** (or Back) returns to the list.
 **Language**
 :   The language MetaMender writes plots, titles, taglines and genres in for
     this library. A new library starts with Kodi's interface language.
+
+    ![Picking the language of a library](screenshots/setup/setup-language-picker.png)
 
 **Fallback language**
 :   Optional. When a plot or episode title does not exist in the library's

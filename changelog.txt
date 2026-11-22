@@ -27,6 +27,9 @@ New Features:
     read. A 1.1 setting for a folder above a library applies to it.
   - Back or Cancel on the library list with unsaved changes asks
     whether to save them.
+  - Setup's lists of options (a language, a country, what to do with a
+    library) open in MetaMender's own window instead of Kodi's, so they
+    look the same in every skin.
 
 Bug Fixes:
   - Fixed: the service and the add-on failed to start on Kodi builds

@@ -54,6 +54,7 @@ from resources.lib.providers.tmdb import (
     KEY_UNCHECKED,
     check_api_key,
 )
+from resources.lib.ui.select_window import show_select
 from resources.lib.ui.setup_model import (
     FALLBACK_ORDER_OPTIONS,
     LIBRARIES,
@@ -86,6 +87,7 @@ log = get_logger('setup')
 
 # Window XML and control ids (resources/skins/Default/1080i).
 _XML = "script-metamender-setup.xml"
+_COLUMN = 30
 _LIST = 100
 _NEXT = 21
 _BACK = 22
@@ -162,21 +164,18 @@ def _option_label(text: tuple[int, ...], values: tuple[Any, ...], current: Any) 
 
 
 class Dialogs:
-    """The stock Kodi dialogs the steps open on top of the window."""
+    """The dialogs the steps open on top of the window: MetaMender's own
+    picker, and Kodi's keyboard and message dialogs."""
 
     def input(self, heading: str, default: str) -> str:
         return xbmcgui.Dialog().input(heading, default)
 
     def select(self, heading: str, options: list[str], preselect: int,
-               details: Optional[list[str]] = None) -> int:
+               details: Optional[list[str]] = None, marked: bool = True) -> int:
         """The picked index, -1 when cancelled. ``details`` puts a sub-line
-        under each option."""
-        if details is None:
-            items: list[Any] = list(options)
-            return xbmcgui.Dialog().select(heading, items, preselect=preselect)
-        items = [xbmcgui.ListItem(label, detail, offscreen=True)
-                 for label, detail in zip(options, details)]
-        return xbmcgui.Dialog().select(heading, items, preselect=preselect, useDetails=True)
+        under each option; ``marked`` False lists actions rather than a
+        choice with a current option."""
+        return show_select(heading, options, preselect, details, marked)
 
     def ok(self, heading: str, message: str) -> None:
         xbmcgui.Dialog().ok(heading, message)
@@ -407,7 +406,8 @@ class SetupController:
             return
         lib = libraries[index]
         first = 32665 if lib.included else 32663
-        picked = self._dialogs.select(self._label(lib), [lang(first), lang(32664)], 0)
+        picked = self._dialogs.select(self._label(lib), [lang(first), lang(32664)], 0,
+                                      marked=False)
         if picked == 1:
             # The settings stay, so including the library again restores them.
             self.state.libraries.replace(replace(lib, included=False))
