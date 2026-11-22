@@ -11,7 +11,9 @@ New Features:
     then the fallback language, then a poster without text; the best
     voted TMDB poster or most liked fanart.tv poster wins, and a current
     poster stays unless a better one clearly leads. A poster without
-    votes or likes never replaces one that has them.
+    votes or likes never replaces one in the same language that has them;
+    a poster in the library's language replaces one in another language
+    or without text even before anyone rated it.
   - Episode thumbs, per library: with Episode thumbs ticked, a thumb Kodi
     grabbed from the video (washed out on HDR files), a broken link or an
     empty thumb gets TMDB's episode still, or TheTVDB's episode image when
@@ -28,6 +30,16 @@ New Features:
     refreshes the season posters too.
   - Both ticks are off for every library, including libraries set up
     before this version.
+  - Manual and help at the top of the settings: a window with a QR code
+    and the address of the online manual, to open on a phone or computer.
+
+Bug Fixes:
+  - Stop scan takes effect before the next part of the scan asks Kodi for
+    its list of items, which on a large library takes seconds, and a stop
+    that arrives between two parts ends the scan there.
+  - The scan that runs when you open MetaMender from Program add-ons no
+    longer ends at once because of a stop left over from an earlier scan,
+    and it stops when Stop scan is chosen.
 
 v1.2.1 (2026-11-22)
 -------------------
