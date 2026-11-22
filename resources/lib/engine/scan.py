@@ -692,25 +692,28 @@ def _gate_art(
         )
 
 
-def _drop_nfo_art(
+def _drop_protected_art(
     tracker: TrackerDB,
     media_type: str,
     identity: str,
     item: dict[str, Any],
     fs_map: dict[str, dict[str, Any]],
     decisions: dict[str, str],
+    protected: frozenset[str],
+    reason: str,
 ) -> None:
-    """On an NFO item, take out the art fields the NFO rule would refuse to
-    write (protect.may_write: neither empty nor a placeholder, nor
-    MetaMender's own), so no request is made for them."""
-    for f in sorted(ART_FIELDS & decisions.keys()):
+    """Take out the ``protected`` art fields (all of them on an NFO item,
+    the fill-only ones in a folder without a language) that _plan_writes
+    would refuse to write (protect.may_write: neither empty nor a
+    placeholder, nor MetaMender's own), so no request is made for them."""
+    for f in sorted(ART_FIELDS & protected & decisions.keys()):
         if decisions[f] == FINAL:
             continue
         current = kodi_form(item.get(f) or "")
         if may_write(True, current, (fs_map.get(f) or {}).get("written_value")):
             continue
         del decisions[f]
-        _art_reason(tracker, media_type, identity, f, fs_map, REASON_NFO)
+        _art_reason(tracker, media_type, identity, f, fs_map, reason)
 
 
 def _keep_originals(
@@ -1369,6 +1372,8 @@ def run_scan(
                 refills.add(f)
 
         _gate_art(tracker, media_type.name, identity, item, fs_map, decisions)
+        _drop_protected_art(tracker, media_type.name, identity, item, fs_map, decisions,
+                            fill_only, REASON_FILL_ONLY)
         due = any(d == FETCH_NOW for d in decisions.values())
 
         # NFO detection touches the share, so it runs once, and only for an
@@ -1389,7 +1394,8 @@ def run_scan(
                 continue
             nfo_managed = state == NFO
             if nfo_managed:
-                _drop_nfo_art(tracker, media_type.name, identity, item, fs_map, decisions)
+                _drop_protected_art(tracker, media_type.name, identity, item, fs_map,
+                                    decisions, ART_FIELDS, REASON_NFO)
                 due = any(d == FETCH_NOW for d in decisions.values())
 
         ids = _resolve_ids(

@@ -34,19 +34,18 @@ def _fanart_answer(
 ) -> Any:
     """fanart.tv's answer through the per-scan cache, or TRANSIENT.
 
-    fanart.tv is optional: once it has rejected the keys this cycle it counts
-    as answering "nothing", so posters settle on TMDB's instead of waiting a
-    whole cycle on a key the user may never fix.
+    A disabled fanart.tv, tripped or with its keys rejected, is not an
+    answer: a poster whose pick needs it waits with its clock untouched,
+    as text fields do while TheTVDB is out. A pick TMDB settles on its own
+    never asks (art.pick_poster is lazy).
     """
     if key in ctx.fanart_cache:
         return ctx.fanart_cache[key]
     if ctx.breaker.is_disabled("fanart"):
-        answer: Any = TRANSIENT
-    else:
-        answer = _call_provider("fanart", fetch, ctx, identity)
-    if answer is TRANSIENT:
-        return None if "fanart" in ctx.breaker.auth_rejected() else TRANSIENT
-    ctx.fanart_cache[key] = answer
+        return TRANSIENT
+    answer = _call_provider("fanart", fetch, ctx, identity)
+    if answer is not TRANSIENT:
+        ctx.fanart_cache[key] = answer
     return answer
 
 

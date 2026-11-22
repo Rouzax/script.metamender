@@ -487,16 +487,63 @@ def test_fanart_auth_failure_does_not_stop_scan(
     second_fs = _fs(tracker, MOVIE, second)
     tracker.close()
 
+    # One rejected call; the second movie does not ask again.
     assert mock_fanart.call_count == 1
     assert breaker.auth_rejected() == ["fanart"]
     assert not breaker.is_disabled("tmdb")
     assert stats["aborted"] is False
     assert stats["tvdb_auth_failed"] is False
-    posters = [c.kwargs.get("poster") for c in mock_update.call_args_list]
-    assert posters == [NL_POSTER, NL_POSTER]
-    assert _written(mock_update, "plot") == "Great movie"
-    assert _count(first_fs, "poster") == 1
-    assert _count(second_fs, "poster") == 1
+    # The TMDB-only field is written; posters needing fanart.tv wait.
+    assert [c.kwargs.get("plot") for c in mock_update.call_args_list] == [
+        "Great movie", "Great movie"]
+    assert _written(mock_update, "poster") is None
+    assert _count(first_fs, "plot") == 1
+    assert _count(first_fs, "poster") == 0
+    assert _count(second_fs, "poster") == 0
+    assert _reason(first_fs, "poster") == REASON_UNCHECKED
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_fanart_auth_failure_leaves_tmdb_answered_pick_alone(
+    mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    """A TMDB-source library whose language tier TMDB answers never needs
+    fanart.tv, so a rejection earlier in the cycle changes nothing."""
+    item = _movie("")
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
+    breaker = CircuitBreaker()
+    breaker.disable("fanart", auth=True)
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH), [item], breaker=breaker)
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    mock_fanart.assert_not_called()
+    assert _written(mock_update, "poster") == NL_POSTER
+    assert _count(fs_map, "poster") == 1
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=False)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_rejected_poster_write_leaves_clock_and_provenance(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    item = _movie(EN_POSTER)
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    keep = tracker.get_keep("movie", compute_identity(item, MOVIE))
+    tracker.close()
+
+    assert mock_update.call_args.kwargs["poster"] == NL_POSTER
+    assert _count(fs_map, "poster") == 0
+    assert (fs_map.get("poster") or {}).get("written_value") is None
+    assert (keep.get("poster") or {}).get("written_fp") is None
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
@@ -565,6 +612,32 @@ def test_unconfigured_language_poster_only_fills(mock_movie, mock_update, tmp_pa
     posters = [c.kwargs.get("poster") for c in mock_update.call_args_list]
     assert posters == [NL_POSTER]
     assert _reason(kept_fs, "poster") == REASON_FILL_ONLY
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_unconfigured_language_web_poster_not_fetched(
+    mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    """A poster fill-only could not replace costs no images request."""
+    item = _movie(EN_POSTER)
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "en")])
+    tracker = _make_tracker(tmp_path)
+    libs = one_library(frozenset({"poster", "plot"}), language="",
+                       poster_source=POSTER_SOURCE_FANART)
+    settings = dict(_make_settings(), ui_language="en-US")
+
+    _scan_movies(tracker, libs, [item], settings=settings)
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert mock_movie.call_count == 1
+    assert "image_languages" not in mock_movie.call_args.kwargs
+    mock_fanart.assert_not_called()
+    assert _written(mock_update, "poster") is None
+    assert _reason(fs_map, "poster") == REASON_FILL_ONLY
+    assert _count(fs_map, "poster") == 0
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)

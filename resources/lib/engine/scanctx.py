@@ -300,8 +300,9 @@ def _call_provider(
     Records breaker success on any non-raising return (including None, a real
     "nothing"). On ApiKeyError re-raises (terminal, TMDB only). On a
     ProviderAuthError (TheTVDB, fanart.tv) disables that provider for the
-    cycle, logs once, and returns ``TRANSIENT``; the scan goes on without it. On TransientProviderError records a breaker failure, logs
-    the trip once, and returns ``TRANSIENT``. When ``best_effort`` is True
+    cycle, logs once, and returns ``TRANSIENT``; the scan goes on without
+    it. On TransientProviderError records a breaker failure, logs the trip
+    once, and returns ``TRANSIENT``. When ``best_effort`` is True
     (episode ID enrichment) both TMDB exceptions are logged at scan.error and
     yield ``TRANSIENT`` without touching the breaker.
     """
@@ -309,11 +310,14 @@ def _call_provider(
     try:
         result = fn()
     except ProviderAuthError as exc:
-        if ctx.breaker.disable(exc.provider, auth=True):
-            log.exception(
+        name = exc.provider or provider
+        if ctx.breaker.disable(name, auth=True):
+            # TheTVDB's rejection is the add-on's own credentials failing and
+            # the user is told; fanart.tv is optional, its posters wait.
+            emit = log.exception if name == "tvdb" else log.warning
+            emit(
                 "Provider rejected the add-on's credentials, disabled for this cycle",
-                event="scan.{}_auth".format(exc.provider), provider=exc.provider,
-                identity=identity,
+                event="scan.{}_auth".format(name), provider=name, identity=identity,
             )
         return TRANSIENT
     except ApiKeyError:
