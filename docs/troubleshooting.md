@@ -11,11 +11,10 @@ was left alone.
 
 Sometimes, on purpose, and never where you told it not to:
 
-- **Fields you did not tick in setup** are never touched.
+- **Libraries you did not include**, and fields you did not tick for a
+  library, are never touched.
 - **An item with an NFO file** keeps its values: MetaMender only fills fields
   that are empty (and keeps refreshing what it filled itself).
-- **A folder without a language**: MetaMender only fills empty text fields
-  there (and keeps refreshing what it filled itself).
 - **Everything else** is kept in line with TMDB, TheTVDB and IMDb until the
   field is settled: a value that differs from the site is replaced. That
   includes an edit you made by hand in Kodi, if the field is checked again
@@ -26,7 +25,8 @@ Sometimes, on purpose, and never where you told it not to:
 - **When MetaMender replaced a value**, it kept the old one. **Restore
   original** in the Details window puts it back and locks the field.
 
-NFO files, or switching a field off in setup, protect values from the start.
+NFO files, leaving a library out, or switching a field off for a library,
+protect values from the start.
 
 ### Why did it leave this field alone?
 
@@ -75,22 +75,29 @@ library.
 
 - **Setup not finished, no key, or a rejected key**: a **MetaMender needs
   you** window says so when nothing plays. Choose **Open setup**.
-- **The field is switched off**: check [What to fill](setup.md#4-what-to-fill).
+- **The library is not included, or the field is switched off for it**:
+  check the [library list](libraries.md#the-library-list) and the library's
+  [What to fill](libraries.md#what-to-fill). A library you added to Kodi
+  after setup stays out until you include it.
+- **The item is in no library**: a notice says how many items that applies
+  to. See [Items in no library](libraries.md#items-in-no-library).
 - **The first scan is still running**: on a large library it takes a while;
   a notification says when it is done.
 - **Kodi was playing**: scans wait until playback stops.
 
 ### A plot or title is in the wrong language
 
-- **The folder's language is not set** or is wrong: check
-  [Folders in another language](setup.md#3-folders-in-another-language). In a
-  folder without a language MetaMender keeps existing text.
+- **The library's language is wrong**: check its
+  [Language](libraries.md#language). A library whose items are in several
+  languages works best split into one library per language.
 - **The site has no text in that language yet**: MetaMender keeps the current
   text and checks again on its schedule. The fallback language only fills
-  empty fields, so an English plot in a Dutch folder stays until a Dutch one
+  empty fields, so an English plot in a Dutch library stays until a Dutch one
   appears.
 - **Show and movie titles** are only changed with **Show and movie titles**
-  ticked.
+  ticked for the library. With **Keep the original title**, a movie or show
+  gets its title in its own language on purpose; see
+  [Titles](libraries.md#titles).
 
 ### An episode has no title or plot
 
@@ -109,16 +116,20 @@ library.
 - **Right after installing**: the IMDb Ratings module first downloads IMDb's
   data. Until that has finished, IMDb ratings wait; they appear after a later
   scan.
-- **Rating source** is set to **TMDB only**.
+- **Which rating to show** is set to **TMDB only** for the library.
 - **The item has no IMDb id**, or IMDb has no rating for it.
 
 ### An age rating looks wrong
 
-- **Wrong country**: check **Country** on the **Certifications** tab;
-  **Automatic** follows Kodi's interface language.
-- **Wrong prefix for your skin**: use **Override certification prefix**.
-- **The American rating is still there**: **Replace incorrect certifications**
-  is off, or no rating for your country was found yet.
+- **Wrong country**: check **Certification country** on the library's
+  [page](libraries.md#age-ratings); **Automatic** follows the country of
+  the library's language, and Kodi's interface language only when the
+  library's language has no country.
+- **Wrong prefix for your skin**: change **Rating prefix** on the library's
+  page.
+- **The American rating is still there**: **Replace other countries'
+  ratings** is off for the library, or no rating for your country was found
+  yet.
 - **It was converted from another country's rating**: MetaMender replaces it
   when your country's real rating appears. See [Age ratings](age-ratings.md).
 

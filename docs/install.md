@@ -53,8 +53,8 @@ not get updates automatically this way: install a newer zip yourself.
 ## After installing
 
 Nothing in your library changes yet. MetaMender waits until you have finished
-its setup: it needs your TMDB key and the languages of your library before it
-can do anything useful.
+its setup: it needs your TMDB key, and you choose which libraries it may
+work in and what it does there.
 
 - Kodi shows a **MetaMender needs you** window that says setup has not been
   finished. Choose **Open setup**.

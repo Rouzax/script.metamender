@@ -6,16 +6,22 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from resources.lib.data.libraries import Library, LibraryConfig
 from resources.lib.service import manual
+
+_LIBRARIES = LibraryConfig([
+    Library(path="smb://nas/Movies/", label="Movies", included=True, language="en-US",
+            fallback_language="", toggles=frozenset({"ratings"}), rating_source=0),
+    Library(path="smb://nas/Kids/", label="Kids", included=False, language="en-US",
+            fallback_language="", toggles=frozenset({"ratings"}), rating_source=0),
+])
 
 
 def _settings(**overrides: Any) -> Dict[str, Any]:
     """Build a complete-enough settings dict for manual.run()."""
     base: Dict[str, Any] = {
         "tmdb_api_key": "k",
-        "rating_source": 0,
-        "text_source_order": 0,
-        "enabled_fields": frozenset({"plot"}),
+        "ui_language": "en-US",
         "stale_threshold_days": 365,
         "rate_limit": 0.25,
         "scan_interval": 24,
@@ -36,11 +42,10 @@ def patched(monkeypatch: pytest.MonkeyPatch) -> Dict[str, MagicMock]:
     monkeypatch.setattr(manual, "TrackerDB", tracker_cls)
     monkeypatch.setattr(manual, "run_scan", run_scan)
     tracker.get_show_id_map = MagicMock(return_value={})
-    monkeypatch.setattr(manual, "load_source_config", MagicMock(return_value={}))
+    sync = MagicMock(return_value=_LIBRARIES)
+    monkeypatch.setattr(manual, "_sync_libraries", sync)
+    monkeypatch.setattr(manual, "_prepare_imdb_ratings", MagicMock(return_value=False))
     monkeypatch.setattr(manual, "_get_db_path", MagicMock(return_value=":memory:"))
-    monkeypatch.setattr(
-        manual, "_get_sources_config_path", MagicMock(return_value="sources.json")
-    )
     monkeypatch.setattr(manual, "notify", MagicMock())
     monkeypatch.setattr(manual, "acquire_scan_lock", MagicMock(return_value=True))
     monkeypatch.setattr(manual, "release_scan_lock", MagicMock())
@@ -55,6 +60,7 @@ def patched(monkeypatch: pytest.MonkeyPatch) -> Dict[str, MagicMock]:
         "tracker": tracker,
         "tracker_cls": tracker_cls,
         "run_scan": run_scan,
+        "sync": sync,
     }
 
 
@@ -198,3 +204,22 @@ def test_manual_working_key_clears_the_problem(monkeypatch, patched):
     patched["run_scan"].return_value = {"updated": 0, "tmdb_answered": True}
     manual.run()
     assert "key_rejected" not in _open_problems(store)
+
+
+def test_manual_scans_with_the_libraries(monkeypatch, patched):
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    manual.run()
+    patched["sync"].assert_called_once_with(patched["tracker"], "en-US")
+    assert [c.kwargs["libraries"] for c in patched["run_scan"].call_args_list] == [
+        _LIBRARIES] * 3
+    prepared = manual._prepare_imdb_ratings.call_args.args[0]
+    assert [lib.path for lib in prepared] == ["smb://nas/Movies/"]
+
+
+def test_manual_without_libraries_scans_nothing(monkeypatch, patched):
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    patched["sync"].return_value = None
+    manual.run()
+    patched["run_scan"].assert_not_called()
+    patched["tracker"].begin_cycle.assert_not_called()
+    manual.release_scan_lock.assert_called_once_with()

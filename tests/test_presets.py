@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
-import xml.etree.ElementTree as ET  # the repo's own settings.xml
 from pathlib import Path
 from unittest.mock import patch
 
@@ -60,18 +58,6 @@ def test_missing_preset_fails_closed(tmp_path, monkeypatch):
 def test_unknown_country_is_none():
     assert load_preset("ES") is None
     assert load_preset("../NL") is None
-
-
-def test_country_setting_order_matches_codes():
-    root = ET.parse("resources/settings.xml").getroot()
-    country = next(s for s in root.iter("setting") if s.get("id") == "country")
-    po = Path("resources/language/resource.language.en_gb/strings.po").read_text(encoding="utf-8")
-    labels = dict(re.findall(r'msgctxt "#(\d+)"\nmsgid "(.*)"', po))
-    options = {int(o.text): labels[o.get("label")] for o in country.iter("option")}
-    assert options[0].startswith("Automatic")
-    for value, code in enumerate(COUNTRY_CODES, start=1):
-        assert options[value].startswith(code + " ")
-    assert country.findtext("default") == "0"
 
 
 def test_country_for_setting():

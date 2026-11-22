@@ -3,12 +3,18 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from resources.lib.service import actions
+from resources.lib.data.libraries import Library, LibraryConfig
+from resources.lib.service import actions, refresh
+
+_AIR = "smb://nas/Movies/Air (2023)/air.mkv"
+_MOVIES = Library(path="smb://nas/Movies/", label="Movies", included=True,
+                  language="en-US", fallback_language="", toggles=frozenset({"plots"}))
 
 
 # English msgid templates for the notification string IDs actions.py uses.
@@ -53,10 +59,12 @@ def patched(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(actions, "release_scan_lock", release)
     monkeypatch.setattr(actions.StructuredLogger, "initialize", MagicMock())
     monkeypatch.setattr(actions, "get_bool_setting", MagicMock(return_value=False))
+    ask = MagicMock(return_value=True)
+    monkeypatch.setattr(actions, "show_question", ask)
 
     return {
         "tracker": tracker, "tracker_cls": tracker_cls, "notify": notify,
-        "acquire": acquire, "release": release,
+        "acquire": acquire, "release": release, "ask": ask,
     }
 
 
@@ -66,10 +74,8 @@ def patched(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_reset_tracker_clears_field_status(patched, kodi_stubs):
-    import xbmcgui
-    xbmcgui.Dialog.return_value.yesno.return_value = True
     actions.reset_tracker()
-    assert xbmcgui.Dialog.return_value.yesno.called
+    patched["ask"].assert_called_once_with("Reset tracker?", _LANG[32361])
     patched["tracker"].clear_field_status.assert_called_once_with()
     patched["notify"].assert_called_once()
     message = patched["notify"].call_args[0][0]
@@ -78,16 +84,13 @@ def test_reset_tracker_clears_field_status(patched, kodi_stubs):
 
 
 def test_reset_tracker_cancelled_when_user_declines(patched, kodi_stubs):
-    import xbmcgui
-    xbmcgui.Dialog.return_value.yesno.return_value = False
+    patched["ask"].return_value = False
     actions.reset_tracker()
     patched["tracker_cls"].assert_not_called()
     patched["notify"].assert_not_called()
 
 
 def test_reset_tracker_closes_tracker_on_error(patched, kodi_stubs):
-    import xbmcgui
-    xbmcgui.Dialog.return_value.yesno.return_value = True
     patched["tracker"].clear_field_status.side_effect = RuntimeError("boom")
     actions.reset_tracker()  # should not raise
     patched["tracker"].close.assert_called_once_with()
@@ -96,8 +99,6 @@ def test_reset_tracker_closes_tracker_on_error(patched, kodi_stubs):
 
 def test_reset_tracker_skips_when_scan_running(patched, kodi_stubs):
     """If the scan lock is held, reset must not touch the tracker."""
-    import xbmcgui
-    xbmcgui.Dialog.return_value.yesno.return_value = True
     patched["acquire"].return_value = False
     actions.reset_tracker()
     patched["tracker_cls"].assert_not_called()
@@ -117,23 +118,21 @@ def update_patched(monkeypatch: pytest.MonkeyPatch):
     tracker_cls = MagicMock(return_value=tracker)
     notify = MagicMock()
     run_scan = MagicMock(return_value={"updated": 1})
-    get_item_by_id = MagicMock(return_value={"title": "Air", "movieid": 7})
+    get_item_by_id = MagicMock(return_value={"title": "Air", "movieid": 7, "file": _AIR})
     acquire = MagicMock(return_value=True)
     release = MagicMock()
-    load_source_config = MagicMock(return_value={"sources": [], "default_language": "en-US"})
+    load_libraries = MagicMock(return_value=LibraryConfig([_MOVIES]))
     build_show_id_map = MagicMock(return_value={7: "555"})
     tracker.get_show_id_map = build_show_id_map
-    load_settings = MagicMock(return_value={
-        "tmdb_api_key": "key",
-        "enabled_fields": frozenset({"plot"}),
-        "rate_limit": 0.0,
-    })
+    load_settings = MagicMock(return_value={"tmdb_api_key": "key", "rate_limit": 0.0})
 
     monkeypatch.setattr(actions, "TrackerDB", tracker_cls)
     monkeypatch.setattr(actions, "_get_db_path", MagicMock(return_value=":memory:"))
-    monkeypatch.setattr(actions, "_get_sources_config_path", MagicMock(return_value="src.json"))
+    monkeypatch.setattr(refresh, "_get_sources_config_path", MagicMock(return_value="src.json"))
     monkeypatch.setattr(actions, "_load_settings", load_settings)
-    monkeypatch.setattr(actions, "load_source_config", load_source_config)
+    monkeypatch.setattr(refresh, "load_libraries", load_libraries)
+    monkeypatch.setattr(refresh, "notify", notify)
+    monkeypatch.setattr(refresh, "lang", _fake_lang)
     monkeypatch.setattr(actions, "get_item_by_id", get_item_by_id)
     monkeypatch.setattr(actions, "run_scan", run_scan)
     monkeypatch.setattr(actions, "acquire_scan_lock", acquire)
@@ -150,7 +149,8 @@ def update_patched(monkeypatch: pytest.MonkeyPatch):
         "open_setup": open_setup,
         "tracker": tracker, "notify": notify, "run_scan": run_scan,
         "get_item_by_id": get_item_by_id, "acquire": acquire, "release": release,
-        "build_show_id_map": build_show_id_map,
+        "build_show_id_map": build_show_id_map, "load_libraries": load_libraries,
+        "tracker_cls": tracker_cls,
     }
 
 
@@ -160,7 +160,8 @@ def test_update_now_movie_runs_reset_scan(update_patched):
     update_patched["run_scan"].assert_called_once()
     _, kwargs = update_patched["run_scan"].call_args
     assert kwargs["reset"] is True
-    assert kwargs["items"] == [{"title": "Air", "movieid": 7}]
+    assert kwargs["items"] == [{"title": "Air", "movieid": 7, "file": _AIR}]
+    assert kwargs["libraries"] == LibraryConfig([_MOVIES])
     update_patched["notify"].assert_called_once()
     update_patched["release"].assert_called_once_with()
 
@@ -193,6 +194,7 @@ def test_update_now_locked_skips(update_patched):
 def test_update_now_episode_builds_show_id_map(update_patched):
     update_patched["get_item_by_id"].return_value = {
         "title": "Pilot", "episodeid": 5, "showtitle": "Some Show",
+        "file": "smb://nas/Movies/Some Show/s01e01.mkv",
     }
     actions.update_now("episode", "5")
     update_patched["build_show_id_map"].assert_called_once()
@@ -226,44 +228,29 @@ def test_update_now_reports_an_update_even_if_a_field_was_unchecked(update_patch
     assert update_patched["notify"].call_args[0][0] == "Updated: Air"
 
 
-@patch("resources.lib.service.actions.run_scan")
-@patch("resources.lib.service.actions.get_item_by_id")
-def test_update_now_runs_on_disabled_source(mock_get, mock_scan, kodi_stubs, settings_mock):
-    """Source disabled in config: the reset path must still run a scan."""
-    from resources.lib.service import actions as _actions
+@pytest.mark.parametrize("libraries", [
+    LibraryConfig([replace(_MOVIES, included=False)]),
+    LibraryConfig([replace(_MOVIES, subfolders=({"path": "smb://nas/Movies/", "enabled": False},))]),
+    LibraryConfig([]),
+    None,  # no libraries file
+], ids=["library_left_out", "subfolder_left_out", "no_library", "no_file"])
+def test_update_now_on_excluded_library_shows_message_and_changes_nothing(
+        update_patched, monkeypatch, libraries):
+    monkeypatch.setattr(refresh, "lang", lambda i: "s{}".format(i))
+    update_patched["load_libraries"].return_value = libraries
+    actions.update_now("movie", "7")
+    update_patched["run_scan"].assert_not_called()
+    update_patched["tracker_cls"].assert_not_called()
+    assert [c.args[0] for c in update_patched["notify"].call_args_list] == ["s32650"]
+    update_patched["release"].assert_called_once_with()
 
-    # Wire up the minimal set of dependencies that update_now touches
-    # before calling run_scan (lock, db path, sources config, settings).
-    with patch.object(_actions, "acquire_scan_lock", return_value=True), \
-         patch.object(_actions, "release_scan_lock"), \
-         patch.object(_actions, "TrackerDB"), \
-         patch.object(_actions, "_get_db_path", return_value=":memory:"), \
-         patch.object(_actions, "_get_sources_config_path", return_value="s.json"), \
-         patch.object(_actions, "load_source_config",
-                      return_value={"sources": [], "default_language": "en-US"}), \
-         patch.object(_actions, "_load_settings", return_value={
-             "tmdb_api_key": "key",
-             "enabled_fields": frozenset({"plot"}),
-             "rate_limit": 0.0,
-         }), \
-         patch.object(_actions, "notify"), \
-         patch.object(_actions, "lang", _fake_lang), \
-         patch.object(_actions, "get_bool_setting", return_value=False), \
-         patch.object(_actions, "is_setup_complete", return_value=True), \
-         patch.object(_actions.StructuredLogger, "initialize", MagicMock()):
 
-        mock_get.return_value = {
-            "movieid": 1,
-            "title": "X",
-            "file": "smb://disabled/x.mkv",
-            "uniqueid": {"tmdb": "1"},
-        }
-        mock_scan.return_value = {"updated": 1}
-
-        _actions.update_now("movie", "1")
-
-    assert mock_scan.called, "run_scan was not called even though source is disabled"
-    assert mock_scan.call_args.kwargs.get("reset") is True
+def test_update_now_prepares_imdb_for_the_item_library_only(update_patched, monkeypatch):
+    prepare = MagicMock(return_value=True)
+    monkeypatch.setattr(actions, "_prepare_imdb_ratings", prepare)
+    actions.update_now("movie", "7")
+    assert prepare.call_args.args[0] == [_MOVIES]
+    assert update_patched["run_scan"].call_args.kwargs["settings"]["imdb_ready"] is True
 
 
 def test_update_now_tvdb_auth_failure_notified(update_patched, monkeypatch):

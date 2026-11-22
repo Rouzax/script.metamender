@@ -21,14 +21,13 @@ def _ctx(tracker, reset=False, checked=True, show_tmdb: str | None = "55",
          show_tvdb: str | None = "77", tracked=True):
     return _ScanCtx(
         media_type=EPISODE, tracker=tracker, breaker=CircuitBreaker(),
-        pacer=_Pacer(0), tmdb_api_key="k", default_language="en-US",
-        default_language_set=True, sources=[], enabled_fields=frozenset({"title"}),
+        pacer=_Pacer(0), tmdb_api_key="k", enabled_fields=frozenset({"title"}),
         show_id_map={10: show_tmdb} if show_tmdb else {},
         show_tvdb_map={10: show_tvdb} if show_tvdb else {},
         checked_shows=frozenset({10}) if checked else frozenset(),
         season_cache={}, tvdb_cache={}, logged_once=set(), counts={},
         schedule=(), rating_pref=0, text_order=0, fallback_order=0,
-        default_fallback="", imdb_ready=False, reset=reset,
+        imdb_ready=False, reset=reset,
         tracked_shows=frozenset({10}) if tracked else frozenset(),
     )
 

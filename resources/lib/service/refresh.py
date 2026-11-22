@@ -4,6 +4,11 @@ sent to Kodi's background progress bar.
 
 Logging:
     Logger: 'refresh'
+    Key events:
+        - refresh.not_included (INFO): Update now outside the included
+          libraries; nothing changed
+        - refresh.skip_excluded (INFO): episodes in a subfolder that is not
+          included were left out of a refresh
 """
 from __future__ import annotations
 
@@ -22,8 +27,8 @@ from resources.lib.data.kodi import (
     get_item_by_id,
     get_season_info,
 )
+from resources.lib.data.libraries import Library, LibraryConfig, load_libraries
 from resources.lib.data.media_types import EPISODE, TVSHOW, MediaType
-from resources.lib.data.sources import load_source_config
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
@@ -41,17 +46,26 @@ from resources.lib.service.lock import (
     release_scan_lock,
 )
 from resources.lib.ui.progress_window import show_progress_window
-from resources.lib.utils import ApiKeyError, StructuredLogger, get_logger, lang, notify
+from resources.lib.utils import (
+    ApiKeyError,
+    StructuredLogger,
+    display_path,
+    get_logger,
+    lang,
+    notify,
+)
 
 log = get_logger('refresh')
 
 
 @dataclass(frozen=True)
 class Scope:
-    """What one refresh covers: a whole show (season None) or one season."""
+    """What one refresh covers: a whole show (season None) or one season.
+    ``file`` is the show's folder, which places it in a library."""
     tvshowid: int
     season: int | None
     title: str
+    file: str = ""
 
 
 def resolve_scope(dbtype: str, dbid: int) -> Scope | None:
@@ -69,7 +83,21 @@ def resolve_scope(dbtype: str, dbid: int) -> Scope | None:
     show = get_item_by_id(TVSHOW, tvshowid)
     if show is None:
         return None
-    return Scope(tvshowid, season, str(show.get("title") or tvshowid))
+    return Scope(tvshowid, season, str(show.get("title") or tvshowid),
+                 str(show.get("file") or ""))
+
+
+def included_library(file_path: str) -> Library | None:
+    """The included library Update now may work in for this file; None,
+    after telling the user, when the file's library or subfolder is not
+    included or the file is in no library."""
+    libraries = load_libraries(_get_sources_config_path()) or LibraryConfig()
+    lib = libraries.included_for(file_path)
+    if lib is None:
+        log.info("Update now outside the included libraries", event="refresh.not_included",
+                 file_path=display_path(file_path))
+        notify(lang(32650))  # This library isn't included in MetaMender
+    return lib
 
 
 def show_id_of(dbtype: str, dbid: int) -> int | None:
@@ -203,7 +231,7 @@ def _pass(
     items: list[dict[str, Any]],
     progress: RefreshProgress,
     settings: dict[str, Any],
-    source_config: dict[str, Any],
+    libraries: LibraryConfig,
     tracker: TrackerDB,
     monitor: Any,
     breaker: CircuitBreaker,
@@ -226,7 +254,7 @@ def _pass(
         return True
 
     stats = run_scan(
-        media_type, tracker, source_config, settings["enabled_fields"],
+        media_type, tracker, libraries,
         settings["tmdb_api_key"], settings, monitor=monitor, items=items,
         reset=True, breaker=breaker, show_id_map=show_id_map, progress=on_item,
     )
@@ -239,7 +267,7 @@ def run_refresh(
     scope: Scope,
     progress: RefreshProgress,
     settings: dict[str, Any],
-    source_config: dict[str, Any],
+    libraries: LibraryConfig,
     tracker: TrackerDB,
     monitor: Any,
     prepare: Callable[[], bool] | None = None,
@@ -247,13 +275,21 @@ def run_refresh(
     """Refresh a show (its record, then every episode) or a season (its
     episodes), as Update now does for one item. The episode pass builds its
     show id map after the show pass, so it uses the ids that pass found.
+    Only what lies in an included library and subfolder is refreshed.
 
     ``prepare`` readies the IMDb ratings store (its first use downloads the
     dataset, which takes a while) and answers ``settings["imdb_ready"]``;
     it runs after the episode count is known, so the window shows it, and a
     Stop pressed meanwhile ends the refresh before the first item."""
-    episodes = get_all_items(EPISODE, tvshowid=scope.tvshowid, season=scope.season)
+    listed = get_all_items(EPISODE, tvshowid=scope.tvshowid, season=scope.season)
+    episodes = [e for e in listed if libraries.included_for(e.get("file", ""))]
+    if len(episodes) < len(listed):
+        log.info("Episodes outside the included libraries left out",
+                 event="refresh.skip_excluded", tvshowid=scope.tvshowid,
+                 skipped=len(listed) - len(episodes))
     show = get_item_by_id(TVSHOW, scope.tvshowid) if scope.season is None else None
+    if show and not libraries.included_for(show.get("file", "")):
+        show = None
     progress.begin(len(episodes), now=time.monotonic())
     log.info("Refresh starting", event="refresh.start", tvshowid=scope.tvshowid,
              season=scope.season, episodes=len(episodes))
@@ -270,10 +306,10 @@ def run_refresh(
     breaker = CircuitBreaker()
     passes: list[dict[str, Any]] = []
     if show:
-        passes.append(_pass(TVSHOW, [show], progress, settings, source_config,
+        passes.append(_pass(TVSHOW, [show], progress, settings, libraries,
                             tracker, monitor, breaker))
     if episodes and not (passes and (passes[-1]["stopped"] or passes[-1]["aborted"])):
-        passes.append(_pass(EPISODE, episodes, progress, settings, source_config,
+        passes.append(_pass(EPISODE, episodes, progress, settings, libraries,
                             tracker, monitor, breaker, tracker.get_show_id_map()))
     shutdown = bool(monitor is not None and monitor.abortRequested())
     outcome = RefreshOutcome(
@@ -369,6 +405,9 @@ def open_refresh(dbtype: str, dbid: int) -> None:
     if scope is None:
         notify(lang(32345))  # Item not found
         return
+    lib = included_library(scope.file)
+    if lib is None:
+        return
     if not acquire_scan_lock():
         answer = bring_back_or_busy(scope.tvshowid)
         if answer == "reopen":
@@ -399,10 +438,9 @@ def open_refresh(dbtype: str, dbid: int) -> None:
             tracker = None
             try:
                 tracker = TrackerDB(_get_db_path())
-                source_config = load_source_config(_get_sources_config_path())
                 result["outcome"] = run_refresh(
-                    scope, progress, settings, source_config, tracker, monitor,
-                    prepare=lambda: _prepare_imdb_ratings(settings, monitor))
+                    scope, progress, settings, LibraryConfig([lib]), tracker, monitor,
+                    prepare=lambda: _prepare_imdb_ratings([lib], monitor))
                 if result["outcome"].tmdb_answered:
                     attention.update(
                         tracker, lambda a: a.clear(attention.KEY_REJECTED))

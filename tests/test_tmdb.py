@@ -270,6 +270,22 @@ class TestParseTrailer:
         assert _parse_trailer({}) is None
         assert _parse_trailer({"results": []}) is None
 
+    def test_skips_a_key_that_is_not_a_youtube_id(self) -> None:
+        """TMDB's video data is community-edited; a key must not add plugin parameters."""
+        videos = {
+            "results": [
+                {"type": "Trailer", "site": "YouTube", "key": "kA244xewjcI&action=x"},
+                {"type": "Trailer", "site": "YouTube", "key": "short"},
+                {"type": "Trailer", "site": "YouTube", "key": "dQw4w9WgXc_"},
+            ],
+        }
+        expected = "plugin://plugin.video.youtube/?action=play_video&videoid=dQw4w9WgXc_"
+        assert _parse_trailer(videos) == expected
+
+    def test_returns_none_when_every_key_is_invalid(self) -> None:
+        videos = {"results": [{"type": "Trailer", "site": "YouTube", "key": "../../x?y=z"}]}
+        assert _parse_trailer(videos) is None
+
 
 class TestParseMovieCertifications:
     def test_extracts_certifications(self) -> None:
@@ -571,6 +587,16 @@ class TestFetchTvshow:
         assert result["votes"] == 1162
         assert result["plot"] == "An FBI agent unravels a conspiracy."
         assert result["genres"] == ["Action & Adventure", "Drama"]
+
+    @patch("resources.lib.providers.http._send")
+    def test_tvshow_parse_has_original_title(self, mock_get: MagicMock) -> None:
+        mock_get.return_value = _mock_response(
+            200, {**TVSHOW_RESPONSE, "name": "Tummy Tom", "original_name": "Dikkie Dik"})
+
+        result = fetch_tvshow("129552", "fake_key")
+
+        assert result is not None
+        assert result["original_title"] == "Dikkie Dik"
 
     @patch("resources.lib.providers.http._send")
     def test_certifications_parsed(self, mock_get: MagicMock) -> None:

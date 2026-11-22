@@ -131,3 +131,6 @@ feat/7d-provider-replacement.
 - [x] Docker infrastructure: media mount (MEDIA_ROOT), path substitution, MetaMender volume
 - [x] Live integration test suite (10 scenarios, 53 checks, runs against Docker Kodi)
 
+## Releases
+- [x] v1.0.0 (2026-11-12), v1.0.1 (2026-11-13)
+- [x] v1.1.0 (2026-11-13): setup asks which rating to show, where plots and titles come from, and whether to replace other countries' ratings

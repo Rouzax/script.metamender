@@ -13,6 +13,7 @@ from typing import Any
 from resources.lib.constants import (
     PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
 )
+from resources.lib.data.libraries import TITLE_LANGUAGE
 from resources.lib.data.media_types import MediaType
 from resources.lib.data.presets import Preset
 from resources.lib.data.tracker import TrackerDB
@@ -204,11 +205,13 @@ class _CertConfig:
 
 @dataclass(frozen=True)
 class _ScanCtx:
-    """Scan-level constants shared across one run_scan cycle.
+    """Constants for the items of one library in one run_scan pass.
 
     Holds everything that does not vary per item, so the per-item helpers take a
-    single ``ctx`` plus the handful of per-item values. Mutable members
-    (breaker, pacer, caches, tracker) are referenced, not copied.
+    single ``ctx`` plus the handful of per-item values. run_scan derives each
+    library's ctx from one base with dataclasses.replace, so the mutable
+    members (breaker, pacer, caches, tracker) are shared by every library of
+    the pass, not copied.
     """
 
     media_type: MediaType
@@ -216,11 +219,6 @@ class _ScanCtx:
     breaker: CircuitBreaker
     pacer: _Pacer
     tmdb_api_key: str
-    default_language: str
-    # Whether sources.json set default_language; without it a folder no
-    # source entry covers has no configured language.
-    default_language_set: bool
-    sources: list[dict[str, Any]]
     enabled_fields: frozenset[str]
     show_id_map: dict[int, str]
     show_tvdb_map: dict[int, str]
@@ -240,9 +238,6 @@ class _ScanCtx:
     rating_pref: int
     text_order: int
     fallback_order: int
-    # sources.json's fallback_language, for folders whose entry sets none;
-    # "" means no fallback.
-    default_fallback: str
     imdb_ready: bool
     # Certification settings for this pass; None when certifications are off
     # or no usable country preset exists (episodes never have one).
@@ -257,6 +252,8 @@ class _ScanCtx:
     # with no ids of its own is skipped before it is tracked, so it never
     # joins checked_shows: its episodes have no route rather than waiting.
     tracked_shows: frozenset[int] = frozenset()
+    # The library's title mode for shows and movies (libraries.TITLE_*).
+    title_mode: str = TITLE_LANGUAGE
 
 
 def _get_season_data(

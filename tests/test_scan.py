@@ -20,6 +20,7 @@ from resources.lib.engine.scan import (
     _plan_writes,
     run_scan,
 )
+from tests.conftest import one_library
 
 
 # Every scan module logs through its own "scan" logger; one mock stands in for
@@ -69,6 +70,44 @@ def _make_tracker(tmp_path):
 def _make_source_config():
     # type: () -> Dict[str, Any]
     return {"sources": [], "default_language": "en-US"}
+
+
+# Library options the tests set in their settings dict, as in 1.1 where
+# they were global.
+_LIBRARY_OPTIONS = ("rating_source", "text_source_order", "fallback_order", "title_mode",
+                    "cert_replace_foreign", "cert_prefix_override", "cert_not_found")
+
+
+# The fields of the "details" toggle, which switches them on together.
+_DETAILS = frozenset({"genre", "studio", "country", "runtime", "firstaired"})
+
+
+def _libs(fields, source_config=None, settings=None):
+    """One library covering every test path, set up as a 1.1 source config
+    (by default _make_source_config's) and global settings describe it: the
+    config's default languages are the library's, its entries the library's
+    subfolders, and the library options in ``settings`` the library's own.
+    No cert_country means no country."""
+    from resources.lib.constants import COUNTRY_CODES
+    from resources.lib.data.libraries import NO_COUNTRY
+    config = _make_source_config() if source_config is None else source_config
+    settings = settings or {}
+    fallback = str(config.get("fallback_language") or "")
+    subfolders = []
+    for entry in config.get("sources") or []:
+        sub = {k: v for k, v in entry.items() if k != "language"}
+        if entry.get("language"):
+            sub["language"] = entry["language"]
+            sub["fallback_language"] = str(entry.get("fallback_language", fallback) or "")
+        subfolders.append(sub)
+    overrides = {k: settings[k] for k in _LIBRARY_OPTIONS if k in settings}
+    country = settings.get("cert_country")
+    overrides["cert_country"] = (
+        COUNTRY_CODES.index(country) + 1 if country in COUNTRY_CODES else NO_COUNTRY)
+    return one_library(
+        fields, language=str(config.get("default_language") or ""),
+        fallback_language=fallback, subfolders=tuple(subfolders), **overrides,
+    )
 
 
 def _make_settings():
@@ -402,7 +441,7 @@ def test_refresh_overwrites_nonempty_plot_when_volatile(mock_fetch, mock_update,
     mock_fetch.return_value = _tmdb_movie_response(plot="Fresh plot")
     mock_update.return_value = True
     tracker = TrackerDB(str(tmp_path / "t.db"))
-    run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+    run_scan(MOVIE, tracker, _libs(frozenset({"plot"})),
              "key", _make_settings(), items=[item])
     tracker.close()
     _, kwargs = mock_update.call_args
@@ -418,11 +457,11 @@ def test_old_content_finalizes_after_one_fetch(mock_fetch, mock_update, tmp_path
     mock_fetch.return_value = _tmdb_movie_response(plot="A plot")
     mock_update.return_value = True
     tracker = TrackerDB(str(tmp_path / "t.db"))
-    run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+    run_scan(MOVIE, tracker, _libs(frozenset({"plot"})),
              "key", _make_settings(), items=[item])
     # second scan: field is final (old content, sampled once) -> no second fetch
     mock_fetch.reset_mock()
-    run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+    run_scan(MOVIE, tracker, _libs(frozenset({"plot"})),
              "key", _make_settings(), items=[item])
     tracker.close()
     assert not mock_fetch.called
@@ -439,8 +478,7 @@ def test_run_scan_propagates_kodi_query_error(mock_get_all, tmp_path, kodi_stubs
     try:
         with pytest.raises(KodiQueryError):
             run_scan(
-                MOVIE, tracker, _make_source_config(),
-                frozenset({"rating"}),
+                MOVIE, tracker, _libs(frozenset({"rating"})),
                 "fake_key", _make_settings(),
             )
     finally:
@@ -471,8 +509,7 @@ def test_run_scan_paces_between_provider_calls(
     tracker = _make_tracker(tmp_path)
     with patch("resources.lib.engine.scan.time.sleep") as mock_sleep:
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"}), settings=settings),
             "fake_key", settings,
         )
     tracker.close()
@@ -496,8 +533,7 @@ def test_run_scan_no_sleep_when_rate_limit_zero(
     tracker = _make_tracker(tmp_path)
     with patch("resources.lib.engine.scan.time.sleep") as mock_sleep:
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
     tracker.close()
@@ -523,8 +559,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -545,8 +580,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -567,8 +601,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, source_config,
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"}), source_config),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -598,8 +631,7 @@ class TestRunScanMovies:
         tracker.commit()
 
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -620,8 +652,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             monitor=monitor,
         )
@@ -641,8 +672,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -665,8 +695,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
 
@@ -688,8 +717,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -710,8 +738,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
 
@@ -735,8 +762,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
 
@@ -760,8 +786,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
 
@@ -796,8 +821,7 @@ class TestRunScanMovies:
         tracker.commit()
 
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
 
@@ -821,8 +845,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -848,8 +871,7 @@ class TestRunScanMovies:
         ):
             tracker = _make_tracker(tmp_path)
             stats = run_scan(
-                MOVIE, tracker, _make_source_config(),
-                frozenset({"rating", "plot"}),
+                MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
                 "fake_key", _make_settings(),
             )
 
@@ -873,8 +895,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -907,8 +928,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
 
@@ -936,8 +956,7 @@ class TestRunScanMovies:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
 
@@ -959,8 +978,7 @@ class TestRunScanTVShows:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            TVSHOW, tracker, _make_source_config(),
-            frozenset({"rating", "plot", "genre"}),
+            TVSHOW, tracker, _libs(frozenset({"rating", "plot"}) | _DETAILS),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -983,8 +1001,7 @@ class TestRunScanEpisodes:
         tracker = _make_tracker(tmp_path)
         show_map = {10: "55555"}
         stats = run_scan(
-            EPISODE, tracker, _make_source_config(),
-            frozenset({"rating", "plot", "title"}),
+            EPISODE, tracker, _libs(frozenset({"rating", "plot", "title"})),
             "fake_key", _make_settings(),
             show_id_map=show_map,
         )
@@ -1015,8 +1032,7 @@ class TestRunScanEpisodes:
         tracker = _make_tracker(tmp_path)
         show_map = {10: "55555"}
         run_scan(
-            EPISODE, tracker, _make_source_config(),
-            frozenset({"rating", "plot", "title"}),
+            EPISODE, tracker, _libs(frozenset({"rating", "plot", "title"})),
             "fake_key", _make_settings(),
             show_id_map=show_map,
         )
@@ -1040,8 +1056,7 @@ class TestRunScanEpisodes:
         tracker = _make_tracker(tmp_path)
         show_map = {10: "55555"}
         stats = run_scan(
-            EPISODE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            EPISODE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             show_id_map=show_map,
         )
@@ -1071,8 +1086,7 @@ class TestRunScanEpisodes:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            EPISODE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            EPISODE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             show_id_map={10: "55555"},
         )
@@ -1107,8 +1121,7 @@ class TestRunScanEpisodes:
         tracker = _make_tracker(tmp_path)
         show_map = {10: "55555"}
         stats = run_scan(
-            EPISODE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            EPISODE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             show_id_map=show_map,
         )
@@ -1137,8 +1150,7 @@ class TestRunScanSourceLanguage:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, source_config,
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"}), source_config),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -1166,8 +1178,7 @@ class TestRunScanApiKeyError:
         # instead of silently finishing the pass as a no-op.
         with pytest.raises(ApiKeyError):
             run_scan(
-                MOVIE, tracker, _make_source_config(),
-                frozenset({"rating"}),
+                MOVIE, tracker, _libs(frozenset({"rating"})),
                 "bad_key", _make_settings(),
             )
         tracker.close()
@@ -1195,8 +1206,7 @@ class TestRunScanApiKeyError:
             tracker = _make_tracker(tmp_path / media_type.name)
             with _scan_log() as mock_log, pytest.raises(ApiKeyError):
                 run_scan(
-                    media_type, tracker, _make_source_config(),
-                    frozenset({"plot"}), "bad_key", _make_settings(),
+                    media_type, tracker, _libs(frozenset({"plot"})), "bad_key", _make_settings(),
                     items=items, **extra,
                 )
             tracker.close()
@@ -1221,8 +1231,7 @@ class TestRunScanMultipleItems:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -1256,8 +1265,7 @@ class TestRunScanMaturity:
         tracker.commit()
 
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -1284,8 +1292,7 @@ class TestRunScanMaturity:
         tracker.commit()
 
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -1314,8 +1321,7 @@ class TestRunScanMaturity:
         tracker.commit()
 
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -1337,8 +1343,7 @@ class TestRunScanMaturity:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
         )
 
@@ -1359,8 +1364,7 @@ class TestRunScanMaturity:
         mock_fetch.return_value = None
 
         tracker = _make_tracker(tmp_path)
-        run_scan(MOVIE, tracker, _make_source_config(),
-                 frozenset({"rating"}), "fake_key", _make_settings())
+        run_scan(MOVIE, tracker, _libs(frozenset({"rating"})), "fake_key", _make_settings())
 
         field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
         assert field["fetch_count"] == 1
@@ -1373,8 +1377,7 @@ class TestRunScanMaturity:
         tracker.commit()
 
         tracker.start_new_cycle()
-        run_scan(MOVIE, tracker, _make_source_config(),
-                 frozenset({"rating"}), "fake_key", _make_settings())
+        run_scan(MOVIE, tracker, _libs(frozenset({"rating"})), "fake_key", _make_settings())
 
         field = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
         # 1 (first scan) + 1 (manual record_field_fetch) + 1 (second scan).
@@ -1398,8 +1401,7 @@ class TestRunScanPerFieldRefresh:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"plot", "tagline"}),
+            MOVIE, tracker, _libs(frozenset({"plot", "tagline"})),
             "fake_key", _make_settings(),
         )
 
@@ -1426,8 +1428,7 @@ class TestRunScanPerFieldRefresh:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
             breaker=CircuitBreaker(threshold=5),
         )
@@ -1457,8 +1458,7 @@ class TestRunScanWithItems:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating", "plot"}),
+            MOVIE, tracker, _libs(frozenset({"rating", "plot"})),
             "fake_key", _make_settings(),
             items=[_make_movie_item()],
         )
@@ -1475,8 +1475,7 @@ class TestRunScanWithItems:
     ):
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             items=[],
         )
@@ -1504,8 +1503,7 @@ class TestRunScanCircuitBreaker:
         tracker = _make_tracker(tmp_path)
         breaker = CircuitBreaker(threshold=5)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             breaker=breaker,
         )
@@ -1535,8 +1533,7 @@ class TestRunScanCircuitBreaker:
         tracker = _make_tracker(tmp_path)
         breaker = CircuitBreaker(threshold=3)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             breaker=breaker,
         )
@@ -1563,8 +1560,7 @@ class TestRunScanCircuitBreaker:
         tracker = _make_tracker(tmp_path)
         breaker = CircuitBreaker(threshold=1)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             breaker=breaker,
         )
@@ -1592,8 +1588,7 @@ class TestRunScanCircuitBreaker:
         breaker.record_failure("tmdb")
 
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             breaker=breaker,
         )
@@ -1617,8 +1612,7 @@ class TestRunScanCircuitBreaker:
         # First pass: one failing movie -> 1 failure, not yet disabled.
         mock_get_all.return_value = [_make_movie_item(title="M1", tmdb_id="1", movie_id=1)]
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             breaker=breaker,
         )
@@ -1627,8 +1621,7 @@ class TestRunScanCircuitBreaker:
         # Second pass sharing the SAME breaker: second failure trips it.
         mock_get_all.return_value = [_make_movie_item(title="M2", tmdb_id="2", movie_id=2)]
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "fake_key", _make_settings(),
             breaker=breaker,
         )
@@ -1668,8 +1661,7 @@ class TestRunScanReset:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
             items=[item], reset=True,
         )
@@ -1699,8 +1691,7 @@ class TestRunScanReset:
         tracker.commit()
 
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
             items=[item], reset=True,
         )
@@ -1731,8 +1722,7 @@ class TestRunScanReset:
         tracker.commit()
 
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
             items=[item],
         )
@@ -1763,8 +1753,7 @@ class TestRunScanReset:
         tracker.commit()
 
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
             items=[item], reset=True,
         )
@@ -1790,8 +1779,7 @@ class TestRunScanReset:
         tracker.mark_cycle_processed("movie", _MOVIE_IDENTITY)
 
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
             items=[item], reset=True,
         )
@@ -1825,8 +1813,7 @@ class TestRunScanReset:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, source_config,
-            frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), source_config),
             "fake_key", _make_settings(),
             items=[item], reset=True,
         )
@@ -1860,8 +1847,7 @@ class TestRunScanReset:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, source_config,
-            frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), source_config),
             "fake_key", _make_settings(),
             items=[item],
         )
@@ -1887,7 +1873,7 @@ class TestCycleCompletionReporting:
         mock_fetch.return_value = {"plot": "A plot"}
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
         )
         tracker.close()
@@ -1906,7 +1892,7 @@ class TestCycleCompletionReporting:
         monitor.abortRequested.return_value = True
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(), monitor=monitor,
         )
         tracker.close()
@@ -1929,7 +1915,7 @@ class TestFailedWriteLeavesClockAlone:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
         )
         fs_map = tracker.get_field_status_map(
@@ -1952,7 +1938,7 @@ class TestFailedWriteLeavesClockAlone:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
         )
         fs_map = tracker.get_field_status_map(
@@ -1982,8 +1968,7 @@ class TestEpisodeTransientDoesNotAdvanceClock:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            EPISODE, tracker, _make_source_config(),
-            frozenset({"rating", "plot", "title"}),
+            EPISODE, tracker, _libs(frozenset({"rating", "plot", "title"})),
             "fake_key", _make_settings(),
             show_id_map={10: "55555"},
         )
@@ -2011,7 +1996,7 @@ class TestTransientFieldsAreCounted:
         mock_fetch.side_effect = TransientProviderError("http 503")
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot", "tagline"}),
+            MOVIE, tracker, _libs(frozenset({"plot", "tagline"})),
             "k", _make_settings(), items=[_make_movie_item()],
         )
         tracker.close()
@@ -2026,7 +2011,7 @@ class TestTransientFieldsAreCounted:
         mock_fetch.return_value = _tmdb_movie_response()
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[_make_movie_item()],
         )
         tracker.close()
@@ -2057,11 +2042,11 @@ class TestReenabledFieldIsCheckedAgain:
         tracker = _make_tracker(tmp_path)
         self._finished_plot(tracker)
         if off_scan:
-            run_scan(MOVIE, tracker, _make_source_config(), frozenset({"tagline"}),
+            run_scan(MOVIE, tracker, _libs(frozenset({"tagline"})),
                      "k", _make_settings(), items=[_make_movie_item()])
         tracker.start_new_cycle()  # the field is switched on in a later cycle
         mock_fetch.reset_mock()
-        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+        run_scan(MOVIE, tracker, _libs(frozenset({"plot"})),
                  "k", _make_settings(), items=[_make_movie_item()])
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
         tracker.close()
@@ -2085,7 +2070,7 @@ class TestUpdateNowKeepsCadence:
         tracker.commit()
 
     def _run(self, tracker, fields=("plot",), reset=True):
-        return run_scan(MOVIE, tracker, _make_source_config(), frozenset(fields),
+        return run_scan(MOVIE, tracker, _libs(frozenset(fields)),
                         "k", _make_settings(), items=[_make_movie_item(plot="Old")],
                         reset=reset)
 
@@ -2162,7 +2147,7 @@ class TestProgressHook:
             return True
 
         tracker = _make_tracker(tmp_path)
-        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+        run_scan(MOVIE, tracker, _libs(frozenset({"plot"})), "k",
                  _make_settings(), items=self._items(), reset=True, progress=progress)
         tracker.close()
         assert seen == [(0, "A", 0), (1, "B", 1), (2, "C", 2)]
@@ -2175,7 +2160,7 @@ class TestProgressHook:
         mock_fetch.return_value = _tmdb_movie_response(plot="New plot")
         tracker = _make_tracker(tmp_path)
         items = self._items()
-        stats = run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+        stats = run_scan(MOVIE, tracker, _libs(frozenset({"plot"})), "k",
                          _make_settings(), items=items, reset=True,
                          progress=lambda index, item, stats: index < 1)
         second = tracker.get_field_status_map("movie", compute_identity(items[1], MOVIE))
@@ -2207,7 +2192,7 @@ class TestConsecutiveCycles:
         # Cycle 1, run to completion.
         tracker.begin_cycle(resume_interrupted=True)
         first = run_scan(
-            MOVIE, tracker, _make_source_config(), fields, "k", settings,
+            MOVIE, tracker, _libs(fields, settings=settings), "k", settings,
         )
         tracker.mark_cycle_complete()
 
@@ -2221,7 +2206,7 @@ class TestConsecutiveCycles:
 
         tracker.begin_cycle(resume_interrupted=True)
         run_scan(
-            MOVIE, tracker, _make_source_config(), fields, "k", settings,
+            MOVIE, tracker, _libs(fields, settings=settings), "k", settings,
         )
         last_seen_after_cycle_2 = tracker.get_item("movie", identity)["last_seen"]
         tracker.close()
@@ -2259,7 +2244,7 @@ class TestUnheardProviderDoesNotAdvanceClock:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+            MOVIE, tracker, _libs(frozenset({"plot", "rating"})),
             "fake_key", _make_settings(), breaker=_tripped_breaker("tmdb"),
         )
         fs_map = tracker.get_field_status_map("movie", _MOVIE_IDENTITY)
@@ -2285,7 +2270,7 @@ class TestUnheardProviderDoesNotAdvanceClock:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+            MOVIE, tracker, _libs(frozenset({"plot", "rating"})),
             "fake_key", _make_settings(),
         )
         fs_map = tracker.get_field_status_map("movie", compute_identity(item, MOVIE))
@@ -2310,7 +2295,7 @@ class TestEpisodeShowLookup:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"plot", "title"}),
+            EPISODE, tracker, _libs(frozenset({"plot", "title"})),
             "fake_key", _make_settings(), show_id_map={10: "55555"},
         )
         fs_map = tracker.get_field_status_map("episode", compute_identity(item, EPISODE))
@@ -2331,7 +2316,7 @@ class TestEpisodeShowLookup:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"plot", "title"}),
+            EPISODE, tracker, _libs(frozenset({"plot", "title"})),
             "fake_key", _make_settings(), show_id_map={10: "55555"},
         )
         fs_map = tracker.get_field_status_map("episode", compute_identity(item, EPISODE))
@@ -2353,7 +2338,7 @@ class TestEpisodeShowLookup:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"plot", "title"}),
+            EPISODE, tracker, _libs(frozenset({"plot", "title"})),
             "fake_key", _make_settings(), show_id_map={1: "2316", 2: "2996"},
         )
         tracker.close()
@@ -2446,7 +2431,7 @@ class TestTextChain:
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"}), _nl_source_config()),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
             breaker=_tripped_breaker("tvdb"),
         )
@@ -2472,7 +2457,7 @@ class TestTextChain:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), settings=settings),
             "k", settings, items=[item],
         )
         fs_map = _fs(tracker, TVSHOW, item)
@@ -2495,7 +2480,7 @@ class TestTextChain:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[item],
         )
         tracker.close()
@@ -2518,7 +2503,7 @@ class TestTextChain:
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"}), _nl_source_config()),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -2545,7 +2530,7 @@ class TestTextChain:
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"}), _nl_source_config(), settings),
             "k", settings, items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -2572,7 +2557,7 @@ class TestTextChain:
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, config, frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"}), config),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         tracker.close()
@@ -2597,7 +2582,7 @@ class TestTextChain:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[item],
         )
         fs_map = _fs(tracker, MOVIE, item)
@@ -2628,7 +2613,7 @@ class TestTextChain:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot", "genre"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}) | _DETAILS, settings=settings),
             "k", settings, items=[item], breaker=breaker,
         )
         fs_map = _fs(tracker, TVSHOW, item)
@@ -2656,7 +2641,7 @@ class TestTextChain:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot", "genre"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}) | _DETAILS),
             "k", _make_settings(), items=[item], breaker=breaker,
         )
         tracker.close()
@@ -2678,7 +2663,7 @@ class TestTextChain:
 
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot", "genre"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}) | _DETAILS, settings=settings),
             "k", settings, items=[item], breaker=_tripped_breaker("tmdb"),
         )
         fs_map = _fs(tracker, TVSHOW, item)
@@ -2696,7 +2681,7 @@ class TestTextChain:
     ):
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[_make_movie_item()],
             breaker=_tripped_breaker("tmdb"),
         )
@@ -2720,8 +2705,7 @@ class TestRatingsVerdict:
         tracker = _make_tracker(tmp_path)
         with patch("resources.lib.providers.imdb_ratings.lookup") as mock_lookup:
             run_scan(
-                EPISODE, tracker, _make_source_config(),
-                frozenset({"rating", "votes", "plot", "title"}),
+                EPISODE, tracker, _libs(frozenset({"rating", "plot", "title"}), settings=settings),
                 "k", settings, items=[item], show_id_map={10: "55555"},
             )
         fs_map = _fs(tracker, EPISODE, item)
@@ -2748,7 +2732,7 @@ class TestRatingsVerdict:
             side_effect=TransientProviderError("store not loaded"),
         ):
             run_scan(
-                MOVIE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+                MOVIE, tracker, _libs(frozenset({"plot", "rating"})),
                 "k", _make_settings(), items=[_make_movie_item()],
             )
         fs_map = _fs(tracker, MOVIE, _make_movie_item())
@@ -2769,7 +2753,7 @@ class TestRatingsVerdict:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"}), settings=settings),
             "k", settings, items=[_make_movie_item()],
         )
         fs_map = _fs(tracker, MOVIE, _make_movie_item())
@@ -2794,8 +2778,7 @@ class TestRatingsVerdict:
             side_effect=TransientProviderError("http 503"),
         ):
             run_scan(
-                EPISODE, tracker, _make_source_config(),
-                frozenset({"rating", "plot"}),
+                EPISODE, tracker, _libs(frozenset({"rating", "plot"})),
                 "k", _make_settings(), items=[item], show_id_map={10: "55555"},
             )
         fs_map = _fs(tracker, EPISODE, item)
@@ -2819,7 +2802,7 @@ class TestRatingsVerdict:
             "resources.lib.providers.imdb_ratings.lookup", return_value=(8.1, 12345),
         ) as mock_lookup:
             run_scan(
-                MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+                MOVIE, tracker, _libs(frozenset({"rating"}), settings=settings),
                 "k", settings, items=[_make_movie_item()],
             )
         fs_map = _fs(tracker, MOVIE, _make_movie_item())
@@ -2848,7 +2831,7 @@ class TestTextChainIds:
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"})),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -2872,7 +2855,7 @@ class TestTextChainIds:
         _register_checked_show(tracker, tvdb_id=None, tmdb_id="55555")
 
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"})),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -2899,7 +2882,7 @@ class TestTextChainIds:
 
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, config, frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), config, settings),
             "k", settings, items=[item],
         )
         fs_map = _fs(tracker, TVSHOW, item)
@@ -2930,7 +2913,7 @@ class TestTextChainIds:
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"}), settings=settings),
             "k", settings, items=[first, second], show_id_map={10: "55555"},
         )
         tracker.close()
@@ -2994,7 +2977,7 @@ class TestUnknownIds:
         }
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), _nl_source_config()),
             "k", _make_settings(), items=[item],
         )
         row = _row(tracker, TVSHOW, item)
@@ -3020,7 +3003,7 @@ class TestUnknownIds:
         }
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), _nl_source_config()),
             "k", _make_settings(), items=[item],
         )
         row = _row(tracker, TVSHOW, item)
@@ -3044,7 +3027,7 @@ class TestUnknownIds:
         mock_tvdb.side_effect = TransientProviderError("503")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), _nl_source_config()),
             "k", _make_settings(), items=[item],
         )
         row = _row(tracker, TVSHOW, item)
@@ -3068,7 +3051,7 @@ class TestUnknownIds:
         _register_checked_show(tracker)
 
         stats = run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"}), _nl_source_config()),
             "k", _make_settings(), items=[listed, unlisted], show_id_map={},
         )
         listed_row = _row(tracker, EPISODE, listed)
@@ -3102,7 +3085,7 @@ class TestUnknownIds:
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"})),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         row = _row(tracker, EPISODE, item)
@@ -3128,7 +3111,7 @@ class TestUnknownIds:
         mock_tvdb.return_value = {"name": "Show", "overview": "TVDB plot", "names": []}
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[item],
         )
         row = _row(tracker, TVSHOW, item)
@@ -3155,9 +3138,9 @@ class TestUnknownIds:
         _register_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _make_source_config(),
-            frozenset({"title", "plot", "runtime"}),
-            "k", dict(_make_settings(), text_source_order=0), items=[item], show_id_map={10: "55555"},
+            EPISODE, tracker,
+            _libs(frozenset({"title", "plot"}) | _DETAILS, settings={"text_source_order": 0}),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
         row = _row(tracker, EPISODE, item)
@@ -3190,7 +3173,7 @@ class TestUnknownIds:
         mock_ids.return_value = {"tvdb_id": "777"}
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _nl_source_config(), frozenset({"plot", "genre"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}) | _DETAILS, _nl_source_config()),
             "k", _make_settings(), items=[accepted, crossref],
         )
         tracker.close()
@@ -3220,7 +3203,7 @@ class TestIdResolutionOrder:
         _register_checked_show(tracker)
 
         run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"title", "runtime"}),
+            EPISODE, tracker, _libs(frozenset({"title"}) | _DETAILS, _nl_source_config()),
             "k", _make_settings(), items=[item], show_id_map={},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -3244,7 +3227,8 @@ class TestIdResolutionOrder:
         _register_checked_show(tracker, checked=False)
 
         run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"title", "runtime"}),
+            EPISODE, tracker,
+            _libs(frozenset({"title"}) | _DETAILS, _nl_source_config(), {"text_source_order": 0}),
             "k", dict(_make_settings(), text_source_order=0), items=[item], show_id_map={},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -3266,7 +3250,7 @@ class TestIdResolutionOrder:
         _register_checked_show(tracker, tvdb_id=None, tmdb_id="55555", checked=False)
 
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"})),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -3283,14 +3267,25 @@ class TestIdResolutionOrder:
         self, mock_tvdb, mock_resolve, mock_ids, mock_tmdb, mock_update,
         tmp_path, kodi_stubs
     ):
+        from resources.lib.engine.scan import settings_fingerprint
+
         unknown = _nl_show()
         tmdb_only = _make_tvshow_item(title="Other", tmdb_id="12")
         tmdb_only["tvshowid"] = 11
         mock_tvdb.return_value = {"name": "", "overview": "", "names": _BUURMAN_NAMES}
         mock_ids.return_value = None
         tracker = _make_tracker(tmp_path)
+        # The plot of each show is final: old content sampled once under
+        # the current settings, so nothing is due.
+        fp = settings_fingerprint("plot", {}, "nl-NL", "tvshow", "en-US")
+        for show in (unknown, tmdb_only):
+            show["premiered"] = "2000-01-01"
+            identity = compute_identity(show, TVSHOW)
+            tracker.upsert_item("tvshow", identity, kodi_id=show["tvshowid"])
+            tracker.record_field_fetch("tvshow", identity, "plot", None, settings_fp=fp)
+        tracker.commit()
         run_scan(
-            TVSHOW, tracker, _nl_source_config(), frozenset(),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), _nl_source_config()),
             "k", _make_settings(), items=[unknown, tmdb_only],
         )
         unknown_row = _row(tracker, TVSHOW, unknown)
@@ -3324,7 +3319,7 @@ class TestCrossReferenceRecheck:
         tracker.commit()
 
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"runtime"}),
+            EPISODE, tracker, _libs(_DETAILS),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -3350,7 +3345,7 @@ class TestCrossReferenceRecheck:
         for _ in range(2):
             tracker.start_new_cycle()
             run_scan(
-                EPISODE, tracker, _make_source_config(), frozenset({"runtime"}),
+                EPISODE, tracker, _libs(_DETAILS),
                 "k", _make_settings(), items=[item], show_id_map={10: "55555"},
                 reset=True,
             )
@@ -3372,7 +3367,7 @@ class TestCrossReferenceRecheck:
         )
         tracker.commit()
         run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[item],
         )
         tracker.close()
@@ -3399,7 +3394,7 @@ class TestImdbStoreErrorLogging:
         tracker = _make_tracker(tmp_path)
         with _scan_log() as mock_log:
             run_scan(
-                MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+                MOVIE, tracker, _libs(frozenset({"rating"}), settings=settings),
                 "k", settings, items=items,
             )
         tracker.close()
@@ -3428,7 +3423,7 @@ class TestDeferredLookupsNotRecorded:
         _register_checked_show(tracker, checked=False)
 
         run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"runtime", "title"}),
+            EPISODE, tracker, _libs(frozenset({"title"}) | _DETAILS, _nl_source_config()),
             "k", _make_settings(), items=[item], show_id_map={},
         )
         after_first = _row(tracker, EPISODE, item)
@@ -3438,7 +3433,7 @@ class TestDeferredLookupsNotRecorded:
         _register_checked_show(tracker, tmdb_id="55555")
         tracker.start_new_cycle()
         run_scan(
-            EPISODE, tracker, _nl_source_config(), frozenset({"runtime", "title"}),
+            EPISODE, tracker, _libs(frozenset({"title"}) | _DETAILS, _nl_source_config()),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         tracker.close()
@@ -3459,7 +3454,7 @@ class TestDeferredLookupsNotRecorded:
         _register_checked_show(tracker, tvdb_id=None, tmdb_id="55555", checked=False)
 
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"runtime"}),
+            EPISODE, tracker, _libs(_DETAILS),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         row = _row(tracker, EPISODE, item)
@@ -3490,7 +3485,7 @@ class TestFoundEpisodeSeason:
         for _ in range(2):
             tracker.start_new_cycle()
             run_scan(
-                EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+                EPISODE, tracker, _libs(frozenset({"title"})),
                 "k", _make_settings(), items=[item], show_id_map={10: "55555"},
                 reset=True,
             )
@@ -3516,7 +3511,7 @@ class TestFoundEpisodeSeason:
         tracker = _make_tracker(tmp_path)
         _register_show(tracker)
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"runtime"}),
+            EPISODE, tracker, _libs(_DETAILS),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs_map = _fs(tracker, EPISODE, item)
@@ -3546,7 +3541,7 @@ class TestShowYearVerification:
         }
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), _nl_source_config()),
             "k", _make_settings(), items=[item],
         )
         row = _row(tracker, TVSHOW, item)
@@ -3591,7 +3586,7 @@ class TestNfoProtection:
         mock_season.return_value = [_tmdb_episode_data(title="Pilot")]
         tracker = _make_tracker(tmp_path)
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+            EPISODE, tracker, _libs(frozenset({"title"})),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs = _fs(tracker, EPISODE, item)
@@ -3614,7 +3609,7 @@ class TestNfoProtection:
         mock_fetch.return_value = _tmdb_movie_response(plot="Een mooie film")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[_make_movie_item(plot="")],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
@@ -3636,7 +3631,7 @@ class TestNfoProtection:
         tracker = _make_tracker(tmp_path)
         _seed_field(tracker, "plot", fingerprint("Old plot"))
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[_young_movie(plot="Old plot")],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
@@ -3658,7 +3653,7 @@ class TestNfoProtection:
         tracker = _make_tracker(tmp_path)
         _seed_field(tracker, "plot", fingerprint("Old plot"))
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[_young_movie(plot="Edited by the user")],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
@@ -3688,7 +3683,7 @@ class TestNfoProtection:
         tracker = _make_tracker(tmp_path)
         _seed_field(tracker, "rating", json.dumps({"imdb": slot_fingerprint(our_slot)}))
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "k", _make_settings(), items=[item],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
@@ -3713,7 +3708,7 @@ class TestNfoProtection:
         tracker = _make_tracker(tmp_path)
         with patch("resources.lib.providers.tmdb.resolve_id") as mock_resolve:
             stats = run_scan(
-                MOVIE, tracker, _make_source_config(), frozenset({"plot", "rating"}),
+                MOVIE, tracker, _libs(frozenset({"plot", "rating"})),
                 "k", _make_settings(), items=[item],
             )
         fs = _fs(tracker, MOVIE, item)
@@ -3739,16 +3734,16 @@ class TestNfoProtection:
         final["premiered"] = "2000-01-01"
         mock_fetch.return_value = _tmdb_movie_response()
         tracker = _make_tracker(tmp_path)
-        fields = frozenset({"plot", "rating", "genre"})
+        fields = frozenset({"plot", "rating"})
         run_scan(
-            MOVIE, tracker, _make_source_config(), fields,
+            MOVIE, tracker, _libs(fields),
             "k", _make_settings(), items=[final],
         )
         final["plot"] = "Great movie"  # what Kodi now holds
         tracker.start_new_cycle()
         with patch("resources.lib.engine.scan.nfo_state", return_value=NO_NFO) as mock_nfo:
             run_scan(
-                MOVIE, tracker, _make_source_config(), fields,
+                MOVIE, tracker, _libs(fields),
                 "k", _make_settings(), items=[due_a, due_b, final],
             )
         tracker.close()
@@ -3776,8 +3771,7 @@ class TestNfoProtection:
         mock_fetch.return_value = _tmdb_movie_response(runtime=120, rating=7.5, votes=1000)
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(),
-            frozenset({"runtime", "rating", "votes"}),
+            MOVIE, tracker, _libs(frozenset({"rating"}) | _DETAILS),
             "k", _make_settings(), items=[_make_movie_item()],
         )
         fs = _fs(tracker, MOVIE, _make_movie_item())
@@ -3787,7 +3781,6 @@ class TestNfoProtection:
         assert fs["runtime"]["written_value"] == fingerprint(7200)
         expected = {"themoviedb": slot_fingerprint({"rating": 7.5, "votes": 1000})}
         assert json.loads(fs["rating"]["written_value"]) == expected
-        assert json.loads(fs["votes"]["written_value"]) == expected
 
     @patch("resources.lib.data.kodi.update_item", return_value=False)
     @patch("resources.lib.providers.tmdb.fetch_movie")
@@ -3797,7 +3790,7 @@ class TestNfoProtection:
         mock_fetch.return_value = _tmdb_movie_response(plot="A plot")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[_young_movie()],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
@@ -3819,7 +3812,7 @@ class TestNfoProtection:
         tracker = _make_tracker(tmp_path)
         _seed_field(tracker, "rating", "not json")
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "k", _make_settings(), items=[item],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
@@ -3855,7 +3848,7 @@ class TestNfoProtection:
             "imdb": slot_fingerprint({"rating": 6.5, "votes": 50}),
         }), settings=settings)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+            MOVIE, tracker, _libs(frozenset({"rating"}), settings=settings),
             "k", settings, items=[item],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
@@ -3880,7 +3873,7 @@ class TestNfoProtection:
         mock_fetch.return_value = _tmdb_movie_response(plot="A plot", tagline="From TMDB")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot", "tagline"}),
+            MOVIE, tracker, _libs(frozenset({"plot", "tagline"})),
             "k", _make_settings(), items=[item], reset=True,
         )
         fs = _fs(tracker, MOVIE, item)
@@ -3902,7 +3895,7 @@ class TestSourceFromWrittenValue:
         mock_season.return_value = [_tmdb_episode_data(firstaired="2025")]
         tracker = _make_tracker(tmp_path)
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"firstaired"}),
+            EPISODE, tracker, _libs(_DETAILS),
             "k", _make_settings(), items=[item], show_id_map={10: "55555"},
         )
         fs = _fs(tracker, EPISODE, item)
@@ -3921,7 +3914,7 @@ class TestSourceFromWrittenValue:
         mock_fetch.return_value = _tmdb_movie_response(plot="Same plot")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[_make_movie_item(plot="Same plot")],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
@@ -3958,7 +3951,7 @@ class TestKodiStoredForm:
         tracker = _make_tracker(tmp_path)
         item = _young_movie(plot="")
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[item],
         )
         first = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
@@ -3972,7 +3965,7 @@ class TestKodiStoredForm:
             mock_update.reset_mock()
             mock_fetch.return_value = _tmdb_movie_response(plot=provider_plot)
             run_scan(
-                MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+                MOVIE, tracker, _libs(frozenset({"plot"})),
                 "k", _make_settings(), items=[_young_movie(plot="Een film.")],
             )
 
@@ -3994,7 +3987,7 @@ class TestKodiStoredForm:
         mock_fetch.return_value = _tmdb_movie_response(genres=[" Drama ", "", "Komedie"])
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"genre"}),
+            MOVIE, tracker, _libs(_DETAILS),
             "k", _make_settings(), items=[_make_movie_item()],
         )
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "genre")
@@ -4012,9 +4005,9 @@ class TestRatingProvenanceRows:
     def test_newer_votes_row_provenance_wins_over_stale_rating_row(
         self, mock_fetch, mock_update, _mock_imdb, _mock_nfo, tmp_path, kodi_stubs
     ):
-        """Only the votes field is managed now, so only its row holds the JSON
-        of the last write; the rating row's older JSON must not protect the
-        slot metamender wrote."""
+        """The votes row holds the JSON of the last write and the rating row
+        older JSON; the older JSON must not protect the slot metamender
+        wrote."""
         import json
 
         from resources.lib.engine.resolve import slot_fingerprint
@@ -4029,14 +4022,14 @@ class TestRatingProvenanceRows:
         ))
         _seed_field(tracker, "votes", json.dumps({"imdb": slot_fingerprint(our_slot)}))
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"votes"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "k", _make_settings(), items=[item],
         )
-        votes = tracker.get_field_status("movie", _MOVIE_IDENTITY, "votes")
+        rating = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
         tracker.close()
 
         assert _written(mock_update, "ratings")["imdb"]["rating"] == 7.0
-        assert json.loads(votes["written_value"]) == {
+        assert json.loads(rating["written_value"]) == {
             "imdb": slot_fingerprint({"rating": 7.0, "votes": 80}),
         }
 
@@ -4059,7 +4052,7 @@ class TestRatingProvenanceRows:
         _seed_field(tracker, "rating", stale)
         _seed_field(tracker, "votes", "not json")
         run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"rating", "votes"}),
+            MOVIE, tracker, _libs(frozenset({"rating"})),
             "k", _make_settings(), items=[item],
         )
         tracker.close()
@@ -4123,7 +4116,7 @@ class TestFallbackRecheck:
         mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie()],
         )
         row = _plot_row(tracker)
@@ -4131,7 +4124,7 @@ class TestFallbackRecheck:
         mock_fetch.reset_mock()
         # Old content would be final after one sample; a fallback value is not.
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         tracker.close()
@@ -4150,7 +4143,7 @@ class TestFallbackRecheck:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot", checks=3)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         row = _plot_row(tracker)
@@ -4171,7 +4164,7 @@ class TestFallbackRecheck:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot", next_retry=_today_plus(5))
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         row = _plot_row(tracker)
@@ -4188,7 +4181,7 @@ class TestFallbackRecheck:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot", checks=FALLBACK_RECHECKS)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         tracker.close()
@@ -4208,14 +4201,14 @@ class TestFallbackRecheck:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot", checks=4)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         row = _plot_row(tracker)
         tracker.start_new_cycle()
         mock_fetch.reset_mock()
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="Nederlandse plot")],
         )
         tracker.close()
@@ -4238,7 +4231,7 @@ class TestFallbackRecheck:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "Same plot", checks=2)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="Same plot")],
         )
         row = _plot_row(tracker)
@@ -4261,7 +4254,7 @@ class TestFallbackRecheck:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot", checks=3)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
             breaker=CircuitBreaker(threshold=5),
         )
@@ -4281,7 +4274,7 @@ class TestFallbackRecheck:
         mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie()],
         )
         row = _plot_row(tracker)
@@ -4299,7 +4292,7 @@ class TestFallbackRecheck:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot", checks=3)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         row = _plot_row(tracker)
@@ -4320,7 +4313,7 @@ class TestFallbackRecheck:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot", checks=7)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")], reset=True,
         )
         row = _plot_row(tracker)
@@ -4342,7 +4335,7 @@ class TestFallbackRecheck:
         mock_fetch.side_effect = _plot_by_lang({"en-US": "English plot"})
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie()], reset=True,
         )
         row = _plot_row(tracker)
@@ -4363,8 +4356,15 @@ def _two_folder_config(lang_a, lang_b):
     }
 
 
+def _settled(item):
+    """The movie holding the details _tmdb_movie_response gives, so a
+    details field has nothing to write and no fill to lose."""
+    item.update(studio=["WB"], country=["US"], runtime=7200)
+    return item
+
+
 def _movie_in(folder, movie_id, tmdb_id):
-    item = _old_movie(plot="Plot", tmdb_id=tmdb_id, movie_id=movie_id)
+    item = _settled(_old_movie(plot="Plot", tmdb_id=tmdb_id, movie_id=movie_id))
     item["file"] = _MOVIES + folder + "/film.mkv"
     item["genre"] = ["Drama"]
     item["uniqueid"] = {"tmdb": tmdb_id}
@@ -4417,14 +4417,14 @@ class TestSettingsFingerprint:
     ):
         mock_fetch.return_value = _tmdb_movie_response(plot="Plot")
         tracker = _make_tracker(tmp_path)
-        fields = frozenset({"plot", "rating", "genre"})
-        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
-                 _make_settings(), items=[_old_movie(plot="Plot")])
+        fields = frozenset({"plot", "rating"}) | _DETAILS
+        run_scan(MOVIE, tracker, _libs(fields, _nl_movie_source_config()), "k",
+                 _make_settings(), items=[_settled(_old_movie(plot="Plot"))])
         assert mock_fetch.called
         tracker.start_new_cycle()
         mock_fetch.reset_mock()
-        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
-                 _make_settings(), items=[_old_movie(plot="Plot")])
+        run_scan(MOVIE, tracker, _libs(fields, _nl_movie_source_config()), "k",
+                 _make_settings(), items=[_settled(_old_movie(plot="Plot"))])
         tracker.close()
 
         assert not mock_fetch.called
@@ -4438,30 +4438,29 @@ class TestSettingsFingerprint:
 
         mock_fetch.return_value = _tmdb_movie_response(plot="Plot")
         tracker = _make_tracker(tmp_path)
-        fields = frozenset({"plot", "rating", "votes", "genre"})
-        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
-                 _make_settings(), items=[_old_movie(plot="Plot")])
+        fields = frozenset({"plot", "rating"}) | _DETAILS
+        run_scan(MOVIE, tracker, _libs(fields, _nl_movie_source_config()), "k",
+                 _make_settings(), items=[_settled(_old_movie(plot="Plot"))])
         before = _fs(tracker, MOVIE, _old_movie())
         tracker.start_new_cycle()
         mock_fetch.reset_mock()
         settings = _make_settings()
         settings["rating_source"] = 2  # TMDB only
-        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
-                 settings, items=[_old_movie(plot="Plot")])
+        run_scan(MOVIE, tracker, _libs(fields, _nl_movie_source_config(), settings), "k",
+                 settings, items=[_settled(_old_movie(plot="Plot"))])
         after = _fs(tracker, MOVIE, _old_movie())
         tracker.start_new_cycle()
         mock_fetch.reset_mock()
-        run_scan(MOVIE, tracker, _nl_movie_source_config(), fields, "k",
-                 settings, items=[_old_movie(plot="Plot")])
+        run_scan(MOVIE, tracker, _libs(fields, _nl_movie_source_config(), settings), "k",
+                 settings, items=[_settled(_old_movie(plot="Plot"))])
         tracker.close()
 
         assert after["rating"]["settings_fp"] == settings_fingerprint(
             "rating", settings, "nl-NL", "movie",
         )
-        assert after["votes"]["settings_fp"] != before["votes"]["settings_fp"]
-        for f in ("rating", "votes"):
-            assert after[f]["fetched_at"] == date.today().isoformat()
-            assert after[f]["fetch_count"] == 1  # re-baselined
+        assert after["rating"]["settings_fp"] != before["rating"]["settings_fp"]
+        assert after["rating"]["fetched_at"] == date.today().isoformat()
+        assert after["rating"]["fetch_count"] == 1  # re-baselined
         for f in ("plot", "genre"):
             assert after[f] == before[f]
         # Once re-checked, the new settings are the baseline.
@@ -4474,16 +4473,16 @@ class TestSettingsFingerprint:
     ):
         mock_fetch.return_value = _tmdb_movie_response(plot="Plot", genres=["Drama"])
         tracker = _make_tracker(tmp_path)
-        fields = frozenset({"plot", "genre", "rating"})
+        fields = frozenset({"plot", "rating"}) | _DETAILS
         movie_a = _movie_in("a", 1, "111")
         movie_b = _movie_in("b", 2, "222")
-        run_scan(MOVIE, tracker, _two_folder_config("nl-NL", "en-US"), fields, "k",
+        run_scan(MOVIE, tracker, _libs(fields, _two_folder_config("nl-NL", "en-US")), "k",
                  _make_settings(), items=[movie_a, movie_b])
         before_b = _fs(tracker, MOVIE, movie_b)
         rating_a = _fs(tracker, MOVIE, movie_a)["rating"]
         tracker.start_new_cycle()
         mock_fetch.reset_mock()
-        run_scan(MOVIE, tracker, _two_folder_config("de-DE", "en-US"), fields, "k",
+        run_scan(MOVIE, tracker, _libs(fields, _two_folder_config("de-DE", "en-US")), "k",
                  _make_settings(), items=[movie_a, movie_b])
         after_a = _fs(tracker, MOVIE, movie_a)
         after_b = _fs(tracker, MOVIE, movie_b)
@@ -4507,14 +4506,14 @@ class TestSettingsFingerprint:
         mock_movie.return_value = _tmdb_movie_response(plot="Plot")
         show = _make_tvshow_item()
         show.update(plot="Plot", genre=["Drama"], premiered="2000-01-01")
-        movie = _old_movie(plot="Plot")
-        fields = frozenset({"plot", "genre"})
+        movie = _settled(_old_movie(plot="Plot"))
+        fields = frozenset({"plot"}) | _DETAILS
         tracker = _make_tracker(tmp_path)
 
         def scan_both(settings):
-            run_scan(TVSHOW, tracker, _make_source_config(), fields, "k",
+            run_scan(TVSHOW, tracker, _libs(fields, settings=settings), "k",
                      settings, items=[show])
-            run_scan(MOVIE, tracker, _make_source_config(), fields, "k",
+            run_scan(MOVIE, tracker, _libs(fields, settings=settings), "k",
                      settings, items=[movie])
 
         scan_both(_make_settings())
@@ -4542,19 +4541,19 @@ class TestSettingsFingerprint:
         mock_fetch.return_value = _tmdb_movie_response()
         tracker = _make_tracker(tmp_path)
         fields = frozenset({"rating"})
-        run_scan(MOVIE, tracker, _make_source_config(), fields, "k",
+        run_scan(MOVIE, tracker, _libs(fields), "k",
                  _make_settings(), items=[_old_movie()])
         before = _fs(tracker, MOVIE, _old_movie())["rating"]
         tracker.start_new_cycle()
         settings = _make_settings()
         settings["rating_source"] = 3  # IMDb only, store not loaded: transient
         settings["imdb_ready"] = False
-        run_scan(MOVIE, tracker, _make_source_config(), fields, "k",
+        run_scan(MOVIE, tracker, _libs(fields, settings=settings), "k",
                  settings, items=[_old_movie()])
         held = _fs(tracker, MOVIE, _old_movie())["rating"]
         tracker.start_new_cycle()
         settings["imdb_ready"] = True
-        run_scan(MOVIE, tracker, _make_source_config(), fields, "k",
+        run_scan(MOVIE, tracker, _libs(fields, settings=settings), "k",
                  settings, items=[_old_movie()])
         after = _fs(tracker, MOVIE, _old_movie())["rating"]
         tracker.close()
@@ -4574,13 +4573,13 @@ class TestSettingsFingerprint:
         tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
         tracker.record_field_fetch("movie", _MOVIE_IDENTITY, "plot", next_retry=None)
         tracker.commit()
-        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+        run_scan(MOVIE, tracker, _libs(frozenset({"plot"})), "k",
                  _make_settings(), items=[_old_movie(plot="Plot")])
         first = mock_fetch.called
         row = _plot_row(tracker)
         tracker.start_new_cycle()
         mock_fetch.reset_mock()
-        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+        run_scan(MOVIE, tracker, _libs(frozenset({"plot"})), "k",
                  _make_settings(), items=[_old_movie(plot="Plot")])
         tracker.close()
 
@@ -4606,7 +4605,7 @@ class TestSettingsFingerprint:
         tracker.commit()
         settings = _make_settings()
         settings["rating_source"] = 2
-        run_scan(MOVIE, tracker, _make_source_config(), frozenset({"rating"}), "k",
+        run_scan(MOVIE, tracker, _libs(frozenset({"rating"}), settings=settings), "k",
                  settings, items=[_young_movie()])
         row = tracker.get_field_status("movie", _MOVIE_IDENTITY, "rating")
         tracker.close()
@@ -4671,7 +4670,7 @@ class TestExtractIds:
         mock_get_all.return_value = [show]
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(),
         )
         assert stats["skipped"] == 1
@@ -4707,7 +4706,7 @@ class TestUnmappedLanguage:
             for _ in range(2):
                 tracker.start_new_cycle()
                 run_scan(
-                    EPISODE, tracker, config, frozenset({"title"}),
+                    EPISODE, tracker, _libs(frozenset({"title"}), config, settings),
                     "k", settings, items=[first, second], show_id_map={10: "55555"},
                     reset=True,
                 )
@@ -4754,7 +4753,7 @@ class TestPerItemOutcomeCounts:
 
         with _scan_log() as mock_log:
             run_scan(
-                EPISODE, tracker, _nl_source_config(), frozenset({"title"}),
+                EPISODE, tracker, _libs(frozenset({"title"}), _nl_source_config()),
                 "k", _make_settings(), items=items, show_id_map={},
             )
         tracker.close()
@@ -4780,7 +4779,7 @@ class TestPerItemOutcomeCounts:
 
         with _scan_log() as mock_log:
             run_scan(
-                EPISODE, tracker, _make_source_config(), frozenset({"title"}),
+                EPISODE, tracker, _libs(frozenset({"title"})),
                 "k", _make_settings(), items=[_episode(100, {"tvdb": "888"})],
                 show_id_map={10: "55555"},
             )
@@ -4804,7 +4803,7 @@ class TestTvdbAuthStats:
         mock_tmdb.return_value = _tmdb_tvshow_response()
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"genre"}),
+            TVSHOW, tracker, _libs(_DETAILS),
             "k", _make_settings(), items=[_make_tvshow_item()], breaker=breaker,
         )
         tracker.close()
@@ -4819,7 +4818,7 @@ class TestTvdbAuthStats:
         mock_tmdb.return_value = _tmdb_tvshow_response()
         tracker = _make_tracker(tmp_path)
         stats = run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"genre"}),
+            TVSHOW, tracker, _libs(_DETAILS),
             "k", _make_settings(), items=[_make_tvshow_item()], breaker=breaker,
         )
         tracker.close()
@@ -4847,7 +4846,7 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), self._german_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         row = _plot_row(tracker)
@@ -4867,7 +4866,7 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), self._german_config()),
             "k", _make_settings(), items=[_old_movie(plot="My own plot")],
         )
         tracker.close()
@@ -4893,7 +4892,7 @@ class TestFallbackSettingChange:
         )
         tracker.commit()
         run_scan(
-            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), self._german_config()),
             "k", _make_settings(), items=[_old_movie(plot="Nederlandse plot")],
         )
         tracker.close()
@@ -4911,7 +4910,7 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), self._german_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         tracker.close()
@@ -4927,7 +4926,7 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), self._german_config()),
             "k", _make_settings(), items=[_old_movie(plot=" English plot ")],
         )
         tracker.close()
@@ -4951,7 +4950,7 @@ class TestFallbackSettingChange:
         _seed_fallback_plot(tracker, "English plot")
         before = _plot_row(tracker)
         run_scan(
-            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), self._german_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         after = _plot_row(tracker)
@@ -4975,7 +4974,7 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, self._german_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), self._german_config()),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         row = _plot_row(tracker)
@@ -4999,7 +4998,7 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, config, frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), config),
             "k", _make_settings(), items=[_old_movie(plot="English plot")],
         )
         tracker.close()
@@ -5018,7 +5017,7 @@ class TestFallbackSettingChange:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot")
         run_scan(
-            MOVIE, tracker, config, frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), config),
             "k", _make_settings(), items=[_old_movie(plot="My own plot")],
         )
         tracker.close()
@@ -5036,7 +5035,7 @@ class TestFallbackSettingChange:
         config["sources"][0]["fallback_language"] = "de-DE"
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, config, frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), config),
             "k", _make_settings(), items=[_old_movie(plot="")],
         )
         tracker.close()
@@ -5053,7 +5052,7 @@ class TestFallbackSettingChange:
         del config["fallback_language"]
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, config, frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), config),
             "k", _make_settings(), items=[_old_movie(plot="")],
         )
         tracker.close()
@@ -5082,7 +5081,7 @@ class TestFallbackRecheckCounting:
             tracker.commit()
             tracker.start_new_cycle()
             run_scan(
-                MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+                MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config(), settings),
                 "k", settings, items=[_young_movie(plot="English plot")],
             )
         row = _plot_row(tracker)
@@ -5102,7 +5101,7 @@ class TestFallbackRecheckCounting:
         tracker = _make_tracker(tmp_path)
         _seed_fallback_plot(tracker, "English plot", checks=2)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_young_movie(plot="")],
         )
         row = _plot_row(tracker)
@@ -5125,7 +5124,7 @@ class TestSettingsChangeWrites:
         })
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[_old_movie()],
         )
         tracker.start_new_cycle()
@@ -5135,7 +5134,7 @@ class TestSettingsChangeWrites:
             "default_language": "en-US",
         }
         run_scan(
-            MOVIE, tracker, german, frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), german),
             "k", _make_settings(), items=[_old_movie(plot="Nederlandse plot")],
         )
         row = _plot_row(tracker)
@@ -5191,7 +5190,7 @@ class TestShowIdConfirmedByEpisodes:
                 patch("resources.lib.data.kodi.update_item", return_value=True), \
                 _scan_log() as mock_log:
             stats = run_scan(
-                TVSHOW, tracker, _nl_source_config(), frozenset({"plot"}),
+                TVSHOW, tracker, _libs(frozenset({"plot"}), _nl_source_config()),
                 "k", _make_settings(), items=[item or _buurman_show()],
             )
         row = _row(tracker, TVSHOW, item or _buurman_show())
@@ -5340,7 +5339,7 @@ class TestIdentitySurvivesIdWriteBack:
         fields = frozenset({"plot"})
         assert compute_identity(item, TVSHOW) == "De Snorkels (1984)"
 
-        run_scan(TVSHOW, tracker, _make_source_config(), fields, "k",
+        run_scan(TVSHOW, tracker, _libs(fields), "k",
                  _make_settings(), items=[item])
         written = [c.kwargs["uniqueid"] for c in mock_update.call_args_list
                    if "uniqueid" in c.kwargs]
@@ -5349,7 +5348,7 @@ class TestIdentitySurvivesIdWriteBack:
         item["uniqueid"] = dict(written[0])
         item["plot"] = "Great show"  # what Kodi now holds
         tracker.begin_cycle(resume_interrupted=False)
-        run_scan(TVSHOW, tracker, _make_source_config(), fields, "k",
+        run_scan(TVSHOW, tracker, _libs(fields), "k",
                  _make_settings(), items=[item])
 
         rows = tracker._conn.execute(
@@ -5383,7 +5382,7 @@ class TestNewOnlyScan:
         tracker.commit()
 
         stats = run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+            MOVIE, tracker, _libs(frozenset({"plot"})), "k",
             _make_settings(), new_only=True,
         )
         tracker.close()
@@ -5409,7 +5408,7 @@ class TestDuplicateIdentities:
 
     def _scan(self, tracker, items, **kw):
         return run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+            MOVIE, tracker, _libs(frozenset({"plot"})), "k",
             _make_settings(), items=items, **kw,
         )
 
@@ -5532,7 +5531,7 @@ class TestUnconfiguredLanguage:
         )
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, {"sources": []}, frozenset({"plot", "tagline", "genre", "runtime"}),
+            MOVIE, tracker, _libs(frozenset({"plot", "tagline"}) | _DETAILS, {"sources": []}),
             "k", _make_settings(), items=[self._item()],
         )
         tracker.close()
@@ -5556,7 +5555,7 @@ class TestUnconfiguredLanguage:
         ]}
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, config, frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), config),
             "k", _make_settings(), items=[self._item()],
         )
         tracker.close()
@@ -5573,8 +5572,8 @@ class TestUnconfiguredLanguage:
         mock_tmdb.return_value = _tmdb_movie_response(plot="An English plot")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, {"sources": [], "default_language": "en-US"},
-            frozenset({"plot"}), "k", _make_settings(), items=[self._item()],
+            MOVIE, tracker, _libs(frozenset({"plot"}), {"sources": [], "default_language": "en-US"}),
+            "k", _make_settings(), items=[self._item()],
         )
         tracker.close()
 
@@ -5602,7 +5601,7 @@ class TestUnconfiguredLanguage:
         tracker.commit()
         mock_tmdb.return_value = _tmdb_movie_response(plot="Nieuwe plot")
         run_scan(
-            MOVIE, tracker, {"sources": []}, frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"}), {"sources": []}),
             "k", _make_settings(), items=[item],
         )
         tracker.close()
@@ -5620,7 +5619,7 @@ def test_empty_source_fallback_turns_off_the_default(
     config["sources"][0]["fallback_language"] = ""
     tracker = _make_tracker(tmp_path)
     run_scan(
-        MOVIE, tracker, config, frozenset({"plot"}),
+        MOVIE, tracker, _libs(frozenset({"plot"}), config),
         "k", _make_settings(), items=[_old_movie(plot="")],
     )
     tracker.close()
@@ -5648,7 +5647,7 @@ class TestRefillBlankedFinal:
 
     def _scan(self, tracker):
         return run_scan(
-            MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            MOVIE, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[_old_movie(plot="")],
         )
 
@@ -5760,7 +5759,7 @@ class TestFollowTheScraper:
         mock_tvdb.return_value = {"name": "Show", "overview": "TVDB plot", "names": []}
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"})),
             "k", _make_settings(), items=[item],
         )
         tracker.close()
@@ -5781,7 +5780,7 @@ class TestFollowTheScraper:
         settings["text_source_order"] = 0
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"plot"}),
+            TVSHOW, tracker, _libs(frozenset({"plot"}), settings=settings),
             "k", settings, items=[item],
         )
         tracker.close()
@@ -5812,7 +5811,7 @@ class TestMainTitles:
         item = _make_movie_item(title="A Monster in Paris")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"main_title"}),
+            MOVIE, tracker, _libs(frozenset({"main_title"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[item],
         )
         tracker.close()
@@ -5831,7 +5830,7 @@ class TestMainTitles:
         item = _make_movie_item(title="")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            MOVIE, tracker, _nl_movie_source_config(), frozenset({"main_title"}),
+            MOVIE, tracker, _libs(frozenset({"main_title"}), _nl_movie_source_config()),
             "k", _make_settings(), items=[item],
         )
         tracker.close()
@@ -5852,7 +5851,7 @@ class TestMainTitles:
         mock_tmdb.return_value = _tmdb_tvshow_response(title="The Snorks", plot="P")
         tracker = _make_tracker(tmp_path)
         run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"main_title", "plot"}),
+            TVSHOW, tracker, _libs(frozenset({"main_title", "plot"})),
             "k", _make_settings(), items=[item],
         )
         tracker.close()
@@ -5871,7 +5870,7 @@ class TestMainTitles:
         tracker.upsert_item("episode", "Test Show S01E01", kodi_id=100)
         tracker.commit()
         run_scan(
-            TVSHOW, tracker, _make_source_config(), frozenset({"main_title"}),
+            TVSHOW, tracker, _libs(frozenset({"main_title"})),
             "k", _make_settings(), items=[item],
         )
         names = [r[0] for r in tracker._conn.execute(
@@ -5894,7 +5893,7 @@ class TestMainTitles:
         with patch.object(tracker, "rename_show_episodes", return_value=None), \
                 patch("resources.lib.engine.scan.log") as log:
             run_scan(
-                TVSHOW, tracker, _make_source_config(), frozenset({"main_title"}),
+                TVSHOW, tracker, _libs(frozenset({"main_title"})),
                 "k", _make_settings(), items=[item],
             )
         reason = tracker.get_field_status(
@@ -5905,6 +5904,140 @@ class TestMainTitles:
         assert reason == "updated"
         events = [c.kwargs.get("event") for c in log.warning.call_args_list]
         assert "scan.rekey_failed" in events
+
+
+class TestKeepOriginalTitle:
+    """Library title_mode "original": a show's or movie's title is TMDB's
+    original title whatever the library's language; episodes are untouched."""
+
+    @staticmethod
+    def _lib(**overrides):
+        return one_library(frozenset({"main_title"}), title_mode="original", **overrides)
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_original_mode_sets_original_title_movie(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(
+            title="Tummy Tom", original_title="Dikkie Dik")
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, self._lib(), "k", _make_settings(),
+                 items=[_make_movie_item(title="Old")])
+        fs = _fs(tracker, MOVIE, _make_movie_item(title="Old"))
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Dikkie Dik"
+        assert _count(fs, "title") == 1
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_original_mode_show(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
+        mock_fetch.return_value = _tmdb_tvshow_response(
+            title="Tummy Tom", original_title="Dikkie Dik")
+        tracker = _make_tracker(tmp_path)
+        run_scan(TVSHOW, tracker, self._lib(), "k", _make_settings(),
+                 items=[_make_tvshow_item(title="Old")])
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Dikkie Dik"
+
+    @patch("resources.lib.engine.scan.nfo_state", return_value=NFO)
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_original_mode_keeps_nfo_title(
+        self, mock_fetch, mock_update, _nfo, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(
+            title="Tummy Tom", original_title="Dikkie Dik")
+        item = _make_movie_item(title="Mijn Titel")
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, self._lib(), "k", _make_settings(), items=[item])
+        fs = _fs(tracker, MOVIE, item)
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        assert fs["title"]["written_value"] is None
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_original_mode_no_tmdb_id_keeps_title(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_movie_item(title="Old", tmdb_id="")
+        item["uniqueid"] = {}
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, self._lib(), "k", _make_settings(), items=[item])
+        tracker.close()
+
+        mock_fetch.assert_not_called()
+        assert _written(mock_update, "title") is None
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_season")
+    def test_original_mode_leaves_episode_titles_in_language(
+        self, mock_season, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_season.return_value = [_tmdb_episode_data(title="Pilot")]
+        item = _make_episode_item(title="Episode 1")
+        tracker = _make_tracker(tmp_path)
+        run_scan(
+            EPISODE, tracker, one_library(frozenset({"title"}), title_mode="original"),
+            "k", _make_settings(), items=[item], show_id_map={10: "55555"},
+        )
+        tracker.close()
+
+        assert _written(mock_update, "title") == "Pilot"
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_original_mode_transient_tmdb_is_transient(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        mock_fetch.side_effect = TransientProviderError("http 503")
+        item = _make_movie_item(title="Old")
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, self._lib(), "k", _make_settings(), items=[item])
+        fs = _fs(tracker, MOVIE, item)
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        assert fs["title"]["fetch_count"] == 0
+        assert fs["title"]["last_reason"] == "unchecked"
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_original_mode_transient_tmdb_show_keeps_the_clock(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        mock_fetch.side_effect = TransientProviderError("http 503")
+        item = _make_tvshow_item(title="Old")
+        tracker = _make_tracker(tmp_path)
+        run_scan(TVSHOW, tracker, self._lib(), "k", _make_settings(), items=[item])
+        fs = _fs(tracker, TVSHOW, item)
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
+        assert fs["title"]["fetch_count"] == 0
+        assert fs["title"]["last_reason"] == "unchecked"
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_original_mode_show_without_original_name_writes_nothing(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        # fetch_tvshow gives "" when TMDB has no original_name.
+        mock_fetch.return_value = _tmdb_tvshow_response(title="Tummy Tom", original_title="")
+        item = _make_tvshow_item(title="Old")
+        tracker = _make_tracker(tmp_path)
+        run_scan(TVSHOW, tracker, self._lib(), "k", _make_settings(), items=[item])
+        tracker.close()
+
+        assert _written(mock_update, "title") is None
 
 
 class TestCertifications:
@@ -5959,7 +6092,7 @@ class TestCertifications:
                    return_value=fetch[1](certifications=certs, plot="P")), \
                 patch("resources.lib.data.kodi.update_item", return_value=True) as upd, \
                 patch("resources.lib.engine.scan.nfo_state", return_value=NFO if nfo else NO_NFO):
-            stats = run_scan(media, tracker, _make_source_config(), frozenset(fields), "k",
+            stats = run_scan(media, tracker, _libs(frozenset(fields), settings=settings), "k",
                              settings, items=[item], cert_gate=gate)
         return upd, stats, gate
 
@@ -6259,7 +6392,7 @@ class TestFollowScraperRatings:
                 patch("resources.lib.providers.imdb_ratings.lookup",
                       return_value=(7.9, 2000)):
             run_scan(
-                MOVIE, tracker, _make_source_config(), frozenset({"rating"}),
+                MOVIE, tracker, _libs(frozenset({"rating"}), settings=settings),
                 "k", settings, items=[item],
             )
             written = _written(upd, "ratings")
@@ -6305,7 +6438,7 @@ class TestEpisodesWithoutUsableIds:
         tracker.upsert_item("tvshow", "tmdb:55555", kodi_id=10, tmdb_id="55555",
                             ids_checked="2026-01-01")
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"plot"}),
+            EPISODE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(), show_id_map={10: "55555"},
         )
         row = tracker.get_item("episode", "Test Show S01E01")
@@ -6329,7 +6462,7 @@ class TestEpisodesWithoutUsableIds:
         tracker.upsert_item("tvshow", "tmdb:55555", kodi_id=10, tmdb_id="55555",
                             ids_checked="2026-01-01")
         run_scan(
-            EPISODE, tracker, _make_source_config(), frozenset({"plot"}),
+            EPISODE, tracker, _libs(frozenset({"plot"})),
             "fake_key", _make_settings(), show_id_map={10: "55555"},
         )
         row = tracker.get_item("episode", "Test Show S01E01")
@@ -6359,7 +6492,7 @@ class TestUpdateNowReasksEmptyLookups:
         tracker.upsert_item("movie", "imdb:tt0000001", kodi_id=item["movieid"],
                             imdb_id="tt0000001", ids_checked=self._yesterday())
         with patch("resources.lib.providers.tmdb.resolve_id", return_value=None) as find:
-            run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+            run_scan(MOVIE, tracker, _libs(frozenset({"plot"})),
                      "k", _make_settings(), items=[item], reset=reset)
         tracker.close()
         assert find.called is reset
@@ -6382,7 +6515,7 @@ class TestUpdateNowReasksEmptyLookups:
         tracker.upsert_item("episode", "Test Show S01E01", tmdb_id="99999",
                             tmdb_season=1, number_matched=1, orig_title="Pilot",
                             orig_aired="2020-01-01", ids_checked=self._yesterday())
-        run_scan(EPISODE, tracker, _make_source_config(), frozenset({"plot"}),
+        run_scan(EPISODE, tracker, _libs(frozenset({"plot"})),
                  "k", _make_settings(), items=[ep], show_id_map={10: "55555"},
                  reset=True)
         row = tracker.get_item("episode", "Test Show S01E01")
@@ -6397,10 +6530,10 @@ class TestProviderAnswers:
     def test_stats_say_whether_tmdb_answered(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
         mock_fetch.return_value = _tmdb_movie_response(plot="New")
         tracker = _make_tracker(tmp_path)
-        stats = run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+        stats = run_scan(MOVIE, tracker, _libs(frozenset({"plot"})),
                          "k", _make_settings(), items=[_make_movie_item(plot="Old")], reset=True)
         assert stats["tmdb_answered"] is True and stats["tvdb_answered"] is False
-        stats = run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}),
+        stats = run_scan(MOVIE, tracker, _libs(frozenset({"plot"})),
                          "k", _make_settings(), items=[])
         tracker.close()
         assert stats["tmdb_answered"] is False
@@ -6435,7 +6568,7 @@ class TestFieldReasonsAndKeep:
                 patch("resources.lib.data.kodi.update_item", return_value=update) as upd, \
                 patch("resources.lib.engine.scan.nfo_state", return_value=NFO if nfo else NO_NFO):
             run_scan(
-                MOVIE, tracker, source_config or _make_source_config(), frozenset(fields),
+                MOVIE, tracker, _libs(frozenset(fields), source_config, settings),
                 "k", settings or _make_settings(), items=[item], reset=reset,
             )
         return upd, fetch
@@ -6453,7 +6586,7 @@ class TestFieldReasonsAndKeep:
         tracker = _make_tracker(tmp_path)
         item = _make_movie_item(plot="Scraper plot")
         upd, _f = self._scan(
-            tracker, item, ("plot", "genre", "tagline", "director", "rating"),
+            tracker, item, _DETAILS | {"plot", "tagline", "director", "writer", "rating"},
             tmdb=_tmdb_movie_response(plot="Fresh plot", genres=["Drama"]),
         )
         keep = self._keep(tracker)
@@ -6549,7 +6682,7 @@ class TestFieldReasonsAndKeep:
         with patch("resources.lib.providers.tmdb.fetch_movie",
                    side_effect=TransientProviderError("http 503")), \
                 patch("resources.lib.data.kodi.update_item", return_value=True):
-            run_scan(MOVIE, tracker, _make_source_config(), frozenset({"plot"}), "k",
+            run_scan(MOVIE, tracker, _libs(frozenset({"plot"})), "k",
                      _make_settings(), items=[_young_movie(plot="Old")])
         after = tracker.get_field_status("movie", _MOVIE_IDENTITY, "plot")
         tracker.close()
@@ -6635,7 +6768,7 @@ class TestFieldReasonsAndKeep:
         with patch("resources.lib.providers.tmdb.fetch_season",
                    return_value=[_tmdb_episode_data()]), \
                 patch("resources.lib.data.kodi.update_item", return_value=True) as upd:
-            run_scan(EPISODE, tracker, _make_source_config(), frozenset({"plot"}),
+            run_scan(EPISODE, tracker, _libs(frozenset({"plot"})),
                      "k", _make_settings(), items=[episode], show_id_map={10: "55555"},
                      reset=True)
         reason = tracker.get_field_status("episode", "Original Show S01E01", "plot")
@@ -6703,7 +6836,7 @@ class TestFieldReasonsAndKeep:
                    return_value=_tmdb_movie_response(certifications={"NL": "16"})), \
                 patch("resources.lib.data.kodi.update_item", return_value=True) as upd, \
                 patch("resources.lib.engine.scan._resolve_cert") as resolve:
-            run_scan(MOVIE, tracker, _make_source_config(), frozenset({"mpaa", "plot"}), "k",
+            run_scan(MOVIE, tracker, _libs(frozenset({"mpaa", "plot"}), settings=settings), "k",
                      settings, items=[item], cert_gate=gate, reset=True)
         reason = self._reason(tracker, "mpaa")
         tracker.close()
@@ -6727,3 +6860,188 @@ class TestFieldReasonsAndKeep:
 
         assert _written(upd, "plot") == "Newer plot"
         assert keep["plot"]["original"] == "Scraper plot"
+
+
+# ---------------------------------------------------------------------------
+# Per-library settings: each item is scanned with its own library's options
+# ---------------------------------------------------------------------------
+
+
+def _two_libraries(a_toggles, b_toggles, **a_overrides):
+    from resources.lib.data.libraries import Library, LibraryConfig
+    a = Library(path="smb://server/movies/", label="A", included=True, language="en-US",
+                fallback_language="", toggles=frozenset(a_toggles), **a_overrides)
+    b = Library(path="smb://server/films/", label="B", included=True, language="en-US",
+                fallback_language="", toggles=frozenset(b_toggles))
+    return LibraryConfig([a, b])
+
+
+def _movie_under(folder, movie_id, tmdb_id, **kw):
+    item = _make_movie_item(movie_id=movie_id, tmdb_id=tmdb_id, **kw)
+    item["file"] = folder + "m{}.mkv".format(movie_id)
+    item["uniqueid"] = {"tmdb": tmdb_id}
+    return item
+
+
+class TestPerLibrarySettings:
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_items_use_their_own_library_fields(
+        self, mock_fetch, mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response(plot="New plot", tagline="New tagline")
+        items = [_movie_under("smb://server/movies/", 1, "1"),
+                 _movie_under("smb://server/films/", 2, "2")]
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, _two_libraries({"plots"}, {"taglines"}),
+                 "key", _make_settings(), items=items)
+        tracker.close()
+        written = {c.args[0]: set(c.kwargs) for c in mock_update.call_args_list}
+        assert written == {1: {"plot"}, 2: {"tagline"}}
+
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_item_in_excluded_library_is_skipped_and_stamped(
+        self, mock_fetch, tmp_path, kodi_stubs
+    ):
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", _MOVIE_IDENTITY, kodi_id=1, tmdb_id="12345")
+        tracker.update_last_seen("movie", _MOVIE_IDENTITY, "2020-01-01")
+        tracker.commit()
+        stats = run_scan(MOVIE, tracker, one_library({"plot"}, included=False),
+                         "key", _make_settings(), items=[_make_movie_item()])
+        row = tracker.get_item("movie", _MOVIE_IDENTITY)
+        tracker.close()
+        assert not mock_fetch.called
+        assert stats["excluded"] == 1 and stats["unmatched"] == 0
+        assert row["last_seen"] == date.today().isoformat()
+
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_excluded_subfolder_is_skipped(self, mock_fetch, tmp_path, kodi_stubs):
+        item = _make_movie_item()
+        item["file"] = "smb://server/movies/kids/test.mkv"
+        libs = one_library({"plot"}, subfolders=(
+            {"path": "smb://server/movies/kids/", "enabled": False},))
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(MOVIE, tracker, libs,
+                         "key", _make_settings(), items=[item])
+        tracker.close()
+        assert not mock_fetch.called
+        assert stats["excluded"] == 1
+
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_item_in_no_library_is_skipped(self, mock_fetch, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(MOVIE, tracker, one_library({"plot"}, path="smb://other/"),
+                         "key", _make_settings(), items=[_make_movie_item()])
+        row = tracker.get_item("movie", _MOVIE_IDENTITY)
+        tracker.close()
+        assert not mock_fetch.called
+        assert stats["unmatched"] == 1 and stats["excluded"] == 0
+        assert row is None
+
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_library_with_no_fields_writes_nothing(self, mock_fetch, tmp_path, kodi_stubs):
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(MOVIE, tracker, one_library(set()),
+                         "key", _make_settings(),
+                         items=[_make_movie_item()])
+        fs = tracker.get_field_status_map("movie", _MOVIE_IDENTITY)
+        tracker.close()
+        assert not mock_fetch.called
+        assert fs == {}
+        assert stats["skipped"] == 1
+
+    @patch("resources.lib.providers.tvdb.fetch_series")
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    @patch("resources.lib.providers.tmdb.resolve_id", return_value=None)
+    def test_show_in_library_with_no_fields_is_not_looked_up(
+        self, mock_resolve, mock_tmdb, mock_tvdb, tmp_path, kodi_stubs
+    ):
+        # An unchecked show is normally resolved even with nothing due; with
+        # no fields switched on there is nothing to resolve it for.
+        item = _make_tvshow_item()
+        item["uniqueid"] = {"tvdb": "777"}
+        identity = compute_identity(item, TVSHOW)
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(TVSHOW, tracker, one_library(set()),
+                         "key", _make_settings(), items=[item])
+        row = tracker.get_item("tvshow", identity)
+        tracker.close()
+        assert not (mock_resolve.called or mock_tmdb.called or mock_tvdb.called)
+        assert row is None
+        assert stats["skipped"] == 1
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tvdb.fetch_series")
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_library_whose_providers_are_down_does_not_stop_the_pass(
+        self, mock_tmdb, mock_tvdb, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.data.libraries import Library, LibraryConfig
+        a = Library(path="smb://server/a/", label="A", included=True, language="en-US",
+                    fallback_language="", toggles=frozenset({"ratings"}))
+        b = Library(path="smb://server/b/", label="B", included=True, language="en-US",
+                    fallback_language="", toggles=frozenset({"plots"}), text_source_order=1)
+        show_a = _make_tvshow_item(tmdb_id="1")
+        show_a.update(tvshowid=1, file="smb://server/a/show/")
+        show_a["uniqueid"] = {"tmdb": "1", "tvdb": "11"}
+        show_b = _make_tvshow_item(tmdb_id="2")
+        show_b.update(tvshowid=2, file="smb://server/b/show/")
+        show_b["uniqueid"] = {"tmdb": "2", "tvdb": "22"}
+        mock_tvdb.return_value = {"name": "Show", "overview": "TVDB plot", "names": []}
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(TVSHOW, tracker, LibraryConfig([a, b]), "k", _make_settings(),
+                         items=[show_a, show_b], breaker=_tripped_breaker("tmdb"))
+        fs_a = _fs(tracker, TVSHOW, show_a)
+        fs_b = _fs(tracker, TVSHOW, show_b)
+        tracker.close()
+        assert stats["aborted"] is False
+        assert stats["transient"] == 1 and stats["processed"] == 1
+        assert fs_a == {}
+        assert _count(fs_b, "plot") == 1
+        assert mock_update.call_args.args[0] == 2
+        assert _written(mock_update, "plot") == "TVDB plot"
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_fingerprint_changes_only_for_changed_library(
+        self, mock_fetch, _mock_update, tmp_path, kodi_stubs
+    ):
+        mock_fetch.return_value = _tmdb_movie_response()
+        items = [_movie_under("smb://server/movies/", 1, "1", rating=7.5),
+                 _movie_under("smb://server/films/", 2, "2", rating=7.5)]
+        for item in items:
+            item["premiered"] = "2000-01-01"  # old: final after one sample
+        tracker = _make_tracker(tmp_path)
+        run_scan(MOVIE, tracker, _two_libraries({"ratings"}, {"ratings"}),
+                 "key", _make_settings(), items=items)
+        tracker.start_new_cycle()
+        mock_fetch.reset_mock()
+        run_scan(MOVIE, tracker, _two_libraries({"ratings"}, {"ratings"}, rating_source=2),
+                 "key", _make_settings(), items=items)
+        tracker.close()
+        assert [c.args[0] for c in mock_fetch.call_args_list] == ["1"]
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_reset_ignores_inclusion(self, mock_fetch, mock_update, tmp_path, kodi_stubs):
+        mock_fetch.return_value = _tmdb_movie_response(plot="Fetched plot")
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(MOVIE, tracker, one_library({"plot"}, included=False),
+                         "key", _make_settings(), items=[_make_movie_item()], reset=True)
+        tracker.close()
+        assert mock_fetch.called
+        assert mock_update.call_args.kwargs == {"plot": "Fetched plot"}
+        assert stats["excluded"] == 0
+
+    def test_title_fingerprint_includes_title_mode(self):
+        import json
+        from resources.lib.engine.scan import settings_fingerprint as sfp
+        for media in ("movie", "tvshow"):
+            assert (sfp("title", {"title_mode": "original"}, "en-US", media)
+                    != sfp("title", {"title_mode": "language"}, "en-US", media))
+        assert (sfp("title", {"title_mode": "original"}, "en-US", "episode")
+                == sfp("title", {"title_mode": "language"}, "en-US", "episode"))
+        # The library-language mode keeps the fingerprint titles already have.
+        assert sfp("title", {"title_mode": "language"}, "en-US", "movie") == json.dumps(
+            {"fallback_language": "", "folder_language": "en-US"}, sort_keys=True)

@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any, Dict, Generator
+from typing import TYPE_CHECKING, Any, Dict, Generator
 from unittest.mock import MagicMock
 
 import pytest
+
+if TYPE_CHECKING:
+    from resources.lib.data.libraries import LibraryConfig
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +101,18 @@ sys.modules.setdefault("xbmcvfs", MagicMock())
 # script.module.imdbratings is a Kodi add-on module, not installed under pytest.
 # The default stand-in reads as a store that is not loaded and has no ratings,
 # so a test that needs a loaded store must say so (see imdbratings_stub).
+# StoreError must be a real exception class: a MagicMock attribute cannot be
+# named in an except clause.
+
+
+class _StoreError(Exception):
+    """Stand-in for imdbratings.StoreError."""
+
+
 _imdbratings = MagicMock()
+_imdbratings.StoreError = _StoreError
 _imdbratings.dataset_date.return_value = None
-_imdbratings.get_rating.return_value = None
+_imdbratings.lookup.side_effect = _StoreError("no dataset loaded yet")
 sys.modules.setdefault("imdbratings", _imdbratings)
 
 # Add project root to path so `resources.lib` resolves
@@ -136,6 +148,7 @@ def settings_mock() -> Generator[MagicMock, None, None]:
 def imdbratings_stub() -> Generator[MagicMock, None, None]:
     """A fresh stand-in for script.module.imdbratings, restored on teardown."""
     stub = MagicMock()
+    stub.StoreError = _StoreError
     previous = sys.modules.get("imdbratings")
     sys.modules["imdbratings"] = stub
     yield stub
@@ -143,3 +156,32 @@ def imdbratings_stub() -> Generator[MagicMock, None, None]:
         sys.modules.pop("imdbratings", None)
     else:
         sys.modules["imdbratings"] = previous
+
+
+# Covers every file path the scan tests use.
+ONE_LIBRARY_PATH = "smb://"
+
+
+def one_library(fields: set[str] | frozenset[str], **overrides: Any) -> LibraryConfig:
+    """A LibraryConfig with one included library covering every test path,
+    language en-US and no fallback. ``fields`` are Kodi field names as the
+    scan manages them ("main_title" for a show's or movie's title); they must
+    be exactly the fields of some set of toggles. ``overrides`` set any other
+    Library attribute."""
+    from resources.lib.data.libraries import FIELD_TOGGLES, Library, LibraryConfig
+
+    wanted = frozenset(fields)
+    toggles = frozenset(name for name, own in FIELD_TOGGLES.items() if own <= wanted)
+    covered = frozenset().union(*(FIELD_TOGGLES[t] for t in toggles))
+    if covered != wanted:
+        raise ValueError("no toggles give exactly the fields {}".format(sorted(wanted)))
+    values: dict[str, Any] = {
+        "path": ONE_LIBRARY_PATH,
+        "label": "Test",
+        "included": True,
+        "language": "en-US",
+        "fallback_language": "",
+        "toggles": toggles,
+    }
+    values.update(overrides)
+    return LibraryConfig([Library(**values)])

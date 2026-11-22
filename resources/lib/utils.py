@@ -114,6 +114,11 @@ def get_bool_setting(setting_id: str) -> bool:
     return get_setting(setting_id) == 'true'
 
 
+def set_bool_setting(setting_id: str, value: bool) -> None:
+    """Write a boolean setting."""
+    get_addon().setSettingBool(setting_id, value)
+
+
 def is_setup_complete() -> bool:
     """Whether the setup wizard has been finished once. Until it has, no
     scan of any kind runs: without a key and a confirmed language a scan

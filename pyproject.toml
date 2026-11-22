@@ -3,11 +3,11 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 
 [tool.ruff]
-# Kodi 21 Omega runs Python 3.11 on the official builds, but Linux builds that
-# link the system Python can be older; the headless Omega Docker image used for
-# live tests runs 3.10. Pinned to match pyrightconfig.json so neither tool
-# proposes syntax that interpreter cannot run.
-target-version = "py310"
+# Kodi 21 Omega runs Python 3.11 on the official builds, but builds that link
+# the system Python run older ones: OSMC's Kodi 21 (Debian 11) runs 3.9.
+# Pinned to match pyrightconfig.json so neither tool proposes syntax that
+# interpreter cannot run; tests/test_python_floor.py checks the same floor.
+target-version = "py39"
 
 [tool.ruff.lint]
 # UP (pyupgrade) stays disabled: enabling it would rewrite every typing import

@@ -235,6 +235,26 @@ _ALL_FIELDS = frozenset({
 })
 
 
+# Library roots that together cover every path the Docker Kodi reports.
+_ROOTS = ("/", "smb://", "nfs://")
+
+
+def _libraries(fields: Any, settings: Dict[str, Any], language: str = "en-US",
+               fallback: str = "en-US") -> Any:
+    """Libraries covering every path, with each toggle that switches on any of
+    ``fields`` and the library options in ``settings``."""
+    from resources.lib.data.libraries import FIELD_TOGGLES, Library, LibraryConfig
+    toggles = frozenset(name for name, own in FIELD_TOGGLES.items() if own & set(fields))
+    return LibraryConfig([
+        Library(path=root, label=root, included=True, language=language,
+                fallback_language=fallback, toggles=toggles,
+                rating_source=settings["rating_source"],
+                text_source_order=settings["text_source_order"],
+                fallback_order=settings["fallback_order"])
+        for root in _ROOTS
+    ])
+
+
 def run_targeted_scan(
     media_type: Any,
     items: List[Dict[str, Any]],
@@ -243,13 +263,14 @@ def run_targeted_scan(
     enabled_fields: Optional[Any] = None,
 ) -> Dict[str, Any]:
     from resources.lib.engine.scan import run_scan
+    settings = _default_settings()
     return run_scan(
         media_type=media_type,
         tracker=tracker,
-        source_config={"sources": [], "default_language": "en-US", "fallback_language": "en-US"},
-        enabled_fields=_ALL_FIELDS if enabled_fields is None else enabled_fields,
+        libraries=_libraries(
+            _ALL_FIELDS if enabled_fields is None else enabled_fields, settings),
         tmdb_api_key=TMDB_KEY,
-        settings=_default_settings(),
+        settings=settings,
         items=items,
         show_id_map=show_id_map,
     )
@@ -270,21 +291,21 @@ def run_scan_with_settings(
 ):
     # type: (...) -> Dict[str, Any]
     from resources.lib.engine.scan import run_scan
+    settings = _default_settings(
+        rating_source=rating_source,
+        text_source_order=text_source_order,
+        imdb_ready=_imdb_ready() if imdb_ready is None else imdb_ready,
+        rate_limit=rate_limit,
+        refetch_schedule=refetch_schedule,
+        stale_threshold_days=stale_threshold_days,
+    )
     return run_scan(
         media_type=media_type,
         tracker=tracker,
-        source_config={"sources": [], "default_language": language,
-                       "fallback_language": "en-US"},
-        enabled_fields=_ALL_FIELDS if enabled_fields is None else enabled_fields,
+        libraries=_libraries(
+            _ALL_FIELDS if enabled_fields is None else enabled_fields, settings, language),
         tmdb_api_key=TMDB_KEY,
-        settings=_default_settings(
-            rating_source=rating_source,
-            text_source_order=text_source_order,
-            imdb_ready=_imdb_ready() if imdb_ready is None else imdb_ready,
-            rate_limit=rate_limit,
-            refetch_schedule=refetch_schedule,
-            stale_threshold_days=stale_threshold_days,
-        ),
+        settings=settings,
         items=items,
         show_id_map=show_id_map,
         reset=reset,
@@ -874,12 +895,8 @@ def test_11_tvdb_series_verification(t):
         with patch("resources.lib.data.kodi.update_item", return_value=True):
             run_scan(
                 media_type=TVSHOW, tracker=tracker,
-                source_config={
-                    "sources": [{"path": show["file"], "language": "nl-NL",
-                                 "enabled": True}],
-                    "default_language": "nl-NL",
-                },
-                enabled_fields=frozenset({"plot"}), tmdb_api_key=TMDB_KEY,
+                libraries=_libraries({"plot"}, _default_settings(), "nl-NL", ""),
+                tmdb_api_key=TMDB_KEY,
                 settings=_default_settings(), items=[show],
             )
         row = tracker.get_item("tvshow", identity) or {}
@@ -1893,8 +1910,7 @@ def test_34_resume_interrupted_scan(t):
         stats1 = run_scan(
             media_type=MOVIE,
             tracker=tracker,
-            source_config={"sources": [], "default_language": "en-US", "fallback_language": "en-US"},
-            enabled_fields=frozenset({"plot"}),
+            libraries=_libraries({"plot"}, _default_settings()),
             tmdb_api_key=TMDB_KEY,
             settings=_default_settings(rate_limit=0.0),
             monitor=AbortingMonitor(),
@@ -1920,8 +1936,7 @@ def test_34_resume_interrupted_scan(t):
         stats2 = run_scan(
             media_type=MOVIE,
             tracker=tracker,
-            source_config={"sources": [], "default_language": "en-US", "fallback_language": "en-US"},
-            enabled_fields=frozenset({"plot"}),
+            libraries=_libraries({"plot"}, _default_settings()),
             tmdb_api_key=TMDB_KEY,
             settings=_default_settings(rate_limit=0.0),
             items=movies2,

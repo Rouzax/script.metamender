@@ -25,9 +25,13 @@ KINDS = {"setup", "details", "attention", "progress", "corner-bar", "context"}
 
 
 def test_every_window_has_a_scene():
+    """A window shown only over another (the picker over setup) is the
+    scene's active window; the shot is cropped to the one beneath."""
     windows = {path.name for path in WINDOWS.glob("*.xml")}
     assert windows
-    assert windows <= {scene["window"] for scene in SCENES.values()}
+    shown = {scene["window"] for scene in SCENES.values()}
+    shown |= {scene["active"] for scene in SCENES.values() if scene.get("active")}
+    assert windows <= shown
 
 
 def test_every_scene_names_a_shipped_window_or_a_native_one():
@@ -62,12 +66,52 @@ def test_no_screenshot_is_left_outside_a_group_folder():
 
 
 def test_setup_scenes_name_real_steps():
-    from resources.lib.ui.setup_model import FEATURES, SetupFlow, SetupState
-    state = SetupState(features={f: True for f in FEATURES})
-    steps = set(SetupFlow("wizard", "en-US").steps(state))
+    from resources.lib.ui.setup_model import WIZARD, SetupFlow, SetupState
+    steps = set(SetupFlow(WIZARD).steps(SetupState()))
     for name, scene in SCENES.items():
         if scene["kind"] == "setup":
             assert scene["step"] in steps, name
+            if scene.get("library"):
+                assert scene["step"] == "libraries", name
+
+
+def test_attention_scenes_name_real_problems():
+    from resources.lib.service.attention import WINDOW_KINDS
+    for name, scene in SCENES.items():
+        if scene["kind"] == "attention":
+            assert scene["main"] in WINDOW_KINDS, name
+            assert all(kind in WINDOW_KINDS for kind, _ in scene.get("others", [])), name
+
+
+def test_question_scenes_wait_for_the_question_over_setup():
+    """The save question is MetaMender's message window over the setup
+    window: the runner waits for it and crops to the setup panel."""
+    asking = [name for name, scene in SCENES.items() if scene.get("question")]
+    assert asking
+    for name in asking:
+        scene = SCENES[name]
+        assert scene["kind"] == "setup", name
+        assert scene["window"] == "script-metamender-setup.xml", name
+        assert scene.get("active") == "script-metamender-message.xml", name
+
+
+def test_picker_scenes_open_the_picker_from_a_row_over_setup():
+    """The helper activates the focused row, which opens MetaMender's
+    picker the way a click does."""
+    picking = [name for name, scene in SCENES.items() if scene.get("pick")]
+    assert picking
+    for name in picking:
+        scene = SCENES[name]
+        assert scene["kind"] == "setup" and scene.get("focus"), name
+        assert scene["window"] == "script-metamender-setup.xml", name
+        assert scene.get("active") == "script-metamender-select.xml", name
+
+
+def test_a_scene_shows_the_notice_for_unread_1_1_settings():
+    from resources.lib.service.attention import SETTINGS_UNREAD
+    details = {scene.get("main_detail") for scene in SCENES.values()
+               if scene["kind"] == "attention" and scene["main"] == "libraries_converted"}
+    assert SETTINGS_UNREAD in details
 
 
 @pytest.fixture
@@ -163,3 +207,30 @@ def test_cleanup_leaves_an_existing_install_enabled(runner):
     disabled = [p["addonid"] for m, p in runner.calls if m == "Addons.SetAddonEnabled"]
     assert runner.ADDON_ID not in disabled
     assert runner.HELPER_ID in disabled
+
+
+def test_setup_scenes_open_on_their_library_and_row(demo, monkeypatch):
+    from resources.lib.ui import setup_window
+    from resources.lib.ui.setup_window import PAGE, SetupController
+    monkeypatch.setattr(setup_window, "lang", lambda i: "#%d" % i)
+    for name, scene in SCENES.items():
+        if scene["kind"] != "setup":
+            continue
+        state = demo.setup_state(scene)
+        c = SetupController("wizard", state, demo.DEMO_UI_LANGUAGE, "", True,
+                            name=lambda code: code)
+        c.flow.current = scene["step"]
+        assert c.view == (PAGE if scene.get("library") else scene["step"]), name
+        if scene.get("library"):
+            assert c.heading() == scene["library"], name
+        if scene.get("focus"):
+            assert scene["focus"] in [row.key for row in c.rows()], name
+        assert scene.get("scroll") in (None, "end"), name
+
+
+def test_demo_libraries_cover_every_list_state(demo):
+    libraries = demo.demo_libraries()
+    assert [lib.label for lib in libraries] == ["Movies", "Kids Movies", "TV Shows",
+                                                "Sport Videos"]
+    assert [lib.included for lib in libraries] == [True, True, True, False]
+    assert [bool(lib.toggles) for lib in libraries] == [True, True, False, False]

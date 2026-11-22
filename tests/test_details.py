@@ -4,14 +4,16 @@ from __future__ import annotations
 import re
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from resources.lib.data.libraries import Library, LibraryConfig
 from resources.lib.data.media_types import MOVIE, TVSHOW
 from resources.lib.data.tracker import REASON_LOCKED, TrackerDB
 from resources.lib.engine.protect import fingerprint
 from resources.lib.service import details
+from resources.lib.service.actions import update_now as _REAL_UPDATE_NOW
 
 IDENT = "Heat (1995)"
 
@@ -243,9 +245,16 @@ def opened(tmp_path, monkeypatch):
     notes = []
     calls = {"update_now": [], "acquire": 0, "release": 0}
     opened_settings = {
-        "enabled_fields": frozenset({"plot", "title", "main_title", "genre", "mpaa"}),
+        "toggles": frozenset({"plots", "episode_titles", "main_titles", "details",
+                              "certifications"}),
         "cert_country": "NL",
     }
+
+    def libraries(path):
+        def lib(folder, language):
+            return Library(path=folder, label="", included=True, language=language,
+                           fallback_language="", toggles=opened_settings["toggles"])
+        return LibraryConfig([lib("/movies/", ""), lib("/series/", "nl-NL")])
 
     def get_item(media_type, kodi_id):
         item = items.get(kodi_id)
@@ -265,15 +274,13 @@ def opened(tmp_path, monkeypatch):
     monkeypatch.setattr(details.kodi, "get_item_by_id", get_item)
     monkeypatch.setattr(details, "_get_db_path", lambda: db_path)
     monkeypatch.setattr(details, "_get_sources_config_path", lambda: str(tmp_path / "s.json"))
-    monkeypatch.setattr(details, "load_source_config", lambda path: {
-        "sources": [{"path": "/series/", "language": "nl-NL"}],
-    })
+    monkeypatch.setattr(details, "load_libraries", libraries)
+    monkeypatch.setattr(details, "resolve_country",
+                        lambda lib, ui: opened_settings["cert_country"])
     monkeypatch.setattr(details, "_load_settings", lambda: {
-        "enabled_fields": opened_settings["enabled_fields"],
-        "stale_threshold_days": 365, "cert_country": opened_settings["cert_country"],
+        "stale_threshold_days": 365, "ui_language": "en-US",
     })
     monkeypatch.setattr(details, "language_name", lambda code: {"nl-NL": "Dutch"}.get(code, code))
-    monkeypatch.setattr(details, "kodi_ui_language", lambda: "en-US")
     monkeypatch.setattr(details, "_init_logging", lambda: None)
     monkeypatch.setattr(details, "acquire_scan_lock", acquire)
     monkeypatch.setattr(details, "release_scan_lock", release)
@@ -305,7 +312,8 @@ def test_open_details_movie_shows_its_rows_and_writes_nothing(opened):
     assert view.heading == "Heat"
     assert view.sub.startswith("No folder language")
     assert _keys(view)[0] == "ids"
-    assert set(_keys(view)) == {"ids", "plot", "title", "genre", "mpaa"}
+    assert set(_keys(view)) == {"ids", "plot", "title", "genre", "studio", "country",
+                                "runtime", "mpaa"}
     assert next(r for r in view.rows if r.key == "plot").action == "restore"
     assert session.identity == "tmdb:949"
     assert opened["notes"] == []
@@ -320,7 +328,7 @@ def test_open_details_episode_heading_and_folder_language(opened):
     assert view.heading == "Het gouden uur · Season 1, episode 1"
     assert view.sub.startswith("Dutch folder")
     # Episodes have no certification; an episode title is managed as "title".
-    assert set(_keys(view)) == {"ids", "plot", "title"}
+    assert set(_keys(view)) == {"ids", "plot", "title", "runtime", "firstaired"}
     session.update_now()
     assert opened["calls"]["update_now"] == [("episode", "12")]
 
@@ -586,7 +594,7 @@ def test_adoptable_title_keyed_row_lists_the_title_the_scan_manages(opened):
 
 
 def test_locked_field_of_a_switched_off_group_is_listed_without_a_next_scan(opened):
-    opened["settings"]["enabled_fields"] = frozenset({"plot"})
+    opened["settings"]["toggles"] = frozenset({"plots"})
     tracker = TrackerDB(opened["db_path"])
     tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=7)
     # Locked while the group was on: the scans then recorded the lock.
@@ -720,3 +728,40 @@ def test_session_keep_failure_tells_the_user(opened):
     with patch.object(TrackerDB, "set_locked", return_value=False):
         session.run_action(row)
     assert opened["notes"] == [_PO_STRINGS[32627]]
+
+
+def test_details_of_an_item_in_no_library_lists_no_managed_fields(opened):
+    MOVIE_ELSEWHERE = dict(MOVIE_ITEM, file="/elsewhere/Heat.mkv")
+    with patch.object(details.kodi, "get_item_by_id", return_value=MOVIE_ELSEWHERE):
+        details.open_details("movie", "7")
+    _session, view = opened["shown"][0]
+    assert _keys(view) == ["ids"]
+    assert view.sub.startswith("No folder language")
+
+
+def test_update_now_on_excluded_library_shows_message_and_changes_nothing(opened, monkeypatch):
+    from resources.lib.service import actions, refresh
+
+    details.open_details("movie", "7")
+    session, _view = opened["shown"][0]
+    run_scan, tracker_cls = MagicMock(), MagicMock()
+    monkeypatch.setattr(actions, "update_now", _REAL_UPDATE_NOW)
+    monkeypatch.setattr(actions, "_init_logging", lambda: None)
+    monkeypatch.setattr(actions, "is_setup_complete", lambda: True)
+    monkeypatch.setattr(actions, "acquire_scan_lock", lambda: True)
+    monkeypatch.setattr(actions, "release_scan_lock", lambda: None)
+    monkeypatch.setattr(actions, "get_item_by_id", lambda mt, i: dict(MOVIE_ITEM))
+    monkeypatch.setattr(actions, "run_scan", run_scan)
+    monkeypatch.setattr(actions, "TrackerDB", tracker_cls)
+    monkeypatch.setattr(actions.StructuredLogger, "start_scan_log", lambda: None)
+    monkeypatch.setattr(actions.StructuredLogger, "stop_scan_log", lambda: None)
+    monkeypatch.setattr(refresh, "_get_sources_config_path", lambda: "s.json")
+    monkeypatch.setattr(refresh, "load_libraries", lambda path: LibraryConfig([Library(
+        path="/movies/", label="", included=False, language="en-US",
+        fallback_language="", toggles=frozenset({"plots"}))]))
+    monkeypatch.setattr(refresh, "notify", opened["notes"].append)
+    monkeypatch.setattr(refresh, "lang", lambda i: _PO_STRINGS.get(i, ""))
+    session.update_now()
+    assert opened["notes"] == [_PO_STRINGS[32650]]
+    run_scan.assert_not_called()
+    tracker_cls.assert_not_called()

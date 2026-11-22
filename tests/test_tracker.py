@@ -775,19 +775,31 @@ def test_rename_show_episodes(tmp_path):
     db.close()
 
 
-def test_forget_disabled_fields_clears_only_other_fields_of_the_media_type(tmp_path):
+def test_forget_item_fields_only_touches_that_item(tmp_path):
     t = _tracker_with_item(tmp_path)
-    t.upsert_item("episode", "Ep", kodi_id=2)
+    t.upsert_item("movie", "Other", kodi_id=3)
+    t.upsert_item("episode", "Air", kodi_id=2)
     t.record_field_fetch("movie", "Air", "plot", None, settings_fp="a")
     t.record_field_fetch("movie", "Air", "tagline", None, settings_fp="b")
-    t.record_field_fetch("episode", "Ep", "plot", None, settings_fp="c")
-    assert t.forget_disabled_fields("movie", ["tagline"]) == 1
-    assert t.forget_disabled_fields("movie", ["tagline"]) == 0
+    t.record_field_fetch("movie", "Other", "plot", None, settings_fp="c")
+    t.record_field_fetch("episode", "Air", "plot", None, settings_fp="d")
+    assert t.forget_item_fields("movie", "Air", ["tagline"]) == 1
+    assert t.forget_item_fields("movie", "Air", ["tagline"]) == 0
     fps = (t.get_field_status("movie", "Air", "plot")["settings_fp"],
            t.get_field_status("movie", "Air", "tagline")["settings_fp"],
-           t.get_field_status("episode", "Ep", "plot")["settings_fp"])
+           t.get_field_status("movie", "Other", "plot")["settings_fp"],
+           t.get_field_status("episode", "Air", "plot")["settings_fp"])
     t.close()
-    assert fps == (None, "b", "c")
+    assert fps == (None, "b", "c", "d")
+
+
+def test_forget_item_fields_with_nothing_enabled_clears_every_field(tmp_path):
+    t = _tracker_with_item(tmp_path)
+    t.record_field_fetch("movie", "Air", "plot", None, settings_fp="a")
+    assert t.forget_item_fields("movie", "Air", []) == 1
+    fp = t.get_field_status("movie", "Air", "plot")["settings_fp"]
+    t.close()
+    assert fp is None
 
 
 def test_record_manual_check_keeps_the_clock(tmp_path):

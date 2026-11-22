@@ -1,6 +1,72 @@
 MetaMender Changelog
 ====================
 
+v1.2.0 (unreleased)
+-------------------
+New Features:
+  - Libraries are included explicitly: the Libraries step of setup and
+    the Libraries entry in the add-on settings list every video source
+    Kodi has, and a library is only worked on once it is ticked. Each
+    included library has its own settings page: language and fallback
+    language, what to fill, rating source, text sources, title to show
+    and age rating country. Ticking a library switches nothing on; its
+    page starts with every field off.
+  - A video source Kodi gains after setup is added as not included and
+    raises one notice (once per library) that opens the library list.
+  - Keep the original title, per library: with show and movie titles ticked,
+    the library's movies and shows get their original title (TMDB's
+    original_title and original_name) in its own language and script
+    instead of the title in the library's language. Episode titles and
+    other text still follow the library's language.
+  - Settings from 1.1 are converted automatically on the first start:
+    each library keeps the choices it had, one notice says so, and
+    nothing in the video library changes. The 1.1 values are copied
+    aside at service start; when Kodi had already dropped them, the
+    libraries 1.1 scanned are included with their languages but nothing
+    switched on, and the notice says the earlier choices could not be
+    read. A 1.1 setting for a folder above a library applies to it.
+  - Back or Cancel on the library list with unsaved changes asks
+    whether to save them.
+  - Setup's lists of options (a language, a country, what to do with a
+    library), its questions and messages, and the Reset tracker question
+    open in MetaMender's own windows instead of Kodi's dialogs, so they
+    look the same in every skin.
+
+Bug Fixes:
+  - Fixed: the service and the add-on failed to start on Kodi builds
+    that run Python 3.9, such as OSMC's Kodi 21 (TypeError: unsupported
+    operand type(s) for |). The certification module's Candidate type
+    alias used an X | None union, which Python evaluates at import and
+    only supports from 3.10.
+  - With script.module.imdbratings 1.1.0, IMDb rating lookups no longer
+    check for a new IMDb dataset and can no longer start its download in
+    the middle of a scan, where Kodi could not stop it at shutdown or
+    when playback starts. The dataset is still refreshed once before each
+    scan, which Kodi can abort. Module 1.0.0 still works as before.
+  - Trailer links only take a TMDB video key that is a YouTube video id;
+    any other key is skipped, so it cannot add parameters to the
+    YouTube add-on call stored in the library.
+  - On Kodi 22, setup offered only "Video add-ons" when Kodi had no
+    video sources of its own (a client sharing another machine's
+    library database), instead of the folders taken from the library.
+    Kodi 22 lists its Video add-ons node as a video source; sources that
+    are no folder are now left out.
+
+Internal:
+  - Library choices are stored per library and read through the
+    library's own settings; the global toggles that used to hold them
+    are gone, together with the strings that labelled them.
+  - Unused entries were removed from strings.po, and the empty-library
+    and summary texts of setup now point at Libraries.
+  - The IMDb adapter uses the module's lookup() and StoreError when the
+    installed module has them (1.1.0), which also tells a failing store
+    apart from "no rating" in one query instead of two; with 1.0.0 it
+    keeps get_rating() plus the dataset_date() check. addon.xml still
+    accepts 1.0.0 until 1.1.0 is in Kodi's official repository.
+  - The Python floor is 3.9: ruff and pyright target it, and
+    tests/test_python_floor.py parses every shipped file with the 3.9
+    grammar and rejects X | Y type unions outside annotations.
+
 v1.1.0 (2026-11-13)
 -------------------
 New Features:

@@ -13,7 +13,7 @@ Details.)
 
 ![The Details window for an episode](screenshots/details/details-plot-updated.png)
 
-At the top is the item and one short line: the language of its folder and
+At the top is the item and one short line: the language of its library and
 when MetaMender last looked at it. On the left is a list of the fields; the
 right side tells the story of the one you have selected. Move up and down the
 list with the remote, and right to reach the buttons.
@@ -39,7 +39,7 @@ Select a field to see on the right:
 - **The whole current value**, or *Empty*.
 - **From**: where the value came from, and in which language, for example
   "TMDB, in English". "In the fallback language" means it came from the
-  [fallback language](setup.md#2-library-language) because your library
+  [fallback language](libraries.md#language) because the library's
   language had none.
 - **Replaced**: what the field held before MetaMender first wrote it: *your
   scraper's value* or *empty*. Items MetaMender updated before it started
@@ -54,14 +54,14 @@ Select a field to see on the right:
 |---|---|
 | Kodi already has this value, so nothing needed to change. | The sites agree with what is there. |
 | Your NFO file sets this field, so MetaMender only fills it when it is empty. | The item has an NFO file, so its values are yours: MetaMender only fills fields that are empty, and never overwrites a value it did not write. |
-| This folder has no language set, so MetaMender only fills empty fields and keeps this value. | Without a folder language MetaMender cannot tell whether existing text is in the right language, so it keeps it. Set the folder's language in [setup](setup.md#3-folders-in-another-language). |
+| This folder has no language set, so MetaMender only fills empty fields and keeps this value. | Without a folder language MetaMender cannot tell whether existing text is in the right language, so it keeps it. Give the folder a language in MetaMender's `sources.json` file, or remove its entry there so it uses the [library's language](libraries.md#language). |
 | The sites MetaMender asks have nothing for this field yet. | TMDB and TheTVDB have no value; MetaMender checks again later. For an old item that is settled: "had nothing for this field". |
 | The sites could not be reached at the last check, so MetaMender tries again. | A temporary problem; the next scan tries again. |
 | You locked this field, so MetaMender leaves it alone. | See [Restore original and the lock](#restore-original-and-the-lock). |
 | Changed since MetaMender's update (your edit or a re-scrape). | Someone or something changed the value after MetaMender wrote it. |
 | Kodi lost MetaMender's value (a refresh or a re-scrape), so the next scan fills it again. | The field was emptied, for example by refreshing the item in Kodi. |
 
-A field that is switched off in the settings (for example Credits) says so
+A field that is switched off for the item's library (for example Credits) says so
 instead of promising a next check.
 
 ![A field left alone because an NFO file sets it](screenshots/details/details-plot-protected.png)
@@ -129,7 +129,7 @@ field at the next scan and may update it again.
 Restore is only offered while the field still holds the value MetaMender wrote,
 so it never overwrites a newer value of your own or from a re-scrape. Ratings
 cannot be locked or restored: MetaMender adds its own rating entries beside
-your scraper's, which stay. A field switched off in the settings has no button,
+your scraper's, which stay. A field switched off for the item's library has no button,
 since MetaMender does not touch it anyway.
 
 Restoring a show's title also moves MetaMender's records of its episodes along
