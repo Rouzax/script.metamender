@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from resources.lib.constants import FANART_API_KEY
-from resources.lib.engine.art import pick_poster
+from resources.lib.engine.art import is_placeholder_art, pick_poster
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome
 from resources.lib.engine.fetch import _Primary
 from resources.lib.engine.ids import _Ids
@@ -92,16 +92,18 @@ def _resolve_thumb(
     primary: _Primary, sources: _TextSources, folder_lang: str,
 ) -> tuple[FieldOutcome, str | None]:
     """The TMDB still, else TheTVDB's episode image. Neither is a fallback:
-    language does not apply to a still."""
+    language does not apply to a still. A link that is itself a placeholder
+    (TheTVDB's empty banner path) counts as no image, so it never replaces
+    a frame grab."""
     if primary.tmdb is TRANSIENT:
         return _TRANSIENT_OUTCOME, None
     still = (primary.tmdb or {}).get("thumb") or ""
-    if still:
+    if not is_placeholder_art(still):
         return FieldOutcome(transient=False, value=still, from_fallback=False), "tmdb"
     image = sources.tvdb("image", folder_lang)
     if image is TRANSIENT:
         return _TRANSIENT_OUTCOME, None
-    if image:
+    if image and not is_placeholder_art(image):
         return FieldOutcome(transient=False, value=image, from_fallback=False), "tvdb"
     return _ANSWERED_EMPTY, None
 

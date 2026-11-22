@@ -1067,3 +1067,43 @@ def test_nfo_item_own_thumb_refreshed_after_reset_tracker(
     tracker.close()
 
     assert _written(mock_update, "thumb") == newer
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tvdb.fetch_series_episodes")
+@patch("resources.lib.providers.tmdb.fetch_season")
+def test_broken_tvdb_image_never_replaces_a_frame_grab(
+    mock_season, mock_tvdb_eps, mock_update, tmp_path, kodi_stubs
+):
+    item = _episode(FRAME_GRAB, uniqueid={"tmdb": "99999", "tvdb": "888"})
+    mock_season.return_value = [_tmdb_episode_data(thumb="")]
+    mock_tvdb_eps.return_value = {
+        "888": {"title": "", "plot": "", "image": "https://artworks.thetvdb.com/banners/"},
+    }
+    tracker = _make_tracker(tmp_path)
+    _register_show(tracker)
+
+    _scan_episodes(tracker, {"thumb"}, [item])
+    fs_map = _fs(tracker, EPISODE, item)
+    tracker.close()
+
+    assert _written(mock_update, "thumb") is None
+    assert _reason(fs_map, "thumb") == REASON_NOTHING
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tvdb.fetch_series_episodes")
+@patch("resources.lib.providers.tmdb.fetch_season")
+def test_broken_tmdb_still_falls_through_to_tvdb(
+    mock_season, mock_tvdb_eps, mock_update, tmp_path, kodi_stubs
+):
+    item = _episode(FRAME_GRAB, uniqueid={"tmdb": "99999", "tvdb": "888"})
+    mock_season.return_value = [_tmdb_episode_data(thumb="https://image.tmdb.org/t/p/original/")]
+    mock_tvdb_eps.return_value = {"888": {"title": "", "plot": "", "image": TVDB_IMAGE}}
+    tracker = _make_tracker(tmp_path)
+    _register_show(tracker)
+
+    _scan_episodes(tracker, {"thumb"}, [item])
+    tracker.close()
+
+    assert _written(mock_update, "thumb") == TVDB_IMAGE
