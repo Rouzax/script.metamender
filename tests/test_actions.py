@@ -377,7 +377,12 @@ def test_addon_context_menu_is_one_metamender_submenu():
     assert submenu.find("visible") is None
 
     items = {i.get("library"): i for i in submenu.findall("item")}
-    assert set(items) == {"context.py", "context_details.py"}
+    assert set(items) == {"context.py", "context_details.py", "context_stop.py"}
+    stop = items["context_stop.py"]
+    assert strings[stop.findtext("label")] == "Stop scan"
+    # Only while a scan holds the lock, and only on a video library item.
+    assert "Window(Home).Property(metamender_scan_lock)" in stop.findtext("visible")
+    assert "ListItem.DBType" in stop.findtext("visible")
     update, details = items["context.py"], items["context_details.py"]
     assert strings[update.findtext("label")] == "Update now"
     assert _dbtypes(update.findtext("visible")) == {"movie", "episode", "tvshow", "season"}

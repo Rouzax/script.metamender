@@ -1127,6 +1127,10 @@ msgctxt "#32630"
 msgid "Which rating to show"
 msgstr ""
 
+msgctxt "#32631"
+msgid "Stop scan"
+msgstr ""
+
 msgctxt "#32632"
 msgid "Follow your scraper"
 msgstr ""
@@ -1153,6 +1157,10 @@ msgstr ""
 
 msgctxt "#32638"
 msgid "Where plots and titles come from"
+msgstr ""
+
+msgctxt "#32639"
+msgid "The scan stops after the current item."
 msgstr ""
 
 msgctxt "#32640"

@@ -77,6 +77,18 @@ FALLBACK_RECHECKS = 12
 # Default refetch schedule in days (attempt 1 -> 7d, attempt 2 -> 30d, attempt 3 -> 90d)
 DEFAULT_REFETCH_SCHEDULE: tuple[int, ...] = (7, 30, 90)
 
+# Kodi's Videos window (WINDOW_VIDEO_NAV). Every JSON-RPC library write makes
+# Kodi reload the active window's list, so a background scan holds its writes
+# while this window is open and the user has pressed something within
+# BROWSE_IDLE_SECONDS: long enough to scroll and read, short enough that a
+# scan still finishes when Kodi is left sitting on the library.
+VIDEO_NAV_WINDOW = 10025
+BROWSE_IDLE_SECONDS = 60
+
+# Home window property the "Stop scan" context-menu action sets; a background
+# scan checks it before each item and the service clears it per cycle.
+STOP_SCAN_PROPERTY = "metamender_stop_scan"
+
 
 def parse_refetch_schedule(value: str) -> tuple[int, ...]:
     """Parse a 'comma,separated,days' schedule string, dropping non-positive

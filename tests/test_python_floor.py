@@ -15,7 +15,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 SHIPPED = sorted(
-    [ROOT / "default.py", ROOT / "service.py", ROOT / "context.py", ROOT / "context_details.py"]
+    [ROOT / "default.py", ROOT / "service.py", ROOT / "context.py", ROOT / "context_details.py",
+     ROOT / "context_stop.py"]
     + list((ROOT / "resources").rglob("*.py"))
 )
 _FLOOR = (3, 9)
