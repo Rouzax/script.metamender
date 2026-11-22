@@ -435,3 +435,37 @@ def test_get_seasons_for_scan_of_one_show(kodi_stubs):
     sent = [json.loads(c.args[0]) for c in kodi_stubs["xbmc"].executeJSONRPC.call_args_list]
     assert [s["params"].get("tvshowid") for s in sent] == [3, 3]
     assert [i["show_tmdb_id"] for i in items] == ["4607", "4607"]
+
+
+@pytest.mark.parametrize("media_type", [MOVIE, TVSHOW, EPISODE])
+def test_build_properties_without_art(media_type):
+    props = _build_properties(media_type, art=False)
+    assert "art" not in props
+    assert props == [p for p in _build_properties(media_type) if p != "art"]
+
+
+def test_get_all_items_without_art_requests_and_flattens_none(kodi_stubs):
+    response = {"result": {"episodes": [{"episodeid": 1}]}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps(response))
+    items = get_all_items(EPISODE, art=False)
+    assert "art" not in _sent_params(kodi_stubs)["properties"]
+    assert "thumb" not in items[0]
+
+
+def test_get_item_by_id_without_art(kodi_stubs):
+    response = {"result": {"moviedetails": {"movieid": 1}}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps(response))
+    item = get_item_by_id(MOVIE, 1, art=False)
+    assert "art" not in _sent_params(kodi_stubs)["properties"]
+    assert "poster" not in item
+
+
+def test_get_seasons_for_scan_lists_shows_without_art(kodi_stubs):
+    from resources.lib.data.kodi import get_seasons_for_scan
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({
+        "VideoLibrary.GetTVShows": _SHOWS, "VideoLibrary.GetSeasons": _SEASONS})
+    get_seasons_for_scan({3: "4607"})
+    sent = {json.loads(c.args[0])["method"]: json.loads(c.args[0])["params"]["properties"]
+            for c in kodi_stubs["xbmc"].executeJSONRPC.call_args_list}
+    assert "art" not in sent["VideoLibrary.GetTVShows"]
+    assert "art" in sent["VideoLibrary.GetSeasons"]

@@ -32,7 +32,7 @@ from resources.lib.data.libraries import Library, LibraryConfig, load_libraries
 from resources.lib.data.media_types import EPISODE, SEASON, TVSHOW, MediaType
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
-from resources.lib.engine.scan import run_scan, scans_seasons
+from resources.lib.engine.scan import manages_art, run_scan, scans_seasons
 from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
@@ -292,7 +292,8 @@ def run_refresh(
     dataset, which takes a while) and answers ``settings["imdb_ready"]``;
     it runs after the episode count is known, so the window shows it, and a
     Stop pressed meanwhile ends the refresh before the first item."""
-    listed = get_all_items(EPISODE, tvshowid=scope.tvshowid, season=scope.season)
+    listed = get_all_items(EPISODE, tvshowid=scope.tvshowid, season=scope.season,
+                           art=manages_art(EPISODE, libraries))
     episodes = [e for e in listed if libraries.included_for(e.get("file", ""))]
     if len(episodes) < len(listed):
         log.info("Episodes outside the included libraries left out",

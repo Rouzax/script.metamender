@@ -216,7 +216,7 @@ def test_show_refresh_runs_the_show_then_its_episodes():
     assert [c[0] for c in scan.calls] == [TVSHOW, EPISODE]
     assert scan.calls[1][2] == {"after_passes": 1}  # map built after the show pass
     assert all(c[3] is True for c in scan.calls)
-    assert listing.call_args.kwargs == {"tvshowid": 7, "season": None}
+    assert listing.call_args.kwargs == {"tvshowid": 7, "season": None, "art": False}
     # The show's own record is a step of its own, not an episode.
     assert (progress.total, progress.done, progress.updated) == (2, 2, 2)
     assert progress.show_updated is True
@@ -227,12 +227,21 @@ def test_season_refresh_runs_only_its_episodes():
     scan = FakeScan()
     _, progress, listing = _run(Scope(7, 2, "Lost"), scan, [_episode(1, 2)])
     assert [c[0] for c in scan.calls] == [EPISODE]
-    assert listing.call_args.kwargs == {"tvshowid": 7, "season": 2}
+    assert listing.call_args.kwargs == {"tvshowid": 7, "season": 2, "art": False}
     assert progress.current == "Season 2, episode 1: Ep 1"
 
 
 _POSTERS = LibraryConfig([Library(**{**_SERIES.__dict__,
                                      "toggles": frozenset({"plots", "posters"})})])
+
+
+def test_refresh_lists_episode_art_only_with_episode_thumbs():
+    thumbs = LibraryConfig([Library(**{**_SERIES.__dict__,
+                                       "toggles": frozenset({"plots", "episode_thumbs"})})])
+    _, _, listing = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)], libraries=thumbs)
+    assert listing.call_args.kwargs["art"] is True
+    _, _, listing = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)], libraries=_POSTERS)
+    assert listing.call_args.kwargs["art"] is False
 
 
 def _season(n):

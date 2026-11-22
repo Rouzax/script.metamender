@@ -1013,3 +1013,33 @@ def test_fetch_season_with_tmdb_disabled_is_transient(mock_show, mock_posters):
     mock_show.assert_not_called()
     mock_posters.assert_not_called()
     ctx.tracker.upsert_item.assert_not_called()
+
+
+@pytest.mark.parametrize("fields,media_type,expected", [
+    ({"plot"}, MOVIE, False),
+    ({"plot", "poster"}, MOVIE, True),
+    ({"plot"}, EPISODE, False),
+    ({"thumb"}, EPISODE, True),
+    # A poster library does not manage an episode's art.
+    ({"poster"}, EPISODE, False),
+])
+def test_scan_listing_requests_art_only_when_the_pass_manages_it(
+    fields, media_type, expected, tmp_path, kodi_stubs
+):
+    tracker = _make_tracker(tmp_path)
+    with patch("resources.lib.data.kodi.get_all_items", return_value=[]) as listing:
+        run_scan(media_type, tracker, _libs(frozenset(fields)), "k", _make_settings())
+    tracker.close()
+    assert listing.call_args.kwargs == {"art": expected}
+
+
+def test_new_items_scan_details_follow_the_art_choice(tmp_path, kodi_stubs):
+    tracker = _make_tracker(tmp_path)
+    with patch("resources.lib.data.kodi.get_all_items",
+               return_value=[{"movieid": 9}]) as listing, \
+         patch("resources.lib.engine.scan.get_item_by_id", return_value=None) as details:
+        run_scan(MOVIE, tracker, _libs(frozenset({"plot"})), "k", _make_settings(),
+                 new_only=True)
+    tracker.close()
+    assert listing.call_args.kwargs == {"ids_only": True}
+    assert details.call_args.kwargs == {"art": False}

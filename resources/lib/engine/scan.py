@@ -1005,6 +1005,16 @@ def scans_seasons(libraries: LibraryConfig) -> bool:
     )
 
 
+def manages_art(media_type: MediaType, libraries: LibraryConfig) -> bool:
+    """Whether an included library manages an art field of the media type.
+    Only then does the pass's listing ask Kodi for the art map, which is
+    the bulk of a large episode listing."""
+    return any(
+        lib.included and ART_FIELDS & set(candidate_fields(media_type, lib.fields()))
+        for lib in libraries.libraries
+    )
+
+
 def _season_items(
     tracker: TrackerDB, show_id_map: dict[int, str], new_only: bool,
 ) -> list[dict[str, Any]]:
@@ -1018,16 +1028,19 @@ def _season_items(
     return items
 
 
-def _new_items(tracker: TrackerDB, media_type: MediaType) -> list[dict[str, Any]]:
+def _new_items(
+    tracker: TrackerDB, media_type: MediaType, art: bool,
+) -> list[dict[str, Any]]:
     """The library's items whose Kodi id the tracker does not know yet, with
-    full details. An id listed but gone by the details call is skipped."""
+    full details (the art map only with ``art``). An id listed but gone by
+    the details call is skipped."""
     known = tracker.known_kodi_ids(media_type.name)
     listed = kodi.get_all_items(media_type, ids_only=True)
     fresh = [
         i[media_type.kodi_id_field] for i in listed
         if i.get(media_type.kodi_id_field) not in known
     ]
-    items = [d for d in (get_item_by_id(media_type, i) for i in fresh) if d]
+    items = [d for d in (get_item_by_id(media_type, i, art=art) for i in fresh) if d]
     log.info(
         "New library items selected", event="scan.new_items",
         media_type=media_type.name, listed=len(listed), new=len(items),
@@ -1249,7 +1262,11 @@ def run_scan(
     if items is None and media_type is SEASON:
         items = _season_items(tracker, shared.show_id_map, new_only)
     elif items is None:
-        items = _new_items(tracker, media_type) if new_only else kodi.get_all_items(media_type)
+        art = manages_art(media_type, libraries)
+        items = (
+            _new_items(tracker, media_type, art) if new_only
+            else kodi.get_all_items(media_type, art=art)
+        )
     needed = _pass_providers(media_type, libraries, items, reset)
 
     for index, item in enumerate(items):
