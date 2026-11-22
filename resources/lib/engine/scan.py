@@ -77,10 +77,13 @@ from datetime import date
 from typing import Any
 
 import xbmc
+import xbmcgui
 
 from resources.lib.constants import (
+    BROWSE_IDLE_SECONDS,
     DEFAULT_REFETCH_SCHEDULE,
     FALLBACK_RECHECKS,
+    VIDEO_NAV_WINDOW,
     parse_refetch_schedule,
 )
 from resources.lib.data import kodi
@@ -646,6 +649,32 @@ def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
             "Scan resumed, playback stopped",
             event="scan.resume", media_type=ctx.media_type.name,
         )
+
+
+def _browsing() -> bool:
+    return (xbmcgui.getCurrentWindowId() == VIDEO_NAV_WINDOW
+            and xbmc.getGlobalIdleTime() < BROWSE_IDLE_SECONDS)
+
+
+def _hold_while_browsing(media_type: MediaType, monitor: Any) -> None:
+    """Hold the next Kodi write while the user is browsing the video library.
+
+    Kodi reloads the active window's list after every JSON-RPC library write,
+    so writing while the Videos window is in use keeps the list the user is
+    looking at reloading. The hold ends when the user has been idle for
+    BROWSE_IDLE_SECONDS, leaves the Videos window, or Kodi quits.
+    """
+    if monitor is None or not _browsing():
+        return
+    started = time.monotonic()
+    while _browsing() and not monitor.abortRequested():
+        if monitor.waitForAbort(2):
+            break
+    log.debug(
+        "Write held while browsing",
+        event="scan.browse_hold", media_type=media_type.name,
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
 
 
 def _cert_config(
@@ -1397,6 +1426,9 @@ def run_scan(
             if new_ratings is not None:
                 fields_to_write["ratings"] = new_ratings
 
+        # Update now is the user's own request, so it writes straight away.
+        if fields_to_write and not reset:
+            _hold_while_browsing(media_type, monitor)
         written = _write_fields(
             ctx, kodi_id, title, identity, fields_to_write, stats,
         )

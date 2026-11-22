@@ -45,6 +45,12 @@ plays, and a running scan pauses during playback. The first scan visits every
 item and takes the longest; later scans only check fields that are due, which
 on most days is a small part of the library.
 
+Kodi reloads the list on screen every time an item in the library changes. So
+while you browse your movies or shows, a scan holds its changes: it writes the
+next one when you have not pressed anything for a minute, or when you leave
+the library (for the home screen, to watch something, or for the settings).
+**Update now** is your own request, so it writes straight away.
+
 ### What does it send over the internet?
 
 Only lookups: an id or a title to find an item at TMDB, TheTVDB or a rating
@@ -84,6 +90,8 @@ library.
 - **The first scan is still running**: on a large library it takes a while;
   a notification says when it is done.
 - **Kodi was playing**: scans wait until playback stops.
+- **You were browsing the library**: a scan holds its changes until you have
+  not pressed anything for a minute or leave the library.
 
 ### A plot or title is in the wrong language
 
