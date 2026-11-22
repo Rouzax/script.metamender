@@ -59,10 +59,12 @@ def patched(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(actions, "release_scan_lock", release)
     monkeypatch.setattr(actions.StructuredLogger, "initialize", MagicMock())
     monkeypatch.setattr(actions, "get_bool_setting", MagicMock(return_value=False))
+    ask = MagicMock(return_value=True)
+    monkeypatch.setattr(actions, "show_question", ask)
 
     return {
         "tracker": tracker, "tracker_cls": tracker_cls, "notify": notify,
-        "acquire": acquire, "release": release,
+        "acquire": acquire, "release": release, "ask": ask,
     }
 
 
@@ -72,10 +74,8 @@ def patched(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_reset_tracker_clears_field_status(patched, kodi_stubs):
-    import xbmcgui
-    xbmcgui.Dialog.return_value.yesno.return_value = True
     actions.reset_tracker()
-    assert xbmcgui.Dialog.return_value.yesno.called
+    patched["ask"].assert_called_once_with("Reset tracker?", _LANG[32361])
     patched["tracker"].clear_field_status.assert_called_once_with()
     patched["notify"].assert_called_once()
     message = patched["notify"].call_args[0][0]
@@ -84,16 +84,13 @@ def test_reset_tracker_clears_field_status(patched, kodi_stubs):
 
 
 def test_reset_tracker_cancelled_when_user_declines(patched, kodi_stubs):
-    import xbmcgui
-    xbmcgui.Dialog.return_value.yesno.return_value = False
+    patched["ask"].return_value = False
     actions.reset_tracker()
     patched["tracker_cls"].assert_not_called()
     patched["notify"].assert_not_called()
 
 
 def test_reset_tracker_closes_tracker_on_error(patched, kodi_stubs):
-    import xbmcgui
-    xbmcgui.Dialog.return_value.yesno.return_value = True
     patched["tracker"].clear_field_status.side_effect = RuntimeError("boom")
     actions.reset_tracker()  # should not raise
     patched["tracker"].close.assert_called_once_with()
@@ -102,8 +99,6 @@ def test_reset_tracker_closes_tracker_on_error(patched, kodi_stubs):
 
 def test_reset_tracker_skips_when_scan_running(patched, kodi_stubs):
     """If the scan lock is held, reset must not touch the tracker."""
-    import xbmcgui
-    xbmcgui.Dialog.return_value.yesno.return_value = True
     patched["acquire"].return_value = False
     actions.reset_tracker()
     patched["tracker_cls"].assert_not_called()

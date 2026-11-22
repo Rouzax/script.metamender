@@ -416,6 +416,20 @@ def test_select_opens_metamenders_own_picker(monkeypatch):
                      ("h", ["a"], 0, None, False)]
 
 
+def test_messages_open_metamenders_own_window(monkeypatch):
+    calls = []
+
+    def show_message(heading, message, question=False):
+        calls.append((heading, message, question))
+        return True
+
+    monkeypatch.setattr(setup_window, "show_message", show_message)
+    dialogs = setup_window.Dialogs()
+    assert dialogs.yesno("h", "Save?") is True
+    dialogs.ok("h", "Saved.")
+    assert calls == [("h", "Save?", True), ("h", "Saved.", False)]
+
+
 def test_title_mode_rows(ids):
     c, _ = _controller(key="abc", dialogs=FakeDialogs(selects=[1]))
     _open_page(c, included=True, toggles=frozenset({"main_titles"}))

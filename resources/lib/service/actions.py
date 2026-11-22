@@ -20,7 +20,6 @@ Logging:
 from __future__ import annotations
 
 import xbmc
-import xbmcgui
 
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.kodi import get_item_by_id
@@ -45,6 +44,7 @@ from resources.lib.service.refresh import (
     show_id_of,
 )
 from resources.lib.service.wizard import open_setup
+from resources.lib.ui.message_window import show_question
 from resources.lib.ui.setup_model import WIZARD
 from resources.lib.utils import (
     ApiKeyError,
@@ -81,7 +81,7 @@ def reset_tracker() -> None:
     """Clear all maturity facts so the next scan re-pulls everything (settings action)."""
     _init_logging()
 
-    if not xbmcgui.Dialog().yesno(lang(32360), lang(32361)):  # "Reset tracker?" / body
+    if not show_question(lang(32360), lang(32361)):  # "Reset tracker?" / body
         return
 
     # Take the scan lock: this mutates the same field_status rows a running

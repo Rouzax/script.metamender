@@ -54,6 +54,7 @@ from resources.lib.providers.tmdb import (
     KEY_UNCHECKED,
     check_api_key,
 )
+from resources.lib.ui.message_window import show_message
 from resources.lib.ui.select_window import show_select
 from resources.lib.ui.setup_model import (
     FALLBACK_ORDER_OPTIONS,
@@ -165,7 +166,7 @@ def _option_label(text: tuple[int, ...], values: tuple[Any, ...], current: Any) 
 
 class Dialogs:
     """The dialogs the steps open on top of the window: MetaMender's own
-    picker, and Kodi's keyboard and message dialogs."""
+    picker and messages, and Kodi's keyboard."""
 
     def input(self, heading: str, default: str) -> str:
         return xbmcgui.Dialog().input(heading, default)
@@ -178,10 +179,10 @@ class Dialogs:
         return show_select(heading, options, preselect, details, marked)
 
     def ok(self, heading: str, message: str) -> None:
-        xbmcgui.Dialog().ok(heading, message)
+        show_message(heading, message)
 
     def yesno(self, heading: str, message: str) -> bool:
-        return bool(xbmcgui.Dialog().yesno(heading, message))
+        return show_message(heading, message, question=True)
 
 
 def language_name(code: str) -> str:

@@ -28,7 +28,8 @@ New Features:
   - Back or Cancel on the library list with unsaved changes asks
     whether to save them.
   - Setup's lists of options (a language, a country, what to do with a
-    library) open in MetaMender's own window instead of Kodi's, so they
+    library), its questions and messages, and the Reset tracker question
+    open in MetaMender's own windows instead of Kodi's dialogs, so they
     look the same in every skin.
 
 Bug Fixes:

@@ -83,16 +83,16 @@ def test_attention_scenes_name_real_problems():
             assert all(kind in WINDOW_KINDS for kind, _ in scene.get("others", [])), name
 
 
-def test_question_scenes_wait_for_kodis_question_over_setup():
-    """The save question is Kodi's own yes/no dialog over the setup window:
-    the runner waits for that dialog and crops to the setup panel."""
+def test_question_scenes_wait_for_the_question_over_setup():
+    """The save question is MetaMender's message window over the setup
+    window: the runner waits for it and crops to the setup panel."""
     asking = [name for name, scene in SCENES.items() if scene.get("question")]
     assert asking
     for name in asking:
         scene = SCENES[name]
         assert scene["kind"] == "setup", name
         assert scene["window"] == "script-metamender-setup.xml", name
-        assert scene.get("active") == "yesnodialog", name
+        assert scene.get("active") == "script-metamender-message.xml", name
 
 
 def test_picker_scenes_open_the_picker_from_a_row_over_setup():

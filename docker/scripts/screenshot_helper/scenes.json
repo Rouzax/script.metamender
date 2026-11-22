@@ -67,7 +67,7 @@
   "setup-save-question": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
-    "active": "yesnodialog",
+    "active": "script-metamender-message.xml",
     "kind": "setup",
     "step": "libraries",
     "question": true
