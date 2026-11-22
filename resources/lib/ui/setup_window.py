@@ -109,12 +109,15 @@ _FEATURE_TEXT = {
     "credits": (32442, 32443),
     "trailers": (32444, 32445),
     "taglines": (32446, 32447),
+    "posters": (32712, 32713),
+    "episode_thumbs": (32714, 32715),
     "details": (32448, 32449),
 }
 # The short form a toggle takes in a library's one-line summary.
 _FIELD_WORD = {
     "ratings": 32676, "plots": 32677, "episode_titles": 32678, "main_titles": 32679,
     "certifications": 32681, "credits": 32683, "trailers": 32684, "taglines": 32685,
+    "posters": 32716, "episode_thumbs": 32717,
     "details": 32686,
 }
 # The order of the words in that summary: age ratings last, since their

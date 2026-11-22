@@ -52,6 +52,8 @@ _DEFAULT_BOOL = {
     "enable_credits": False, "enable_trailers": False, "enable_taglines": False,
     "enable_details": False, "override_prefix": False, "replace_incorrect": True,
     "enable_fallback": False,
+    # Toggles 1.1 never had: absent from its settings, so they convert as off.
+    "enable_posters": False, "enable_episode_thumbs": False,
 }
 
 

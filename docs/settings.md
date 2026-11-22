@@ -19,6 +19,13 @@ bottom left of the settings screen) to **Advanced**; they are marked
     [setup](setup.md#1-tmdb-api-key). Without a working key MetaMender
     updates nothing and tells you so.
 
+### fanart.tv
+
+**Personal fanart.tv API key**
+:   Optional. A free personal key from fanart.tv (create an account on
+    fanart.tv and copy the key from your account page) makes new images
+    reach you sooner. MetaMender works without it.
+
 ## Backfill
 
 ### Freshness

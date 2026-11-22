@@ -36,6 +36,11 @@ def test_convert_defaults_for_absent_ids():
     assert lib.cert_prefix_override is None and lib.cert_not_found is None
 
 
+def test_convert_1_1_with_new_toggles_does_not_raise():
+    lib = convert(_legacy(), {}, DISCOVERED[:1], "nl-NL").libraries[0]
+    assert "posters" not in lib.toggles and "episode_thumbs" not in lib.toggles
+
+
 def test_convert_automatic_country_stores_resolved_index():
     lib = convert(_legacy(country=0), {}, DISCOVERED[:1], "nl-NL").libraries[0]
     assert lib.cert_country == COUNTRY_CODES.index("NL") + 1
@@ -183,7 +188,8 @@ def test_ensure_copy_write_failure_is_none(tmp_path):
 
 def test_moved_ids_have_defaults():
     covered = set(upgrade._DEFAULT_TEXT) | set(upgrade._DEFAULT_INT) | set(upgrade._DEFAULT_BOOL)
-    assert covered == set(MOVED_IDS)
+    # The art toggles are new in 1.3: they have defaults but were never 1.1 ids.
+    assert covered - {"enable_posters", "enable_episode_thumbs"} == set(MOVED_IDS)
 
 
 def test_convert_without_old_settings_switches_nothing_on():

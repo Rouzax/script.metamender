@@ -35,6 +35,10 @@ TITLE_ORIGINAL = "original"
 # None for it, so certifications have no country (they are off).
 NO_COUNTRY = -1
 
+# Where a library's posters come from: TMDB alone, or fanart.tv first.
+POSTER_SOURCE_TMDB = 0
+POSTER_SOURCE_FANART = 1
+
 # Toggle name -> the fields it switches on. "main_title" stands for the
 # "title" field of shows and movies, so the episode-title toggle does not
 # switch them (see candidate_fields).
@@ -47,6 +51,8 @@ FIELD_TOGGLES: dict[str, frozenset[str]] = {
     "credits": frozenset({"director", "writer"}),
     "trailers": frozenset({"trailer"}),
     "taglines": frozenset({"tagline"}),
+    "posters": frozenset({"poster"}),
+    "episode_thumbs": frozenset({"thumb"}),
     "details": frozenset({"genre", "studio", "country", "runtime", "firstaired"}),
 }
 
@@ -67,6 +73,7 @@ class Library:
     cert_replace_foreign: bool = True
     cert_prefix_override: Optional[str] = None
     cert_not_found: Optional[str] = None
+    poster_source: int = POSTER_SOURCE_TMDB
     # Hand-written entries for folders inside the library: path, optional
     # enabled False, language, fallback_language. Not shown in the UI.
     subfolders: tuple[dict[str, Any], ...] = field(default_factory=tuple)
@@ -180,8 +187,17 @@ def _to_dict(lib: Library) -> dict[str, Any]:
         "cert_replace_foreign": lib.cert_replace_foreign,
         "cert_prefix_override": lib.cert_prefix_override,
         "cert_not_found": lib.cert_not_found,
+        "poster_source": lib.poster_source,
         "subfolders": list(lib.subfolders),
     }
+
+
+def _poster_source(value: Any) -> int:
+    """A stored poster source; anything but a known value reads as TMDB."""
+    if isinstance(value, int) and not isinstance(value, bool) and value in (
+            POSTER_SOURCE_TMDB, POSTER_SOURCE_FANART):
+        return value
+    return POSTER_SOURCE_TMDB
 
 
 def _from_dict(raw: dict[str, Any]) -> Library:
@@ -201,6 +217,7 @@ def _from_dict(raw: dict[str, Any]) -> Library:
         cert_replace_foreign=bool(raw.get("cert_replace_foreign", base.cert_replace_foreign)),
         cert_prefix_override=raw.get("cert_prefix_override"),
         cert_not_found=raw.get("cert_not_found"),
+        poster_source=_poster_source(raw.get("poster_source", POSTER_SOURCE_TMDB)),
         subfolders=tuple(dict(e) for e in raw.get("subfolders", [])),
     )
 
@@ -290,6 +307,7 @@ def scan_settings(lib: Library, general: dict[str, Any], ui_language: str) -> di
         "cert_prefix_override": lib.cert_prefix_override,
         "cert_replace_foreign": lib.cert_replace_foreign,
         "cert_not_found": lib.cert_not_found,
+        "poster_source": "fanart" if lib.poster_source == POSTER_SOURCE_FANART else "tmdb",
     }
 
 

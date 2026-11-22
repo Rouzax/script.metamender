@@ -15,6 +15,18 @@
                     </control>
                 </setting>
             </group>
+            <group id="fanart" label="32709">
+                <setting id="fanart_client_key" type="string" label="32710" help="32711">
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>32710</heading>
+                        <hidden>true</hidden>
+                    </control>
+                </setting>
+            </group>
         </category>
 
         <!-- Tab 2: Backfill -->

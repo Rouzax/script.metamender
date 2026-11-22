@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 
 from resources.lib.data.libraries import FIELD_TOGGLES, Library, LibraryConfig
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
-from resources.lib.engine.art import ART_FIELDS
 from resources.lib.service import daemon
 
 
@@ -361,13 +360,12 @@ def test_service_start_clears_a_lock_file_left_by_a_killed_kodi(kodi_stubs):
 
 def test_every_backfill_field_has_a_toggle():
     """A field no toggle enables is never in enabled_fields, so the scan
-    never manages it. Votes are written with the rating. Art fields are
-    excluded until their toggles exist."""
+    never manages it. Votes are written with the rating."""
     toggled = frozenset().union(*FIELD_TOGGLES.values())
     for media_type in (MOVIE, TVSHOW, EPISODE):
         # A movie or show title has its own toggle, apart from episode titles.
         own = {"title": "main_title"} if media_type is not EPISODE else {}
-        needed = {own.get(f, f) for f in media_type.backfill_fields} - {"votes"} - ART_FIELDS
+        needed = {own.get(f, f) for f in media_type.backfill_fields} - {"votes"}
         missing = needed - toggled
         assert not missing, (media_type.name, sorted(missing))
 

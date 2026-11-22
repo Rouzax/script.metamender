@@ -1430,3 +1430,39 @@ msgstr ""
 msgctxt "#32708"
 msgid "Save your changes?"
 msgstr ""
+
+msgctxt "#32709"
+msgid "fanart.tv"
+msgstr ""
+
+msgctxt "#32710"
+msgid "Personal fanart.tv API key"
+msgstr ""
+
+msgctxt "#32711"
+msgid "Optional. With your own free key from fanart.tv, new images reach you sooner. MetaMender works without it."
+msgstr ""
+
+msgctxt "#32712"
+msgid "Posters"
+msgstr ""
+
+msgctxt "#32713"
+msgid "Posters for movies, shows and seasons."
+msgstr ""
+
+msgctxt "#32714"
+msgid "Episode thumbs"
+msgstr ""
+
+msgctxt "#32715"
+msgid "Thumbnail images for episodes."
+msgstr ""
+
+msgctxt "#32716"
+msgid "posters"
+msgstr ""
+
+msgctxt "#32717"
+msgid "episode thumbs"
+msgstr ""

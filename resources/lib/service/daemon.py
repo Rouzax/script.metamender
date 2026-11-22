@@ -164,6 +164,7 @@ def _load_settings() -> dict[str, Any]:
     library does comes from its own settings (_load_libraries)."""
     return {
         "tmdb_api_key": get_setting("tmdb_api_key"),
+        "fanart_client_key": get_setting("fanart_client_key"),
         "stale_threshold_days": get_int_setting("stale_threshold_days", 365),
         "refetch_schedule": get_setting("refetch_schedule"),
         "rate_limit": get_float_setting("rate_limit", 0.25),
