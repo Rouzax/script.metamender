@@ -134,3 +134,4 @@ feat/7d-provider-replacement.
 ## Releases
 - [x] v1.0.0 (2026-11-12), v1.0.1 (2026-11-13)
 - [x] v1.1.0 (2026-11-13): setup asks which rating to show, where plots and titles come from, and whether to replace other countries' ratings
+- [x] v1.2.0 (2026-11-22): settings per library, keep the original title, automatic upgrade from 1.1, MetaMender's own setup dialogs
