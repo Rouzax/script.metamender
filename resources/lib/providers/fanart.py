@@ -28,6 +28,7 @@ from resources.lib.providers.http import provider_get
 from resources.lib.utils import (
     ApiKeyError,
     FanartAuthError,
+    TransientProviderError,
     get_logger,
     log_timing,
 )
@@ -46,17 +47,20 @@ def _get(
         params["client_key"] = client_key
     with log_timing(log, label, **context):
         try:
-            return provider_get(
+            data = provider_get(
                 "{}/{}".format(FANART_BASE_URL, path), logger=log, label=label,
                 params=params, provider="fanart",
             )
         except ApiKeyError:
-            raise FanartAuthError("fanart.tv rejected the API key")
+            raise FanartAuthError("fanart.tv rejected the API key") from None
+    if data is not None and not isinstance(data, dict):
+        raise TransientProviderError("fanart.tv answered with a non-object body")
+    return data
 
 
 def _poster(item: Dict[str, Any]) -> Optional[Poster]:
-    """One poster from a fanart.tv item; None when it has no usable url or
-    likes count. ``likes`` arrives as a string."""
+    """One poster from a fanart.tv item; None when it has no url or its
+    ``likes`` (a string) is not a number. Missing or empty likes count as 0."""
     url = item.get("url")
     if not url:
         return None

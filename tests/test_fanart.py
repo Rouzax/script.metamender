@@ -101,3 +101,9 @@ def test_fanart_bad_items_are_skipped():
     with patch(_GET, return_value=body):
         result = fanart.fetch_movie_posters(1, None, "pk", "")
     assert result == [Poster("https://a/ok.jpg", "fanart", "en", (0,))]
+
+
+def test_fanart_non_object_body_is_transient():
+    from resources.lib.utils import TransientProviderError
+    with patch(_GET, return_value=["x"]), pytest.raises(TransientProviderError):
+        fanart.fetch_show_posters(1, "pk", "")

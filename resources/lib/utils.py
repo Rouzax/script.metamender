@@ -44,9 +44,10 @@ from resources.lib.constants import (
 # into its exception messages, so a key reaches log text through error= values
 # and tracebacks. Covers both the query form (api_key=...) and a repr'd params
 # dict ('api_key': '...'). Also covers JSON bodies ({"apikey": "..."}) and
-# bearer tokens ("Authorization: Bearer ..."), which TVDB uses.
+# bearer tokens ("Authorization: Bearer ..."), which TVDB uses. fanart.tv's
+# personal client_key travels as a query parameter and is covered too.
 _SECRET_RE = re.compile(
-    r"""(?i)((?:api_?key(?:=|['"]?\s*:\s*['"]?))|(?:\bbearer\s+))[^&\s'",}]+"""
+    r"""(?i)((?:(?:api|client)_?key(?:=|['"]?\s*:\s*['"]?))|(?:\bbearer\s+))[^&\s'",}]+"""
 )
 
 

@@ -100,3 +100,13 @@ def test_tmdb_key_setting_is_hidden():
     root = ET.parse("resources/settings.xml").getroot()
     key = next(s for s in root.iter("setting") if s.get("id") == "tmdb_api_key")
     assert key.findtext("control/hidden") == "true"
+
+
+def test_client_key_is_redacted_in_query_and_dict_text():
+    from resources.lib.utils import _redact
+    url = "https://x/v3/tv/1?api_key=PROJ&client_key=PERSONALKEY123 failed"
+    out = _redact(url)
+    assert "PROJ" not in out and "PERSONALKEY123" not in out
+    assert "failed" in out
+    for text in ("{'client_key': 'PERSONALKEY123'}", '{"clientkey": "PERSONALKEY123"}'):
+        assert "PERSONALKEY123" not in _redact(text)
