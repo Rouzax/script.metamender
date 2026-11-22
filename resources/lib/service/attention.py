@@ -45,6 +45,12 @@ WINDOW_KINDS: tuple[str, ...] = (
 
 # A problem the user cannot fix, told by a toast instead of the window.
 TVDB_AUTH = "tvdb_auth"
+# fanart.tv refused the key, also a toast. The detail is PERSONAL_KEY when
+# the user set a key of their own (they can fix it) and empty when it is
+# MetaMender's own (they cannot), so the toast says which, and shows again
+# if the user adds or removes their key while the problem stands.
+FANART_AUTH = "fanart_auth"
+PERSONAL_KEY = "personal"
 
 FOLDER_OFFLINE_DAYS = 3
 FAILING_ATTEMPTS = 3
@@ -163,6 +169,10 @@ class Attention:
         for problem in displayed:
             if self._open.get(problem.kind) == problem.detail:
                 self._shown[problem.kind] = problem.detail
+
+    def open_detail(self, kind: str) -> str:
+        """The detail of an open problem; empty when it is not open."""
+        return self._open.get(kind, "")
 
     def pending_toast(self, kind: str) -> bool:
         return kind in self._open and self._shown.get(kind) != self._open[kind]

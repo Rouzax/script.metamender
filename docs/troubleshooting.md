@@ -169,7 +169,12 @@ library.
 - **A season of a show without a TMDB id** is left alone, and a show without
   a TheTVDB id gets no posters from fanart.tv.
 - **fanart.tv did not answer** or rejected the key: posters that need it wait
-  until it does. See [Personal fanart.tv API key](settings.md#fanarttv).
+  until it does. If it rejected the key, a notification said so: *fanart.tv
+  refused your personal API key* means the key in Settings, Providers is
+  wrong (fix it, or clear it to use MetaMender's own key); *fanart.tv refused
+  MetaMender's key* is not something you can fix, and posters resume once
+  fanart.tv accepts the key again. See
+  [Personal fanart.tv API key](settings.md#fanarttv).
 - **The item has an NFO file**: its poster and thumb are only filled when
   empty, a frame grab or a broken link.
 - **The poster is settled.** Like other fields, a poster is checked while the

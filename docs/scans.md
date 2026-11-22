@@ -107,5 +107,8 @@ Titles and plots from TheTVDB are paused until it works again; TMDB carries on.
 If fanart.tv rejects its key (MetaMender's or your
 [personal key](settings.md#fanarttv)) or cannot be reached, posters whose
 choice depends on fanart.tv wait, with nothing changed, and are tried again at
-the next scan; everything else carries on. There is no notification; Kodi's
-[log](troubleshooting.md#reporting-a-problem) records it.
+the next scan; everything else carries on. When fanart.tv rejects the key, a
+notification says so once, and says whether it was your personal key or
+MetaMender's own; it shows again only after fanart.tv has accepted a key in
+between. When fanart.tv simply cannot be reached there is no notification;
+Kodi's [log](troubleshooting.md#reporting-a-problem) records both.

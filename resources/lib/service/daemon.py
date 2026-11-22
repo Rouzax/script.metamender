@@ -411,6 +411,19 @@ def tvdb_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
     return any(s.get("tvdb_auth_failed") for s in all_stats)
 
 
+def fanart_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
+    """True when any pass of a cycle reports that fanart.tv rejected the
+    key. Posters that need fanart.tv wait (they are never swapped to
+    TMDB), so the user is told."""
+    return any(s.get("fanart_auth_failed") for s in all_stats)
+
+
+def fanart_auth_string(personal_key: bool) -> int:
+    """The string id of the notice for a fanart.tv key rejection; it
+    differs because only a personal key is the user's to fix."""
+    return 32742 if personal_key else 32743
+
+
 def _run_scan(
     tracker: TrackerDB,
     libraries: LibraryConfig,
@@ -605,11 +618,12 @@ def _check_folders(libraries: LibraryConfig) -> dict[str, bool]:
 def _record_cycle(
     record: attention.Attention, *, shutdown: bool, aborted: bool,
     tvdb_rejected: bool, tmdb_answered: bool, tvdb_answered: bool,
+    fanart_rejected: bool, fanart_answered: bool, fanart_personal: bool,
     folders: dict[str, bool] | None, now: float, unmatched: int | None = None,
 ) -> None:
     """What a finished background cycle tells the problem record: the
     attempt for the failure streak (not when Kodi shut down), TheTVDB's
-    credentials, and, after a full pass over the library, the folders and
+    credentials, fanart.tv's key, and, after a full pass over the library, the folders and
     the number of items in no library. A key or
     credential problem clears only when that provider answered: a cycle
     that never asked it proves nothing, and clearing would show the problem
@@ -622,6 +636,11 @@ def _record_cycle(
         record.raise_problem(attention.TVDB_AUTH)
     elif tvdb_answered:
         record.clear(attention.TVDB_AUTH)
+    if fanart_rejected:
+        record.raise_problem(
+            attention.FANART_AUTH, attention.PERSONAL_KEY if fanart_personal else "")
+    elif fanart_answered:
+        record.clear(attention.FANART_AUTH)
     if folders is not None:
         record.folders_checked(folders, now)
     if unmatched:
@@ -639,7 +658,7 @@ def _attention_tick(
     tracker: TrackerDB, monitor: Any, shown: set[tuple[str, str]],
 ) -> None:
     """Show what the problem record holds that was not shown yet: the
-    attention window, and the TheTVDB toast. Nothing while anything plays
+    attention window, and the TheTVDB and fanart.tv toasts. Nothing while anything plays
     (it waits for the next tick without playback) or while Kodi quits.
 
     ``shown`` is what this service run already showed: should saving the
@@ -676,6 +695,13 @@ def _attention_tick(
             attention.update(
                 tracker, lambda a: a.mark_toast_shown(attention.TVDB_AUTH))
             notify(lang(32352))  # TheTVDB rejected the credentials
+        fanart = record.open_detail(attention.FANART_AUTH)
+        toast = (attention.FANART_AUTH, fanart)
+        if record.pending_toast(attention.FANART_AUTH) and toast not in shown:
+            shown.add(toast)
+            attention.update(
+                tracker, lambda a: a.mark_toast_shown(attention.FANART_AUTH))
+            notify(lang(fanart_auth_string(fanart == attention.PERSONAL_KEY)))
     except Exception:
         log.exception("Showing a problem failed", event="service.attention_failed")
 
@@ -931,6 +957,9 @@ def run() -> None:
                             s.get("tmdb_answered") for s in all_stats.values())
                         tvdb_answered = any(
                             s.get("tvdb_answered") for s in all_stats.values())
+                        fanart_rejected = fanart_auth_failed(all_stats.values())
+                        fanart_answered = any(
+                            s.get("fanart_answered") for s in all_stats.values())
                         full_pass = not targeted and not cycle_aborted
                         folders = _check_folders(libraries) if full_pass else None
                         unmatched = (
@@ -941,7 +970,10 @@ def run() -> None:
                         attention.update(tracker, partial(
                             _record_cycle, shutdown=shutdown, aborted=cycle_aborted,
                             tvdb_rejected=tvdb_rejected, tmdb_answered=tmdb_answered,
-                            tvdb_answered=tvdb_answered, folders=folders,
+                            tvdb_answered=tvdb_answered, fanart_rejected=fanart_rejected,
+                            fanart_answered=fanart_answered,
+                            fanart_personal=bool(settings.get("fanart_client_key")),
+                            folders=folders,
                             now=time.time(), unmatched=unmatched,
                         ))
 

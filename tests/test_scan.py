@@ -6537,6 +6537,7 @@ class TestProviderAnswers:
                          "k", _make_settings(), items=[])
         tracker.close()
         assert stats["tmdb_answered"] is False
+        assert stats["fanart_answered"] is False and stats["fanart_auth_failed"] is False
 
 
 class TestEnrichImdbIdLeavesTheItemAlone:

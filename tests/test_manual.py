@@ -164,6 +164,21 @@ def test_manual_tvdb_auth_failure_notified_once(
     assert "s32341" not in notified
 
 
+@pytest.mark.parametrize("key, text", [("mine", "s32742"), ("", "s32743")])
+def test_manual_fanart_auth_failure_names_the_key_in_use(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock], key: str, text: str
+) -> None:
+    monkeypatch.setattr(
+        manual, "_load_settings", MagicMock(return_value=_settings(fanart_client_key=key)))
+    monkeypatch.setattr(manual, "lang", lambda i: "s{}".format(i))
+    patched["run_scan"].return_value = {"updated": 0, "fanart_auth_failed": True}
+
+    manual.run()
+
+    notified = [c.args[0] for c in manual.notify.call_args_list]
+    assert notified.count(text) == 1
+
+
 def test_manual_does_not_scan_before_setup(patched, monkeypatch):
     monkeypatch.setattr(manual, "is_setup_complete", MagicMock(return_value=False))
     manual.run()

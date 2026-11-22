@@ -1570,3 +1570,11 @@ msgstr ""
 msgctxt "#32741"
 msgid "{}, without text"
 msgstr ""
+
+msgctxt "#32742"
+msgid "fanart.tv refused your personal API key. Posters that need fanart.tv wait until it works. Check the key in Settings, Providers, or clear it to use MetaMender's own key."
+msgstr ""
+
+msgctxt "#32743"
+msgid "fanart.tv refused MetaMender's key. Posters that need fanart.tv wait until it works again; everything else carries on."
+msgstr ""

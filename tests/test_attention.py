@@ -10,6 +10,7 @@ from resources.lib.service.attention import (
     NO_KEY,
     SCANS_FAILING,
     SETUP,
+    FANART_AUTH,
     TVDB_AUTH,
     UNMATCHED,
     WINDOW_KINDS,
@@ -128,6 +129,17 @@ def test_tvdb_toast_once():
     a.clear(TVDB_AUTH)
     a.raise_problem(TVDB_AUTH)
     assert a.pending_toast(TVDB_AUTH)
+
+
+def test_fanart_toast_again_when_the_key_changes():
+    a = Attention()
+    a.raise_problem(FANART_AUTH, "")
+    assert a.pending_toast(FANART_AUTH) and a.pending_window() is None
+    a.mark_toast_shown(FANART_AUTH)
+    a.raise_problem(FANART_AUTH, "")
+    assert not a.pending_toast(FANART_AUTH)
+    a.raise_problem(FANART_AUTH, "personal")
+    assert a.pending_toast(FANART_AUTH)
 
 
 def test_corrupt_or_missing_state_is_empty():

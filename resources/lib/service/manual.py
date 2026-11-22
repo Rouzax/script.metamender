@@ -30,6 +30,8 @@ from resources.lib.service.daemon import (
     _load_settings,
     _prepare_imdb_ratings,
     _sync_libraries,
+    fanart_auth_failed,
+    fanart_auth_string,
     tvdb_auth_failed,
     updated_text,
 )
@@ -141,6 +143,7 @@ def run() -> None:
         # Seasons and episodes use the show ids the show pass found; a
         # stopped scan runs neither them nor the Kodi query for the map.
         later = (SEASON, EPISODE) if scans_seasons(libraries) else (EPISODE,)
+        show_id_map: dict[int, str] = {}
         if not user_stopped(all_stats.values()):
             show_id_map = tracker.get_show_id_map()
         else:
@@ -203,6 +206,8 @@ def run() -> None:
         notify(", ".join(parts))
         if tvdb_auth_failed(all_stats.values()):
             notify(lang(32352))  # TheTVDB rejected the credentials
+        if fanart_auth_failed(all_stats.values()):
+            notify(lang(fanart_auth_string(bool(settings.get("fanart_client_key")))))
 
     except ApiKeyError:
         log.exception("Manual scan stopped: invalid API key", event="manual.apikey")

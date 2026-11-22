@@ -296,6 +296,10 @@ def _make_stats() -> dict[str, Any]:
         "tvdb_auth_failed": False,
         "tmdb_answered": False,
         "tvdb_answered": False,
+        # fanart.tv rejected the key this cycle / gave a real answer; the
+        # posters that need it wait, so the caller tells the user.
+        "fanart_auth_failed": False,
+        "fanart_answered": False,
     }
 
 
@@ -1845,6 +1849,8 @@ def run_scan(
     stats["tvdb_auth_failed"] = "tvdb" in breaker.auth_rejected()
     stats["tmdb_answered"] = breaker.answered("tmdb")
     stats["tvdb_answered"] = breaker.answered("tvdb")
+    stats["fanart_auth_failed"] = "fanart" in breaker.auth_rejected()
+    stats["fanart_answered"] = breaker.answered("fanart")
     log.info(
         "Scan complete",
         event="scan.complete",

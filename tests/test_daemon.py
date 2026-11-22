@@ -289,10 +289,12 @@ def test_kodi_query_failure_backs_off(monkeypatch, kodi_stubs):
     assert scan_mock.call_count == 1
 
 
-def _complete_stats(aborted=False, tmdb_answered=True, tvdb_answered=True):
+def _complete_stats(aborted=False, tmdb_answered=True, tvdb_answered=True,
+                    fanart_answered=False):
     s = {"processed": 1, "skipped": 0, "updated": 1, "errors": 0,
          "fields": {}, "aborted": aborted,
-         "tmdb_answered": tmdb_answered, "tvdb_answered": tvdb_answered}
+         "tmdb_answered": tmdb_answered, "tvdb_answered": tvdb_answered,
+         "fanart_answered": fanart_answered}
     return {"movie": s, "tvshow": dict(s), "episode": dict(s)}
 
 
@@ -560,6 +562,8 @@ class _Service:
         # A list: the real sources.json in addon_data, with these sources
         # discovered in Kodi.
         self.discovered = None
+        # The personal fanart.tv key the scan settings carry.
+        self.fanart_key = ""
 
     def run(self, ticks=2, scan=None, setup=True, key="k", notifications=False,
             playing=lambda svc: False, monitor=None, aborting=lambda: False):
@@ -588,6 +592,7 @@ class _Service:
                                            "resume_interrupted": True,
                                            "show_notifications": notifications,
                                            "orphan_retention_days": 30,
+                                           "fanart_client_key": self.fanart_key,
                                            "ui_language": "en-US"}), \
                 (patch.object(daemon, "_sync_libraries", return_value=LibraryConfig())
                  if self.discovered is None else
@@ -755,6 +760,55 @@ def test_tvdb_toast_not_repeated_after_a_cycle_without_tvdb(kodi_stubs):
     svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(tvdb_answered=False)))
     svc.run(ticks=1, scan=MagicMock(return_value=auth))
     assert svc.notified.count("s32352") == 1
+
+
+def _fanart_rejected():
+    stats = _complete_stats()
+    stats["tvshow"]["fanart_auth_failed"] = True
+    return stats
+
+
+def test_fanart_auth_failed_helper():
+    assert daemon.fanart_auth_failed([{"fanart_auth_failed": False}, {"fanart_auth_failed": True}])
+    assert not daemon.fanart_auth_failed([{}, {"updated": 1}])
+
+
+def test_fanart_toast_names_the_personal_key_when_one_is_set(kodi_stubs):
+    svc = _Service()
+    svc.fanart_key = "mine"
+    svc.run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32742") == 1
+    assert "s32743" not in svc.notified
+    assert attention.FANART_AUTH in json.loads(svc.store["attention"])["open"]
+    assert attention.FANART_AUTH not in attention.WINDOW_KINDS
+
+
+def test_fanart_toast_names_the_add_on_key_when_none_is_set(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32743") == 1
+    assert "s32742" not in svc.notified
+
+
+def test_fanart_toast_once_per_problem(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    svc.run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32743") == 1
+
+
+def test_fanart_problem_survives_a_cycle_that_never_asked_fanart(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(fanart_answered=False)))
+    assert attention.FANART_AUTH in json.loads(svc.store["attention"])["open"]
+    svc.run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32743") == 1
+
+
+def test_fanart_problem_clears_when_fanart_answers(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(fanart_answered=True)))
+    assert attention.FANART_AUTH not in json.loads(svc.store["attention"])["open"]
+    svc.run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32743") == 2
 
 
 def test_a_failing_window_does_not_stop_the_service(kodi_stubs):
