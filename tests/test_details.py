@@ -817,3 +817,22 @@ def test_restore_poster_writes_art(db):
     result, upd = _run(db, "poster", "https://image.tmdb.org/t/p/original/a.jpg")
     assert result == "restored"
     assert upd.call_args.kwargs["poster"] == original
+
+
+def test_duplicate_season_reads_its_own_row(opened, monkeypatch):
+    """The season holding the shared row is told apart through its show's id."""
+    opened["settings"]["toggles"] = frozenset({"posters"})
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("tvshow", "tmdb:250000", "Het gouden uur", kodi_id=5,
+                        tmdb_id="250000")
+    tracker.upsert_item("season", "tmdb:250000/S02", "Season 2", kodi_id=31)
+    own = "tmdb:250000/S02|/series/Het gouden uur/"
+    tracker.commit()
+    tracker.close()
+    real = details.kodi.get_item_by_id
+    seasons = {30: SEASON_ITEM, 31: dict(SEASON_ITEM, seasonid=31)}
+    monkeypatch.setattr(details.kodi, "get_item_by_id",
+                        lambda mt, i: dict(seasons[i]) if mt is SEASON else real(mt, i))
+    details.open_details("season", "30")
+    session, _ = opened["shown"][0]
+    assert session.identity == own

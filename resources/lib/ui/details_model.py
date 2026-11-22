@@ -280,7 +280,8 @@ def _field_row(
               and blanked(item, field, fs))
     settled = not refill and _settled(field, fs, age, today, threshold)
     checked = count > 0 or reason in (REASON_NOTHING, REASON_UNCHECKED)
-    # An unlock leaves the "locked" reason until the next scan records one,
+    # An unlock leaves the "locked" (or art "changed outside") reason until
+    # the next scan records one,
     # and makes the field due at that scan (details.unlock_field). Kodi then
     # holds the restored original, so this wins over "changed".
     unlocked = reason in (REASON_LOCKED, REASON_CHANGED_OUTSIDE) and not locked
@@ -418,30 +419,38 @@ def _ids_row(media_type: MediaType, item: dict[str, Any],
            if n.get("matched") and n.get("site") in ("tmdb", "tvdb")}
     lines: list[tuple[str, str]] = []
     from_kodi = found = False
-    if media_type.name == "season" and item.get("show_tmdb_id"):
-        # Kodi gives a season no ids; the show's is the one that finds it.
-        lines.append(("TMDB", str(item["show_tmdb_id"])))
-    for name, kodi_id, stored, matchable in (
-        ("TMDB", kodi_tmdb, row.get("tmdb_id"), True),
-        # An `unknown` uniqueid is a TheTVDB id once the scan verified it.
-        ("TheTVDB", kodi_tvdb or (
-            kodi_unknown if kodi_unknown and str(kodi_unknown) == str(row.get("tvdb_id"))
-            else None
-        ), row.get("tvdb_id"), True),
-        ("IMDb", kodi_imdb, row.get("imdb_id"), False),
-    ):
-        if kodi_id:
-            lines.append((name, lang(32553).format(kodi_id)))
-            from_kodi = True
-        elif stored:
-            if matchable and number_matched:
-                text = lang(_MATCHED_HOW.get(how.get(name, ""), 32554))
-            elif not matchable:
-                text = lang(32555)
-            else:
-                text = lang(32556)
-            lines.append((name, text.format(stored)))
-            found = True
+    season = media_type.name == "season"
+    if season:
+        # Kodi gives a season no ids; its show's are the ones that find it,
+        # and the scan keeps them on the season's row.
+        for name, show_id in (
+            ("TMDB", item.get("show_tmdb_id") or row.get("tmdb_id")),
+            ("TheTVDB", item.get("show_tvdb_id") or row.get("tvdb_id")),
+        ):
+            if show_id:
+                lines.append((name, str(show_id)))
+    else:
+        for name, kodi_id, stored, matchable in (
+            ("TMDB", kodi_tmdb, row.get("tmdb_id"), True),
+            # An `unknown` uniqueid is a TheTVDB id once the scan verified it.
+            ("TheTVDB", kodi_tvdb or (
+                kodi_unknown if kodi_unknown and str(kodi_unknown) == str(row.get("tvdb_id"))
+                else None
+            ), row.get("tvdb_id"), True),
+            ("IMDb", kodi_imdb, row.get("imdb_id"), False),
+        ):
+            if kodi_id:
+                lines.append((name, lang(32553).format(kodi_id)))
+                from_kodi = True
+            elif stored:
+                if matchable and number_matched:
+                    text = lang(_MATCHED_HOW.get(how.get(name, ""), 32554))
+                elif not matchable:
+                    text = lang(32555)
+                else:
+                    text = lang(32556)
+                lines.append((name, text.format(stored)))
+                found = True
     if _tvmaze_only(item):
         lines.append(("", lang(_TVMAZE_ONLY)))
     if found:

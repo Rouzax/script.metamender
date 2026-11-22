@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from resources.lib.data.media_types import EPISODE, MOVIE
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON
 from resources.lib.engine.protect import fingerprint
 from resources.lib.ui import details_model
 from resources.lib.ui.details_model import build_rows, header_line
@@ -569,3 +569,10 @@ def test_why_changed_outside(reason, text):
                     fs={"last_reason": reason, "source": None, "written_value": None})
     assert dict(row.lines)["Why"] == text
     assert row.group == "left"
+
+
+def test_season_ids_show_each_id_once_when_the_row_holds_them():
+    item = {"season": 2, "showtitle": "S", "show_tmdb_id": "250000", "poster": ""}
+    row = {"tmdb_id": "250000", "tvdb_id": "9001", "last_seen": TODAY}
+    ids = build_rows(SEASON, item, row, {}, {}, TODAY, fields=["poster"])[0]
+    assert ids.lines == [("TMDB", "250000"), ("TheTVDB", "9001")]
