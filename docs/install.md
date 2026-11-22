@@ -17,10 +17,24 @@ runs in the background on its own.
 You do not need an account at TheTVDB or IMDb: MetaMender reads TheTVDB with
 its own key, and IMDb's ratings come from IMDb's public data.
 
-## Install from the Rouzax repository (recommended)
+## Install from the official Kodi repository (recommended)
 
-The repository is a small add-on that lets Kodi install MetaMender and keep it
-up to date for you.
+MetaMender is in Kodi's own add-on repository, so there is nothing to download
+first.
+
+1. In Kodi, open **Settings > Add-ons > Install from repository > Kodi Add-on
+   repository > Program add-ons > MetaMender**.
+2. Choose **Install**.
+
+Kodi installs the add-ons MetaMender needs along with it, including the
+**IMDb Ratings** module, and keeps MetaMender up to date. A new version
+reaches the official repository once the Kodi team has reviewed it.
+
+## Install from the Rouzax repository
+
+The Rouzax repository is a small add-on that lets Kodi install MetaMender and
+keep it up to date. It gets a new version as soon as it is released, before
+the official repository does.
 
 1. Download the latest `repository.rouzax-x.y.z.zip` from the
    [Rouzax repository releases](https://github.com/Rouzax/repository.rouzax/releases).
@@ -36,10 +50,6 @@ Kodi installs the add-ons MetaMender needs along with it, including the
     Kodi only installs zip files when **Settings > System > Add-ons > Unknown
     sources** is switched on. Switch it on for the install; you can switch it
     off again afterwards, and updates from the repository keep working.
-
-!!! info "The official Kodi repository"
-    MetaMender is not in the official Kodi repository yet. Once it is, you can
-    install it from there without the Rouzax repository.
 
 ## Install from a zip file
 

@@ -1,7 +1,7 @@
 MetaMender Changelog
 ====================
 
-v1.2.0 (unreleased)
+v1.2.0 (2026-11-22)
 -------------------
 New Features:
   - Libraries are included explicitly: the Libraries step of setup and

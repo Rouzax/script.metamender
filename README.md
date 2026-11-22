@@ -27,11 +27,13 @@ where each value came from and why a field was left alone.
 
 ## Install
 
-1. Install the [Rouzax repository](https://github.com/Rouzax/repository.rouzax/releases)
-   with **Settings > Add-ons > Install from zip file**.
-2. Install **MetaMender** from **Install from repository > Rouzax Repository**.
-3. Follow the setup: a free TMDB API key, then the libraries MetaMender may
+1. Install **MetaMender** from **Settings > Add-ons > Install from repository >
+   Kodi Add-on repository > Program add-ons**.
+2. Follow the setup: a free TMDB API key, then the libraries MetaMender may
    work in and what it fills in each.
+
+The [Rouzax repository](https://github.com/Rouzax/repository.rouzax/releases)
+gets new versions first, before the official Kodi repository.
 
 Requires Kodi 21 (Omega) or Kodi 22 (Piers). Full instructions:
 [Install](https://rouzax.github.io/script.metamender/docs/install/).

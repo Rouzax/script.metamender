@@ -59,7 +59,7 @@ New here? [Install](install.md) MetaMender, then walk through the
 
 | Page | What it covers |
 |---|---|
-| [Install](install.md) | What you need, the Rouzax repository, a zip file |
+| [Install](install.md) | What you need, the official Kodi repository, the Rouzax repository, a zip file |
 | [Setup](setup.md) | The TMDB key, the libraries MetaMender looks after, the summary |
 | [Libraries](libraries.md) | Each library's choices: language, what to fill, which rating to show, where plots and titles come from, original titles, the age rating country |
 | [Scans](scans.md) | When MetaMender scans, how often a field is checked, what you see |
