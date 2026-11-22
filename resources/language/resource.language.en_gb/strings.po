@@ -1466,3 +1466,7 @@ msgstr ""
 msgctxt "#32717"
 msgid "episode thumbs"
 msgstr ""
+
+msgctxt "#32718"
+msgid "Season {} poster"
+msgstr ""

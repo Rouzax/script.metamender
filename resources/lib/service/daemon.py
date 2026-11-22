@@ -69,7 +69,7 @@ from resources.lib.data.libraries import (
     read_libraries,
     save_libraries,
 )
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.sources import (
     discover_folders,
     kodi_ui_language,
@@ -412,11 +412,11 @@ def _run_scan(
     monitor: MetaMendMonitor,
     new_only: bool = False,
 ) -> dict[str, dict[str, int]]:
-    """Run scan for MOVIE, TVSHOW, and EPISODE in order; with ``new_only``
-    only the items new to the tracker (run_scan's new_only).
+    """Run scan for MOVIE, TVSHOW, SEASON and EPISODE in order; with
+    ``new_only`` only the items new to the tracker (run_scan's new_only).
 
-    TV shows are scanned before episodes so their TMDB IDs are
-    available for the episode season lookups.
+    TV shows are scanned before seasons and episodes so their TMDB IDs are
+    available for the season lookups.
 
     Returns:
         Dict keyed by media type name with stats dicts as values.
@@ -450,23 +450,23 @@ def _run_scan(
 
     show_id_map = tracker.get_show_id_map()
     log.info(
-        "Show ID map built for episode scan",
+        "Show ID map built for season and episode scans",
         event="service.show_id_map",
         shows=len(show_id_map),
     )
 
-    episode_stats = run_scan(
-        media_type=EPISODE,
-        tracker=tracker,
-        libraries=libraries,
-        tmdb_api_key=tmdb_api_key,
-        settings=settings,
-        monitor=monitor,
-        show_id_map=show_id_map,
-        new_only=new_only,
-        breaker=breaker,
-    )
-    all_stats[EPISODE.name] = episode_stats
+    for media_type in (SEASON, EPISODE):
+        all_stats[media_type.name] = run_scan(
+            media_type=media_type,
+            tracker=tracker,
+            libraries=libraries,
+            tmdb_api_key=tmdb_api_key,
+            settings=settings,
+            monitor=monitor,
+            show_id_map=show_id_map,
+            new_only=new_only,
+            breaker=breaker,
+        )
 
     return all_stats
 
@@ -505,7 +505,7 @@ def _maybe_prune_orphans(
         return
     cutoff = (date.today() - timedelta(days=retention)).isoformat()
     total_removed = 0
-    for mt in (MOVIE, TVSHOW, EPISODE):
+    for mt in (MOVIE, TVSHOW, SEASON, EPISODE):
         total_removed += tracker.prune_orphans(mt.name, cutoff=cutoff)
     if total_removed:
         log.info(
@@ -841,6 +841,7 @@ def run() -> None:
 
                         movie_stats = all_stats.get("movie", {})
                         tvshow_stats = all_stats.get("tvshow", {})
+                        season_stats = all_stats.get("season", {})
                         episode_stats = all_stats.get("episode", {})
 
                         log.info(
@@ -848,6 +849,7 @@ def run() -> None:
                             event="service.scan_complete",
                             movies_updated=movie_stats.get("updated", 0),
                             tvshows_updated=tvshow_stats.get("updated", 0),
+                            seasons_updated=season_stats.get("updated", 0),
                             episodes_updated=episode_stats.get("updated", 0),
                             duration_ms=duration_ms,
                         )

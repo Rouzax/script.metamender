@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from resources.lib.data.identity import compute_identity
-from resources.lib.data.media_types import MOVIE, TVSHOW, EPISODE
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 
 
 # NB: items here carry `premiered`/`firstaired` (the date fields the scan
@@ -66,3 +66,10 @@ def test_episode_uses_composite_key():
 def test_episode_pads_numbers():
     item = {"showtitle": "Show", "season": 12, "episode": 3}
     assert compute_identity(item, EPISODE) == "Show S12E03"
+
+
+def test_season_identity():
+    item = {"season": 1, "showtitle": "Lost", "tvshowid": 7, "show_tmdb_id": "4607"}
+    assert compute_identity(item, SEASON) == "tmdb:4607/S01"
+    # Specials are season 0; a renamed show keeps its seasons' rows.
+    assert compute_identity(dict(item, season=0, showtitle="LOST"), SEASON) == "tmdb:4607/S00"

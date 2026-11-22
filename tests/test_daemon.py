@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 from resources.lib.data.libraries import FIELD_TOGGLES, Library, LibraryConfig
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.service import daemon
 
 
@@ -48,7 +48,7 @@ def test_maybe_prune_orphans_full_scan_prunes_all_types():
     called = {
         c.args[0] for c in tracker.prune_orphans.call_args_list
     }
-    assert called == {"movie", "tvshow", "episode"}
+    assert called == {"movie", "tvshow", "season", "episode"}
     for c in tracker.prune_orphans.call_args_list:
         assert c.kwargs["cutoff"] == expected_cutoff
 
@@ -156,8 +156,36 @@ def test_run_scan_passes_imdb_ready_to_every_pass(kodi_stubs):
     prep.assert_called_once()
     assert [lib.path for lib in prep.call_args.args[0]] == ["/m/"]
     assert all(c.kwargs["libraries"] is libraries for c in scan.call_args_list)
-    assert [c.kwargs["settings"]["imdb_ready"] for c in scan.call_args_list] == [True] * 3
+    assert [c.kwargs["settings"]["imdb_ready"] for c in scan.call_args_list] == [True] * 4
     assert "imdb_ready" not in settings
+
+
+def test_daemon_scans_seasons_between_shows_and_episodes(kodi_stubs):
+    tracker = MagicMock()
+    order = []
+
+    def scan(**kw):
+        order.append(kw["media_type"])
+        return {}
+
+    tracker.get_show_id_map.side_effect = lambda: order.append("show_id_map") or {7: "4607"}
+    with patch.object(daemon, "_prepare_imdb_ratings", return_value=True), \
+            patch.object(daemon, "run_scan", side_effect=scan) as run:
+        stats = daemon._run_scan(tracker, LibraryConfig([_lib("/m/")]), {"tmdb_api_key": "k"},
+                                 _AbortMonitor(), new_only=True)
+    assert order == [MOVIE, TVSHOW, "show_id_map", SEASON, EPISODE]
+    by_type = {c.kwargs["media_type"]: c.kwargs for c in run.call_args_list}
+    assert by_type[SEASON]["show_id_map"] == {7: "4607"}
+    assert by_type[SEASON]["new_only"] is True
+    assert by_type[SEASON]["breaker"] is by_type[EPISODE]["breaker"]
+    assert list(stats) == ["movie", "tvshow", "season", "episode"]
+
+
+def test_prune_includes_seasons():
+    tracker = MagicMock()
+    tracker.prune_orphans.return_value = 0
+    daemon._maybe_prune_orphans(tracker, {"orphan_retention_days": 30}, targeted=False)
+    assert "season" in [c.args[0] for c in tracker.prune_orphans.call_args_list]
 
 
 class _FakeMonitor:

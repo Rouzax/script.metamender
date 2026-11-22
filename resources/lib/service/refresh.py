@@ -1,6 +1,6 @@
-"""Update now on a TV show or a season: refresh the show record (for a show)
-and every episode under it, with a progress window that can be stopped or
-sent to Kodi's background progress bar.
+"""Update now on a TV show or a season: refresh the show record (for a show),
+the season posters and every episode under it, with a progress window that
+can be stopped or sent to Kodi's background progress bar.
 
 Logging:
     Logger: 'refresh'
@@ -26,9 +26,10 @@ from resources.lib.data.kodi import (
     get_episode_show_id,
     get_item_by_id,
     get_season_info,
+    get_seasons_for_scan,
 )
 from resources.lib.data.libraries import Library, LibraryConfig, load_libraries
-from resources.lib.data.media_types import EPISODE, TVSHOW, MediaType
+from resources.lib.data.media_types import EPISODE, SEASON, TVSHOW, MediaType
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
@@ -150,14 +151,16 @@ class RefreshProgress:
     ) -> None:
         """Count one item by what changed in the scan stats while it ran: an
         update wins over a field that could not be checked. The show's own
-        record (``counted`` False) is remembered apart from the episodes."""
+        record and its season posters (``counted`` False) are remembered
+        apart from the episodes, together: any of them updated, else any of
+        them unchecked."""
         def grew(key: str) -> bool:
             return int(after.get(key) or 0) > int(before.get(key) or 0)
         with self._lock:
             if not counted:
-                self.show_updated = grew("updated")
+                self.show_updated = self.show_updated or grew("updated")
                 self.show_unchecked = not self.show_updated and (
-                    grew("transient") or grew("unreachable"))
+                    self.show_unchecked or grew("transient") or grew("unreachable"))
                 return
             self.done += 1
             if grew("updated"):
@@ -222,6 +225,8 @@ class RefreshOutcome:
 def _label(media_type: MediaType, item: dict[str, Any]) -> str:
     if media_type is TVSHOW:
         return lang(32472)
+    if media_type is SEASON:
+        return lang(32718).format(item.get("season", ""))
     return lang(32473).format(item.get("season", ""), item.get("episode", ""),
                               item.get("title", ""))
 
@@ -240,7 +245,8 @@ def _pass(
     """One run_scan pass over ``items``, counting each finished item into
     ``progress``: an item is counted when the next one starts or the pass
     ends, by what it changed in the stats. Only episodes count towards the
-    total; the show's own record is reported apart."""
+    total; the show's own record and the season posters are reported
+    apart."""
     pending: list[dict[str, Any]] = []
     counted = media_type is EPISODE
 
@@ -272,10 +278,11 @@ def run_refresh(
     monitor: Any,
     prepare: Callable[[], bool] | None = None,
 ) -> RefreshOutcome:
-    """Refresh a show (its record, then every episode) or a season (its
-    episodes), as Update now does for one item. The episode pass builds its
-    show id map after the show pass, so it uses the ids that pass found.
-    Only what lies in an included library and subfolder is refreshed.
+    """Refresh a show (its record, its season posters, then every episode) or
+    a season (its poster, then its episodes), as Update now does for one
+    item. The season and episode passes build their show id maps after the
+    show pass, so they use the ids that pass found. Only what lies in an
+    included library and subfolder is refreshed.
 
     ``prepare`` readies the IMDb ratings store (its first use downloads the
     dataset, which takes a while) and answers ``settings["imdb_ready"]``;
@@ -305,10 +312,25 @@ def run_refresh(
         progress.begin(len(episodes), now=time.monotonic())
     breaker = CircuitBreaker()
     passes: list[dict[str, Any]] = []
+
+    def halted() -> bool:
+        return bool(passes and (passes[-1]["stopped"] or passes[-1]["aborted"]))
+
     if show:
         passes.append(_pass(TVSHOW, [show], progress, settings, libraries,
                             tracker, monitor, breaker))
-    if episodes and not (passes and (passes[-1]["stopped"] or passes[-1]["aborted"])):
+    if not halted():
+        show_id_map = tracker.get_show_id_map()
+        seasons = [
+            s for s in get_seasons_for_scan(show_id_map, tvshowid=scope.tvshowid,
+                                            show_tvdb_map=tracker.get_show_tvdb_map())
+            if (scope.season is None or s.get("season") == scope.season)
+            and libraries.included_for(s.get("file", ""))
+        ]
+        if seasons:
+            passes.append(_pass(SEASON, seasons, progress, settings, libraries,
+                                tracker, monitor, breaker, show_id_map))
+    if episodes and not halted():
         passes.append(_pass(EPISODE, episodes, progress, settings, libraries,
                             tracker, monitor, breaker, tracker.get_show_id_map()))
     shutdown = bool(monitor is not None and monitor.abortRequested())

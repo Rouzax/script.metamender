@@ -4,7 +4,8 @@ Kodi reassigns its internal DB IDs on library rebuild, so the tracker cannot
 key on kodi_id. External IDs (tmdb/imdb from uniqueid) are stable across
 rebuilds and are preferred. Movies/shows without an external ID fall back to
 "title (year)". Episodes use a composite "{show} S..E.." key (their own S/E
-numbering within Kodi is internally consistent).
+numbering within Kodi is internally consistent). Seasons have no id of their
+own and are keyed on their show's TMDB id, which the scan puts on the item.
 
 Logging:
     None (pure function).
@@ -21,7 +22,14 @@ def compute_identity(item: Dict[str, Any], media_type: MediaType) -> str:
 
     Movies/shows: "tmdb:<id>", else "imdb:<id>", else "title (year)" or "title".
     Episodes: "{showtitle} S{season:02d}E{episode:02d}".
+    Seasons: "tmdb:{show_tmdb_id}/S{season:02d}"; run_scan skips a season
+    whose show has no TMDB id.
     """
+    if media_type.name == "season":
+        return "tmdb:{show}/S{season:02d}".format(
+            show=item.get("show_tmdb_id") or "",
+            season=int(item.get("season", 0) or 0),
+        )
     if media_type.name == "episode":
         return "{showtitle} S{season:02d}E{episode:02d}".format(
             showtitle=item.get("showtitle", ""),

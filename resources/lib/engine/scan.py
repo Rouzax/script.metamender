@@ -18,6 +18,8 @@ Logging:
         - scan.complete (INFO): Scan cycle finished with stats, the
           providers disabled this cycle, and counts of the per-item DEBUG
           outcomes (unknown ids accepted, episodes found by TVDB id)
+        - scan.season_no_show_id (DEBUG): A season skipped because its
+          show has no TMDB id (yet), so it has no identity
         - scan.skip (DEBUG): Item skipped (not due, no candidates;
           reason="excluded": its library or subfolder is not included;
           reason="unmatched": its file is in no library; reason="unreachable":
@@ -96,7 +98,7 @@ from resources.lib.data.libraries import (
     LibraryConfig,
     scan_settings,
 )
-from resources.lib.data.media_types import MediaType
+from resources.lib.data.media_types import SEASON, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import load_preset
 from resources.lib.data.sources import kodi_ui_language
@@ -146,6 +148,7 @@ from resources.lib.engine.chain import TRANSIENT, FieldOutcome
 from resources.lib.engine.fetch import (
     _fetch_episode,
     _fetch_movie_or_show,
+    _fetch_season,
     _Primary,
 )
 from resources.lib.engine.ids import (
@@ -312,8 +315,13 @@ def _item_title(item: dict[str, Any], media_type: MediaType) -> str:
     """Build the display title for an item (logging/UI, not the tracker key).
 
     The tracker key is produced separately by compute_identity. Movies and TV
-    shows use the title directly; episodes use "ShowTitle S01E02" format.
+    shows use the title directly; episodes use "ShowTitle S01E02" format and
+    seasons "ShowTitle S01".
     """
+    if media_type is SEASON:
+        return "{showtitle} S{season:02d}".format(
+            showtitle=item.get("showtitle", ""), season=item.get("season", 0),
+        )
     if media_type.name == "episode":
         return "{showtitle} S{season:02d}E{episode:02d}".format(
             showtitle=item.get("showtitle", ""),
@@ -946,6 +954,19 @@ def _tracker_identity(
     return identity
 
 
+def _season_items(
+    tracker: TrackerDB, show_id_map: dict[int, str], new_only: bool,
+) -> list[dict[str, Any]]:
+    """The library's seasons with their show's folder and ids
+    (kodi.get_seasons_for_scan); with ``new_only`` those whose Kodi id the
+    tracker does not know yet."""
+    items = kodi.get_seasons_for_scan(show_id_map, show_tvdb_map=tracker.get_show_tvdb_map())
+    if new_only:
+        known = tracker.known_kodi_ids(SEASON.name)
+        items = [i for i in items if i.get(SEASON.kodi_id_field) not in known]
+    return items
+
+
 def _new_items(tracker: TrackerDB, media_type: MediaType) -> list[dict[str, Any]]:
     """The library's items whose Kodi id the tracker does not know yet, with
     full details. An id listed but gone by the details call is skipped."""
@@ -1048,7 +1069,10 @@ def run_scan(
     sampling facts in the tracker.
 
     Args:
-        media_type: MOVIE, TVSHOW, or EPISODE.
+        media_type: MOVIE, TVSHOW, SEASON or EPISODE. A season is scanned
+            in its show's library, with its show's ids (identity
+            ``tmdb:<show>/Snn``) and its show's tvshow.nfo; its content age
+            is its TMDB air date, kept in the tracker once fetched.
         tracker: Open TrackerDB instance.
         libraries: The libraries. Each item is scanned with the fields and
             options of the library its file is in (an episode by its own
@@ -1062,8 +1086,8 @@ def run_scan(
         monitor: xbmc.Monitor instance (has abortRequested()), or
             None for tests.
         show_id_map: Dict mapping a show's Kodi id to its show-level TMDB ID.
-            Required for episode scans so fetch_season uses the show
-            ID, not the episode ID. The show TVDB ids come from the tracker.
+            Required for season and episode scans so their TMDB calls use the
+            show ID. The show TVDB ids come from the tracker.
         items: Pre-built list of Kodi items to process. When provided,
             skips the Kodi library query. Useful for targeted scans
             (single item, folder, season) and testing.
@@ -1149,7 +1173,9 @@ def run_scan(
         reset=reset,
     )
 
-    if items is None:
+    if items is None and media_type is SEASON:
+        items = _season_items(tracker, shared.show_id_map, new_only)
+    elif items is None:
         items = _new_items(tracker, media_type) if new_only else kodi.get_all_items(media_type)
     needed = _pass_providers(media_type, libraries, items, reset)
 
@@ -1198,8 +1224,24 @@ def run_scan(
             file_path, lib)
         fallback_lang = fallback_lang.strip()
 
+        # A season is keyed on its show's TMDB id, so without one it has no
+        # identity; it is picked up once its show is resolved.
+        if media_type is SEASON and not item.get("show_tmdb_id"):
+            log.debug(
+                "Skipping season of a show without a TMDB id",
+                event="scan.season_no_show_id", title=title,
+                tvshowid=item.get("tvshowid"),
+            )
+            stats["skipped"] += 1
+            continue
+
         kodi_id = item.get(media_type.kodi_id_field, 0)
         identity = _tracker_identity(tracker, media_type, item, kodi_id)
+        if media_type is SEASON and not item.get(media_type.date_field):
+            # Kodi has no date on a season: its TMDB air date, once a fetch
+            # found it, is kept as the row's premiered.
+            known = tracker.get_item(media_type.name, identity) or {}
+            item[media_type.date_field] = known.get("premiered") or ""
 
         # A library or subfolder that is not included is skipped, but its
         # items count as present, so orphan pruning keeps their history for
@@ -1259,8 +1301,11 @@ def run_scan(
                 media_type=media_type.name, source_path=file_path,
             )
 
-        # Extract external IDs
-        kodi_ids = extract_ids(item)
+        # Extract external IDs; a season has its show's.
+        kodi_ids = (
+            (item.get("show_tmdb_id"), None, item.get("show_tvdb_id"), None)
+            if media_type is SEASON else extract_ids(item)
+        )
         # An episode without ids of its own can still be matched by its
         # number under the show (engine/numbermatch.py).
         if not any(kodi_ids) and media_type.name != "episode":
@@ -1382,7 +1427,9 @@ def run_scan(
         # as it is, ids_checked and cycle flag included, and retried later.
         nfo_managed = False
         if due:
-            state = nfo_state(media_type.name, item.get("file", ""))
+            # A season has no NFO of its own: its show's tvshow.nfo governs it.
+            nfo_kind = "tvshow" if media_type is SEASON else media_type.name
+            state = nfo_state(nfo_kind, item.get("file", ""))
             if state == UNREACHABLE:
                 log.debug(
                     "Media unreachable, skipping item",
@@ -1467,10 +1514,13 @@ def run_scan(
             # The primary fetch brings the poster candidates along.
             ctx = replace(ctx, image_languages=_image_languages(language, fallback_lang))
         tmdb_lang = tmdb_language(language)
-        fetch_primary = (
-            _fetch_episode if media_type.name == "episode" else _fetch_movie_or_show
-        )
+        fetch_primary = {
+            "episode": _fetch_episode, "season": _fetch_season,
+        }.get(media_type.name, _fetch_movie_or_show)
         primary = fetch_primary(ctx, item, kodi_id, title, identity, ids, tmdb_lang)
+        if media_type is SEASON:
+            # The fetch may have found the season's first air date.
+            age = content_age_days(item, media_type, today)
 
         reopened = _reopened_fallbacks(item, fs_map, rebaseline)
         outcomes, values, providers = _resolve_fields(

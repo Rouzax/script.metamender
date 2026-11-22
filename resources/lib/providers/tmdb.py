@@ -450,7 +450,7 @@ def fetch_tvshow(
 
 
 def fetch_season_posters(
-    show_tmdb_id: int,
+    show_tmdb_id: str,
     season_number: int,
     api_key: str,
     image_languages: tuple[str, ...],

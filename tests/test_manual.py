@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from resources.lib.data.libraries import Library, LibraryConfig
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.service import manual
 
 _LIBRARIES = LibraryConfig([
@@ -210,8 +211,10 @@ def test_manual_scans_with_the_libraries(monkeypatch, patched):
     monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
     manual.run()
     patched["sync"].assert_called_once_with(patched["tracker"], "en-US")
-    assert [c.kwargs["libraries"] for c in patched["run_scan"].call_args_list] == [
-        _LIBRARIES] * 3
+    calls = patched["run_scan"].call_args_list
+    assert [c.kwargs["libraries"] for c in calls] == [_LIBRARIES] * 4
+    # Seasons after the shows, whose ids they use, and before the episodes.
+    assert [c.kwargs["media_type"] for c in calls] == [MOVIE, TVSHOW, SEASON, EPISODE]
     prepared = manual._prepare_imdb_ratings.call_args.args[0]
     assert [lib.path for lib in prepared] == ["smb://nas/Movies/"]
 

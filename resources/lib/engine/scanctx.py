@@ -268,6 +268,9 @@ class _ScanCtx:
     # (kind, id) -> fanart.tv's answer (see artsources). Only real answers
     # are cached, as in tvdb_cache.
     fanart_cache: dict[tuple[str, str], Any] = field(default_factory=dict)
+    # Show TMDB id -> its show record, for the season pass's air dates. Only
+    # real answers are cached, as in tvdb_cache.
+    show_cache: dict[str, Any] = field(default_factory=dict)
 
 
 def _get_season_data(

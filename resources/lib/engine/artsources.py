@@ -1,5 +1,6 @@
 """Candidates for one art field during a scan: the episode thumb from TMDB
-or TheTVDB, and the poster picked from TMDB's and fanart.tv's posters.
+or TheTVDB, and the poster (movie, show or season) picked from TMDB's and
+fanart.tv's posters.
 
 Whether the slot may be touched at all is decided before any fetch
 (art.art_gate in run_scan); this module only answers what the image should be.
@@ -49,9 +50,12 @@ def _fanart_answer(
     return answer
 
 
-def _fanart_posters(ctx: _ScanCtx, primary: _Primary, ids: _Ids, identity: str) -> Any:
+def _fanart_posters(
+    ctx: _ScanCtx, item: dict[str, Any], primary: _Primary, ids: _Ids, identity: str,
+) -> Any:
     """The item's fanart.tv posters ([] when it has none or no id to ask
-    with), or TRANSIENT."""
+    with), or TRANSIENT. A season's come from its show's answer, so one
+    call covers the show and all its seasons."""
     if ctx.media_type.name == "movie":
         tmdb_id, imdb_id = primary.tmdb_id, primary.imdb_id
         if not (tmdb_id or imdb_id):
@@ -77,7 +81,11 @@ def _fanart_posters(ctx: _ScanCtx, primary: _Primary, ids: _Ids, identity: str) 
     )
     if answer is TRANSIENT:
         return TRANSIENT
-    return (answer or {}).get("show") or []
+    answer = answer or {}
+    if ctx.media_type.name == "season":
+        season = int(item.get("season", 0) or 0)
+        return (answer.get("seasons") or {}).get(season) or []
+    return answer.get("show") or []
 
 
 def _resolve_thumb(
@@ -122,7 +130,7 @@ def resolve_art(
     fallback = image_language(fallback_lang) if fallback_lang.strip() else None
     pick = pick_poster(
         (primary.tmdb or {}).get("posters") or [],
-        lambda: _fanart_posters(ctx, primary, ids, identity),
+        lambda: _fanart_posters(ctx, sources.item, primary, ids, identity),
         ctx.poster_source, lang, fallback,
         str(sources.item.get("poster") or ""),
     )

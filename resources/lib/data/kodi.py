@@ -18,7 +18,7 @@ from typing import Any
 
 import xbmc
 
-from resources.lib.data.media_types import SEASON, MediaType
+from resources.lib.data.media_types import SEASON, TVSHOW, MediaType
 from resources.lib.engine.art import ART_FIELDS, unwrap
 from resources.lib.utils import KodiQueryError, get_logger, log_timing
 
@@ -89,8 +89,10 @@ def get_all_items(
     """Query Kodi library for items of the given media type.
 
     Args:
-        media_type: The media type to query (MOVIE, TVSHOW, or EPISODE).
-        tvshowid: For episodes, limit to this TV show (Kodi param, not filter).
+        media_type: The media type to query (MOVIE, TVSHOW, SEASON or
+            EPISODE).
+        tvshowid: For seasons and episodes, limit to this TV show (Kodi
+            param, not filter).
         season: For episodes, limit to this season (requires tvshowid).
         ids_only: Ask for no properties: each item carries only its Kodi id
             and label, which keeps a listing of a large library cheap.
@@ -169,6 +171,36 @@ def get_all_items(
     )
 
     return items
+
+
+def get_seasons_for_scan(
+    show_id_map: dict[int, str],
+    tvshowid: int | None = None,
+    show_tvdb_map: dict[int, str] | None = None,
+) -> list[dict[str, Any]]:
+    """The library's seasons (one show's with ``tvshowid``), ready for the
+    season scan.
+
+    Kodi gives a season no file and no ids, so each carries its show's: the
+    show folder as ``file`` (which places it in a library and holds the
+    tvshow.nfo that governs it), and ``show_tmdb_id`` / ``show_tvdb_id`` from
+    the tracker's show maps, None when unknown. A season of a show Kodi did
+    not list keeps an empty ``file``.
+    """
+    if tvshowid is None:
+        shows = get_all_items(TVSHOW)
+    else:
+        show = get_item_by_id(TVSHOW, tvshowid)
+        shows = [show] if show else []
+    folders = {s.get("tvshowid"): str(s.get("file") or "") for s in shows}
+    tvdb_map = show_tvdb_map or {}
+    seasons = get_all_items(SEASON, tvshowid=tvshowid)
+    for season in seasons:
+        show_id = int(season.get("tvshowid", -1))
+        season["file"] = folders.get(show_id, "")
+        season["show_tmdb_id"] = show_id_map.get(show_id)
+        season["show_tvdb_id"] = tvdb_map.get(show_id)
+    return seasons
 
 
 def get_item_by_id(

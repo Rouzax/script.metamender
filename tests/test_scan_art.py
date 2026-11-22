@@ -1,4 +1,5 @@
-"""Scan tests for the art fields: episode thumbs and movie and show posters."""
+"""Scan tests for the art fields: episode thumbs and movie, show and season
+posters."""
 from __future__ import annotations
 
 import json
@@ -10,7 +11,7 @@ import pytest
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.libraries import POSTER_SOURCE_FANART
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.nfo import NFO
 from resources.lib.data.tracker import (
     REASON_CHANGED_OUTSIDE,
@@ -669,3 +670,217 @@ def test_settings_fingerprint_art_fields():
     assert json.loads(settings_fingerprint("poster", settings, "nl-NL", "movie", "en")) == {
         "poster_source": "fanart", "folder_language": "nl-NL", "fallback_language": "en",
     }
+
+
+# ---------------------------------------------------------------------------
+# Season posters
+# ---------------------------------------------------------------------------
+
+SEASON_POSTER = "https://image.tmdb.org/t/p/original/season1.jpg"
+SPECIALS_POSTER = "https://image.tmdb.org/t/p/original/specials.jpg"
+FANART_SEASON = "https://assets.fanart.tv/fanart/tv/777/seasonposter/en.jpg"
+SHOW_FOLDER = "smb://server/shows/test/"
+
+
+def _season(number=1, poster="", **overrides):
+    """A season as kodi.get_seasons_for_scan lists it."""
+    item = {
+        "seasonid": 50 + number, "season": number, "showtitle": "Test Show",
+        "tvshowid": 10, "title": "Season {}".format(number), "poster": poster,
+        "art": {}, "file": SHOW_FOLDER, "show_tmdb_id": "55555",
+        "show_tvdb_id": "777",
+    }
+    item.update(overrides)
+    return item
+
+
+def _scan_seasons(tracker, items, libs=None, settings=None, **kwargs):
+    return run_scan(SEASON, tracker, libs or _libs(frozenset({"poster"})), "k",
+                    settings or _make_settings(), items=items,
+                    show_id_map={10: "55555"}, **kwargs)
+
+
+def _season_fs(tracker, number):
+    return tracker.get_field_status_map("season", "tmdb:55555/S{:02d}".format(number))
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_season_without_show_tmdb_id_is_skipped(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    tracker = _make_tracker(tmp_path)
+    with patch("resources.lib.engine.scan.log") as log:
+        stats = _scan_seasons(tracker, [_season(show_tmdb_id=None)])
+    rows = tracker._conn.execute(
+        "SELECT COUNT(*) FROM items WHERE media_type = 'season'").fetchone()[0]
+    tracker.close()
+
+    assert stats["skipped"] == 1 and stats["processed"] == 0
+    assert rows == 0
+    mock_show.assert_not_called()
+    mock_posters.assert_not_called()
+    mock_update.assert_not_called()
+    events = [c.kwargs.get("event") for c in log.debug.call_args_list]
+    assert "scan.season_no_show_id" in events
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_empty_season_poster_filled(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    from resources.lib.engine import scan as scan_module
+
+    mock_show.return_value = dict(_tmdb_tvshow_response(),
+                                  season_air_dates={1: "2025-01-01"})
+    mock_posters.return_value = [_tmdb(SEASON_POSTER, "en")]
+    tracker = _make_tracker(tmp_path)
+
+    stats = _scan_seasons(tracker, [_season(1), _season(2)])
+    fs_map = _season_fs(tracker, 1)
+    keep = tracker.get_keep("season", "tmdb:55555/S01")
+    tracker.close()
+
+    # One show record for both seasons of the show.
+    assert mock_show.call_count == 1
+    assert mock_posters.call_args_list[0].args == ("55555", 1, "k", ("en",))
+    first = mock_update.call_args_list[0]
+    assert first.args[0] == 51 and first.args[1] is SEASON
+    assert first.kwargs == {"poster": SEASON_POSTER}
+    assert stats["processed"] == 2
+    assert _count(fs_map, "poster") == 1
+    assert fs_map["poster"]["source"] == "tmdb"
+    assert keep["poster"]["original"] == ""
+    # A season's NFO is its show's tvshow.nfo.
+    scan_module.nfo_state.assert_called_with("tvshow", SHOW_FOLDER)
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_specials_season_gets_poster(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    mock_show.return_value = dict(_tmdb_tvshow_response(), season_air_dates={})
+    mock_posters.return_value = [_tmdb(SPECIALS_POSTER, "en")]
+    tracker = _make_tracker(tmp_path)
+
+    _scan_seasons(tracker, [_season(0)])
+    fs_map = _season_fs(tracker, 0)
+    tracker.close()
+
+    assert mock_posters.call_args.args[1] == 0
+    assert mock_update.call_args.args[0] == 50
+    assert _written(mock_update, "poster") == SPECIALS_POSTER
+    assert _count(fs_map, "poster") == 1
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_show_posters")
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_season_poster_from_fanart_when_source_fanart(
+    mock_show, mock_posters, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    mock_show.return_value = dict(_tmdb_tvshow_response(), season_air_dates={})
+    mock_posters.return_value = [_tmdb(SEASON_POSTER, "en")]
+    mock_fanart.return_value = {
+        "show": [_fanart("https://assets.fanart.tv/show.jpg", "en")],
+        "seasons": {1: [_fanart(FANART_SEASON, "en")],
+                    2: [_fanart("https://assets.fanart.tv/s2.jpg", "en")]},
+    }
+    tracker = _make_tracker(tmp_path)
+    libs = one_library(frozenset({"poster"}), poster_source=POSTER_SOURCE_FANART)
+
+    _scan_seasons(tracker, [_season(1), _season(2)], libs=libs)
+    fs_map = _season_fs(tracker, 1)
+    tracker.close()
+
+    # One fanart.tv call covers every season of the show.
+    assert mock_fanart.call_count == 1
+    assert mock_fanart.call_args.args[0] == "777"
+    assert mock_update.call_args_list[0].kwargs == {"poster": FANART_SEASON}
+    assert mock_update.call_args_list[1].kwargs == {
+        "poster": "https://assets.fanart.tv/s2.jpg"}
+    assert fs_map["poster"]["source"] == "fanart"
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_season_content_age_from_tmdb_air_date(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    recent = (date.today() - timedelta(days=10)).isoformat()
+    mock_show.return_value = dict(_tmdb_tvshow_response(),
+                                  season_air_dates={1: "2010-01-01", 2: recent})
+    mock_posters.return_value = [_tmdb(SEASON_POSTER, "en")]
+    tracker = _make_tracker(tmp_path)
+
+    _scan_seasons(tracker, [_season(1), _season(2), _season(3)])
+    old = tracker.get_item("season", "tmdb:55555/S01")
+    young = tracker.get_item("season", "tmdb:55555/S02")
+    undated = tracker.get_item("season", "tmdb:55555/S03")
+    assert old["premiered"] == "2010-01-01"
+    assert young["premiered"] == recent
+    assert not undated["premiered"]
+
+    # Next cycle, every check date passed: the old season is settled; the
+    # young one and the one without a date (age unknown) are sampled again.
+    mock_posters.reset_mock()
+    _make_due(tracker)
+    _scan_seasons(tracker, [_season(1, poster=SEASON_POSTER),
+                            _season(2, poster=SEASON_POSTER),
+                            _season(3, poster=SEASON_POSTER)])
+    counts = [_count(_season_fs(tracker, n), "poster") for n in (1, 2, 3)]
+    tracker.close()
+
+    assert [c.args[1] for c in mock_posters.call_args_list] == [2, 3]
+    assert counts == [1, 2, 2]
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_season_transient_tmdb_leaves_clock_alone(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    mock_show.side_effect = TransientProviderError("down")
+    tracker = _make_tracker(tmp_path)
+
+    stats = _scan_seasons(tracker, [_season(1)])
+    fs_map = _season_fs(tracker, 1)
+    tracker.close()
+
+    mock_posters.assert_not_called()
+    mock_update.assert_not_called()
+    assert stats["transient"] == 1
+    assert _count(fs_map, "poster") == 0
+    assert _reason(fs_map, "poster") == REASON_UNCHECKED
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_season_listing_new_only_skips_known_seasons(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    mock_show.return_value = dict(_tmdb_tvshow_response(), season_air_dates={})
+    mock_posters.return_value = [_tmdb(SEASON_POSTER, "en")]
+    tracker = _make_tracker(tmp_path)
+    _register_show(tracker, tvdb_id="777", tmdb_id="55555")
+    tracker.upsert_item("season", "tmdb:55555/S01", kodi_id=51)
+    tracker.commit()
+
+    with patch("resources.lib.data.kodi.get_seasons_for_scan",
+               return_value=[_season(1), _season(2)]) as listing:
+        run_scan(SEASON, tracker, _libs(frozenset({"poster"})), "k", _make_settings(),
+                 show_id_map={10: "55555"}, new_only=True)
+    tracker.close()
+
+    assert listing.call_args.args == ({10: "55555"},)
+    assert listing.call_args.kwargs == {"show_tvdb_map": {10: "777"}}
+    assert [c.args[0] for c in mock_update.call_args_list] == [52]

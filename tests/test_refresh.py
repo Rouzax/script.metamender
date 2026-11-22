@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import threading
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from resources.lib.data.libraries import Library, LibraryConfig
-from resources.lib.data.media_types import EPISODE, TVSHOW
+from resources.lib.data.media_types import EPISODE, SEASON, TVSHOW
 from resources.lib.service import refresh
 from resources.lib.service.refresh import (
     RefreshProgress,
@@ -180,6 +180,9 @@ class FakeTracker:
         # Built after the show pass, so the episodes see the ids it found.
         return {"after_passes": len(self.scan.calls)}
 
+    def get_show_tvdb_map(self):
+        return {"tvdb_after_passes": len(self.scan.calls)}
+
 
 class Monitor:
     def __init__(self, abort=False):
@@ -190,10 +193,14 @@ class Monitor:
 
 
 def _run(scope, scan, episodes, monitor=None, progress=None, strings_ok=True,
-         libraries=None):
+         libraries=None, seasons=None):
+    """``seasons`` is the season listing, or a mock standing in for it."""
     progress = progress or RefreshProgress()
+    if not isinstance(seasons, MagicMock):
+        seasons = MagicMock(return_value=seasons or [])
     with patch.object(refresh, "run_scan", scan), \
             patch.object(refresh, "get_all_items", return_value=episodes) as listing, \
+            patch.object(refresh, "get_seasons_for_scan", seasons), \
             patch.object(refresh, "get_item_by_id", return_value=_SHOW), \
             patch.object(refresh, "lang", lambda i: {32472: "Show details",
                                                      32473: "Season {}, episode {}: {}"}.get(i, "")):
@@ -222,6 +229,44 @@ def test_season_refresh_runs_only_its_episodes():
     assert [c[0] for c in scan.calls] == [EPISODE]
     assert listing.call_args.kwargs == {"tvshowid": 7, "season": 2}
     assert progress.current == "Season 2, episode 1: Ep 1"
+
+
+def _season(n):
+    return {"seasonid": 40 + n, "season": n, "tvshowid": 7, "title": "Season %d" % n,
+            "file": _LOST, "show_tmdb_id": "4607"}
+
+
+def test_update_now_on_season_scans_that_season_poster():
+    scan = FakeScan()
+    listing = MagicMock(return_value=[_season(1), _season(2)])
+    _, progress, _ = _run(Scope(7, 2, "Lost"), scan, [_episode(1, 2)], seasons=listing)
+    assert [c[0] for c in scan.calls] == [SEASON, EPISODE]
+    assert scan.calls[0][1] == ["Season 2"]
+    assert scan.calls[0][3] is True
+    assert listing.call_args.args == ({"after_passes": 0},)
+    assert listing.call_args.kwargs == {
+        "tvshowid": 7, "show_tvdb_map": {"tvdb_after_passes": 0}}
+    # Progress counts episodes; the season poster is reported with the show.
+    assert (progress.total, progress.done, progress.updated) == (1, 1, 1)
+    assert progress.show_updated is True
+
+
+def test_update_now_on_show_scans_its_season_posters():
+    scan = FakeScan()
+    listing = MagicMock(return_value=[_season(0), _season(1)])
+    _, progress, _ = _run(Scope(7, None, "Lost"), scan, [_episode(1)], seasons=listing)
+    assert [c[0] for c in scan.calls] == [TVSHOW, SEASON, EPISODE]
+    assert scan.calls[1][1] == ["Season 0", "Season 1"]
+    # The season pass uses the ids the show pass found.
+    assert listing.call_args.args == ({"after_passes": 1},)
+    assert (progress.total, progress.done) == (1, 1)
+
+
+def test_seasons_outside_the_included_libraries_are_left_out():
+    scan = FakeScan()
+    elsewhere = dict(_season(1), file="smb://nas/Other/Lost/")
+    _run(Scope(7, None, "Lost"), scan, [_episode(1)], seasons=[elsewhere])
+    assert [c[0] for c in scan.calls] == [TVSHOW, EPISODE]
 
 
 def test_stop_ends_the_refresh_between_items():

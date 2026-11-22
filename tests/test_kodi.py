@@ -397,3 +397,41 @@ def test_get_all_seasons_drops_all_seasons_entry(kodi_stubs):
     items = get_all_items(SEASON, tvshowid=3)
     assert [i["seasonid"] for i in items] == [7]
     assert items[0]["poster"] == "p"
+
+
+_SHOWS = {"result": {"tvshows": [
+    {"tvshowid": 3, "title": "Lost", "file": "smb://nas/Series/Lost/", "art": {}},
+    {"tvshowid": 4, "title": "Dark", "file": "smb://nas/Series/Dark/", "art": {}},
+]}}
+_SEASONS = {"result": {"seasons": [
+    {"seasonid": 30, "season": 0, "tvshowid": 3, "showtitle": "Lost", "art": {}},
+    {"seasonid": 31, "season": 1, "tvshowid": 3, "showtitle": "Lost", "art": {}},
+    {"seasonid": 41, "season": 1, "tvshowid": 4, "showtitle": "Dark", "art": {}},
+]}}
+
+
+def test_get_seasons_for_scan_enriches_with_the_show(kodi_stubs):
+    from resources.lib.data.kodi import get_seasons_for_scan
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({
+        "VideoLibrary.GetTVShows": _SHOWS, "VideoLibrary.GetSeasons": _SEASONS})
+    items = get_seasons_for_scan({3: "4607"}, show_tvdb_map={3: "73739"})
+    assert [(i["seasonid"], i["file"], i["show_tmdb_id"], i["show_tvdb_id"])
+            for i in items] == [
+        (30, "smb://nas/Series/Lost/", "4607", "73739"),
+        (31, "smb://nas/Series/Lost/", "4607", "73739"),
+        (41, "smb://nas/Series/Dark/", None, None),
+    ]
+    # Kodi has no date on a season: the scan supplies it.
+    assert all("firstaired" not in i for i in items)
+
+
+def test_get_seasons_for_scan_of_one_show(kodi_stubs):
+    from resources.lib.data.kodi import get_seasons_for_scan
+    show = {"result": {"tvshowdetails": _SHOWS["result"]["tvshows"][0]}}
+    seasons = {"result": {"seasons": _SEASONS["result"]["seasons"][:2]}}
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({
+        "VideoLibrary.GetTVShowDetails": show, "VideoLibrary.GetSeasons": seasons})
+    items = get_seasons_for_scan({3: "4607"}, tvshowid=3)
+    sent = [json.loads(c.args[0]) for c in kodi_stubs["xbmc"].executeJSONRPC.call_args_list]
+    assert [s["params"].get("tvshowid") for s in sent] == [3, 3]
+    assert [i["show_tmdb_id"] for i in items] == ["4607", "4607"]

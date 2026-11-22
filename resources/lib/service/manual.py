@@ -19,7 +19,7 @@ import time
 import xbmc
 
 from resources.lib.constants import DEFAULT_ADDON_ID
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
@@ -119,23 +119,25 @@ def run() -> None:
             )
             all_stats[media_type.name] = stats
 
+        # Seasons and episodes use the show ids the show pass found.
         show_id_map = tracker.get_show_id_map()
-        episode_stats = run_scan(
-            media_type=EPISODE,
-            tracker=tracker,
-            libraries=libraries,
-            tmdb_api_key=tmdb_api_key,
-            settings=settings,
-            monitor=monitor,
-            show_id_map=show_id_map,
-            breaker=breaker,
-        )
-        all_stats[EPISODE.name] = episode_stats
+        for media_type in (SEASON, EPISODE):
+            all_stats[media_type.name] = run_scan(
+                media_type=media_type,
+                tracker=tracker,
+                libraries=libraries,
+                tmdb_api_key=tmdb_api_key,
+                settings=settings,
+                monitor=monitor,
+                show_id_map=show_id_map,
+                breaker=breaker,
+            )
 
         duration_ms = int((time.perf_counter() - scan_start) * 1000)
 
         movie_stats = all_stats.get("movie", {})
         tvshow_stats = all_stats.get("tvshow", {})
+        season_stats = all_stats.get("season", {})
         episode_stats = all_stats.get("episode", {})
 
         log.info(
@@ -143,6 +145,7 @@ def run() -> None:
             event="manual.complete",
             movies_updated=movie_stats.get("updated", 0),
             tvshows_updated=tvshow_stats.get("updated", 0),
+            seasons_updated=season_stats.get("updated", 0),
             episodes_updated=episode_stats.get("updated", 0),
             duration_ms=duration_ms,
         )
@@ -160,6 +163,7 @@ def run() -> None:
         total_updated = (
             movie_stats.get("updated", 0)
             + tvshow_stats.get("updated", 0)
+            + season_stats.get("updated", 0)
             + episode_stats.get("updated", 0)
         )
         parts = []
