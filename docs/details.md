@@ -87,7 +87,7 @@ grab from the video**, **Broken link** or **No image**.
 field, as for text.
 
 A poster that changed outside MetaMender, by your hand, another add-on or a
-refresh in Kodi, is locked with a padlock and the reason **Changed outside
+refresh in Kodi that brings a different poster, is locked with a padlock and the reason **Changed outside
 MetaMender, left as it is**. **Let MetaMender update this again** unlocks it:
 at the next scan MetaMender treats the poster Kodi holds as the one it first
 saw, and may then replace it with a better one. See

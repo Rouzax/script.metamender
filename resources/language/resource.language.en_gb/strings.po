@@ -1448,7 +1448,7 @@ msgid "Posters"
 msgstr ""
 
 msgctxt "#32713"
-msgid "Fills empty posters and refreshes posters from TMDB or fanart.tv while a title is new. Local image files and posters you changed yourself stay as they are."
+msgid "Fills empty posters and refreshes posters from TMDB or fanart.tv while a title is new. Local image files stay, and so does a poster you change after ticking this."
 msgstr ""
 
 msgctxt "#32714"

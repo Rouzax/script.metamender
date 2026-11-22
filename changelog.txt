@@ -17,10 +17,11 @@ New Features:
     empty thumb gets TMDB's episode still, or TheTVDB's episode image when
     TMDB has none.
   - Local image files (such as those Artwork Dump saved), posters from
-    other websites, art from an NFO file and a poster changed outside
-    MetaMender are left alone. A poster changed outside MetaMender is
-    locked; Details shows why and can unlock it. MetaMender writes no
-    image files.
+    other websites and art from an NFO file are left alone, and so is a
+    poster changed outside MetaMender after Posters was ticked: it is
+    locked, and Details shows why and can unlock it. A TMDB or fanart.tv
+    poster picked before Posters was ticked may be replaced once; Restore
+    original puts it back. MetaMender writes no image files.
   - Poster source per library: TMDB (the default) or fanart.tv.
   - Optional Personal fanart.tv API key setting.
   - Seasons have a Details window, and Update now on a season or show

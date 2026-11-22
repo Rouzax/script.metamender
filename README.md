@@ -20,7 +20,8 @@ background:
   and broken episode thumbs get the official still (TMDB, else TheTVDB), and
   movie, show and season posters are filled and refreshed while a title is
   new, in your library's language, from TMDB or fanart.tv. Local image files
-  and posters you chose stay.
+  stay, and so do posters you change afterwards; a replaced poster can be put
+  back from the Details window.
 
 It respects what is yours (items with an NFO file keep their values, and a
 replaced value can be put back), and its Details window shows, for any item,

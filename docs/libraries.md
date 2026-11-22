@@ -209,7 +209,7 @@ MetaMender takes the first of these that exists:
 3. A poster without text, poster source first.
 
 Within one site the best rated poster wins: on TMDB by its votes, weighted so
-that a poster with two votes cannot beat one with two hundred, and on
+that a poster with only a few votes counts for less than one with many, and on
 fanart.tv by its likes. If neither site has a poster, the current one stays.
 
 !!! example
@@ -299,9 +299,10 @@ A title that is already old gets one check. For a season, its age is that of its
   still your scraper chose.
 - **A poster from any other website** than TMDB or fanart.tv.
 - **A poster that changed outside MetaMender.** MetaMender remembers the
-  poster an item had when it first looked at it. If the poster is later
-  something other than that one or the one MetaMender wrote, you (or another
-  add-on, or a refresh in Kodi) chose it, and MetaMender locks it for good.
+  poster an item had when it first looked at it with **Posters** ticked. If
+  the poster is later something other than that one or the one MetaMender
+  wrote, you (or another add-on, or a refresh in Kodi that brings a different
+  poster) chose it, and MetaMender locks it for good.
   The [Details window](details.md#posters-and-episode-thumbs) says so, and
   **Let MetaMender update this again** unlocks it: MetaMender then treats
   the poster it finds as the one it first saw.
@@ -313,11 +314,13 @@ A title that is already old gets one check. For a season, its age is that of its
   `sources.json` file), posters are only filled when empty or broken.
 
 One case MetaMender cannot recognise: a poster you picked in Kodi before
-MetaMender first looked at the item. If it comes from TMDB or fanart.tv, it
-looks like your scraper's choice and may be replaced once. Ticking
-**Posters** accepts that; to keep such a poster, open the item's Details
-window and choose **Keep this value**, or **Restore original** after it was
-replaced.
+you ticked **Posters** for the library. If it comes from TMDB or fanart.tv,
+it looks like your scraper's choice and may be replaced once, at the first
+scan after ticking. Ticking **Posters** accepts that. To get such a poster
+back, open the item's Details window and choose **Restore original**: it
+puts the poster back and locks it. To protect one before it is replaced,
+choose **Keep this value** on it once **Posters** is ticked, before the next
+scan.
 
 A season is left alone while MetaMender does not know its show's TMDB id.
 

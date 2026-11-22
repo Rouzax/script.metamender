@@ -28,10 +28,11 @@ your own country.
 
 **Posters and episode thumbs, if you want them.**
 :   Washed-out frame grabs and broken episode thumbs get the official episode
-    still. Empty posters of movies, shows and seasons are filled, and early
-    placeholder posters are replaced while a title is new, in your library's
-    language, from TMDB or fanart.tv. Local image files and posters you chose
-    stay. [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs)
+    still. Empty posters of movies, shows and seasons are filled, and posters
+    from TMDB or fanart.tv are refreshed while a title is new, in your
+    library's language. Local image files stay, and so do posters you change
+    afterwards; a replaced poster can be put back from the Details window.
+    [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs)
 
 ## Highlights
 

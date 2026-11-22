@@ -148,8 +148,9 @@ library.
   a poster from a website other than TMDB or fanart.tv. MetaMender leaves
   those alone; the Details window says *Local image file, left as it is* or
   *Image from another source, left as it is*.
-- **An episode thumb from a website**, such as a TMDB still, is kept: only
-  frame grabs, broken links and empty thumbs are replaced.
+- **An episode thumb from a website that MetaMender did not set**, such as
+  a TMDB still your scraper chose, is kept: only frame grabs, broken links
+  and empty thumbs are replaced.
 - **The poster changed outside MetaMender**, so it is locked. Choose **Let
   MetaMender update this again** in the Details window to unlock it.
 - **The current poster is still as good**: a poster is only replaced when a
