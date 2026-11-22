@@ -1043,3 +1043,27 @@ def test_new_items_scan_details_follow_the_art_choice(tmp_path, kodi_stubs):
     tracker.close()
     assert listing.call_args.kwargs == {"ids_only": True}
     assert details.call_args.kwargs == {"art": False}
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season")
+def test_nfo_item_own_thumb_refreshed_after_reset_tracker(
+    mock_season, mock_update, tmp_path, kodi_stubs
+):
+    """field_keep's written_fp outlives Reset tracker, so MetaMender's own
+    art on an NFO item is still its own."""
+    item = _episode(FRAME_GRAB)
+    newer = "https://image.tmdb.org/t/p/original/newer.jpg"
+    mock_season.return_value = [_tmdb_episode_data(thumb=STILL)]
+    tracker = _make_tracker(tmp_path)
+    _register_show(tracker)
+    with patch("resources.lib.engine.scan.nfo_state", return_value=NFO):
+        _scan_episodes(tracker, {"thumb"}, [item])
+        mock_update.reset_mock()
+        tracker.clear_field_status()
+        tracker.start_new_cycle()
+        mock_season.return_value = [_tmdb_episode_data(thumb=newer)]
+        _scan_episodes(tracker, {"thumb"}, [dict(item, thumb=STILL)])
+    tracker.close()
+
+    assert _written(mock_update, "thumb") == newer

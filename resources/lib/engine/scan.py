@@ -43,9 +43,9 @@ Logging:
         - scan.updated (INFO): Item metadata written to Kodi
         - scan.breaker (WARNING): A provider tripped, or every provider the
           enabled fields need is down so the pass stops (scope="all")
-        - scan.tvdb_auth, scan.fanart_auth (ERROR): TheTVDB or fanart.tv
-          rejected the add-on's credentials; that provider is disabled for
-          the cycle, the scan continues
+        - scan.tvdb_auth (ERROR), scan.fanart_auth (WARNING): TheTVDB or
+          fanart.tv rejected the add-on's credentials; that provider is
+          disabled for the cycle, the scan continues
         - scan.art_gated (DEBUG): An art field is left alone before any fetch
           (verdict: local, other, changed; see art.art_gate)
         - scan.imdb_lookup_failed (ERROR): The IMDb ratings store raised
@@ -401,6 +401,7 @@ def _plan_writes(
     fs_map: dict[str, dict[str, Any]],
     identity: str,
     fill_only: frozenset[str] = frozenset(),
+    art_fps: dict[str, str] | None = None,
 ) -> tuple[dict[str, Any], set[str]]:
     """Split extracted values into (fields to write, fields Kodi already holds).
 
@@ -408,7 +409,10 @@ def _plan_writes(
     a differing value overwrites the current one, an identical value is never
     rewritten. On an NFO-managed item, and for a field in ``fill_only``,
     may_write decides with the field's stored provenance; a field it forbids
-    is in neither result, so it gets no write and no source.
+    is in neither result, so it gets no write and no source. ``art_fps``
+    holds field_keep's written_fp of the art fields, which outlives Reset
+    tracker: _gate_art and _drop_protected_art already let such a field
+    through as MetaMender's own, so it must be writable here too.
     """
     to_write: dict[str, Any] = {}
     held: set[str] = set()
@@ -418,7 +422,8 @@ def _plan_writes(
             held.add(f)
             continue
         protected = nfo_managed or f in fill_only
-        if not may_write(protected, current, fs_map.get(f, {}).get("written_value")):
+        written = (art_fps or {}).get(f) or fs_map.get(f, {}).get("written_value")
+        if not may_write(protected, current, written):
             log.debug(
                 "Field protected, value left as it is",
                 event="scan.protected", identity=identity, field=f,
@@ -718,12 +723,17 @@ def _drop_protected_art(
     """Take out the ``protected`` art fields (all of them on an NFO item,
     the fill-only ones in a folder without a language) that _plan_writes
     would refuse to write (protect.may_write: neither empty nor a
-    placeholder, nor MetaMender's own), so no request is made for them."""
-    for f in sorted(ART_FIELDS & protected & decisions.keys()):
-        if decisions[f] == FINAL:
-            continue
+    placeholder, nor MetaMender's own), so no request is made for them.
+    MetaMender's own is recognised as _gate_art does, by field_keep's
+    written_fp first, which outlives Reset tracker."""
+    fields = [f for f in sorted(ART_FIELDS & protected & decisions.keys())
+              if decisions[f] != FINAL]
+    keep = tracker.get_keep(media_type, identity) if fields else {}
+    for f in fields:
         current = kodi_form(item.get(f) or "")
-        if may_write(True, current, (fs_map.get(f) or {}).get("written_value")):
+        written_fp = ((keep.get(f) or {}).get("written_fp")
+                      or (fs_map.get(f) or {}).get("written_value"))
+        if may_write(True, current, written_fp):
             continue
         del decisions[f]
         _art_reason(tracker, media_type, identity, f, fs_map, reason)
@@ -1661,8 +1671,14 @@ def run_scan(
         for f in reopened:
             if f in answered and outcomes[f].value is None:
                 extracted[f] = ""
+        art_keep = (
+            tracker.get_keep(media_type.name, identity)
+            if ART_FIELDS & extracted.keys() else {}
+        )
         fields_to_write, held = _plan_writes(
             extracted, item, nfo_managed, fs_map, identity, fill_only,
+            {f: k["written_fp"] for f, k in art_keep.items()
+             if f in ART_FIELDS and k.get("written_fp")},
         )
         stats["protected"] += len(extracted) - len(fields_to_write) - len(held)
 
