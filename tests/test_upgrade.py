@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from resources.lib.constants import COUNTRY_CODES
 from resources.lib.data import upgrade
+from resources.lib.data.libraries import FIELD_TOGGLES
 from resources.lib.data.upgrade import MOVED_IDS, convert, ensure_copy, read_user_settings
 
 DISCOVERED = [{"path": "/m/movies/", "label": "Movies"},
@@ -188,8 +189,11 @@ def test_ensure_copy_write_failure_is_none(tmp_path):
 
 def test_moved_ids_have_defaults():
     covered = set(upgrade._DEFAULT_TEXT) | set(upgrade._DEFAULT_INT) | set(upgrade._DEFAULT_BOOL)
-    # The art toggles are new in 1.3: they have defaults but were never 1.1 ids.
-    assert covered - {"enable_posters", "enable_episode_thumbs"} == set(MOVED_IDS)
+    # A toggle added since 1.1 has a default but was never a 1.1 id, and
+    # converts as off.
+    new_toggles = {"enable_" + name for name in FIELD_TOGGLES} - set(MOVED_IDS)
+    assert all(upgrade._DEFAULT_BOOL[key] is False for key in new_toggles)
+    assert covered - new_toggles == set(MOVED_IDS)
 
 
 def test_convert_without_old_settings_switches_nothing_on():

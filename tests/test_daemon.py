@@ -422,7 +422,7 @@ def test_every_backfill_field_has_a_toggle():
     """A field no toggle enables is never in enabled_fields, so the scan
     never manages it. Votes are written with the rating."""
     toggled = frozenset().union(*FIELD_TOGGLES.values())
-    for media_type in (MOVIE, TVSHOW, EPISODE):
+    for media_type in (MOVIE, TVSHOW, SEASON, EPISODE):
         # A movie or show title has its own toggle, apart from episode titles.
         own = {"title": "main_title"} if media_type is not EPISODE else {}
         needed = {own.get(f, f) for f in media_type.backfill_fields} - {"votes"}
