@@ -85,6 +85,10 @@ DEFAULT_REFETCH_SCHEDULE: tuple[int, ...] = (7, 30, 90)
 VIDEO_NAV_WINDOW = 10025
 BROWSE_IDLE_SECONDS = 60
 
+# Home window property the "Stop scan" context-menu action sets; a background
+# scan checks it before each item and the service clears it per cycle.
+STOP_SCAN_PROPERTY = "metamender_stop_scan"
+
 
 def parse_refetch_schedule(value: str) -> tuple[int, ...]:
     """Parse a 'comma,separated,days' schedule string, dropping non-positive

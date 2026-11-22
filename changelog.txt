@@ -3,6 +3,11 @@ MetaMender Changelog
 
 v1.2.1 (unreleased)
 -------------------
+New Features:
+  - Stop scan in the MetaMender context submenu, shown while a scan runs:
+    the scan stops after the item it is working on, and the next scan
+    carries on from there.
+
 Bug Fixes:
   - While a scan runs, browsing the movie or TV show list no longer keeps
     reloading it: Kodi reloads the list after every library change, so a

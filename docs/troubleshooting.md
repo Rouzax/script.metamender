@@ -50,6 +50,8 @@ while you browse your movies or shows, a scan holds its changes: it writes the
 next one when you have not pressed anything for a minute, or when you leave
 the library (for the home screen, to watch something, or for the settings).
 **Update now** is your own request, so it writes straight away.
+To end a running scan, choose **Stop scan** in the MetaMender submenu of the
+context menu; see [Stopping a scan](scans.md#stopping-a-scan).
 
 ### What does it send over the internet?
 

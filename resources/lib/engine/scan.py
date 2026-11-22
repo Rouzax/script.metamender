@@ -83,6 +83,8 @@ from resources.lib.constants import (
     BROWSE_IDLE_SECONDS,
     DEFAULT_REFETCH_SCHEDULE,
     FALLBACK_RECHECKS,
+    KODI_HOME_WINDOW_ID,
+    STOP_SCAN_PROPERTY,
     VIDEO_NAV_WINDOW,
     parse_refetch_schedule,
 )
@@ -651,6 +653,11 @@ def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
         )
 
 
+def _stop_requested() -> bool:
+    """The user chose Stop scan (service/stopscan.py sets the property)."""
+    return xbmcgui.Window(KODI_HOME_WINDOW_ID).getProperty(STOP_SCAN_PROPERTY) == "1"
+
+
 def _browsing() -> bool:
     return (xbmcgui.getCurrentWindowId() == VIDEO_NAV_WINDOW
             and xbmc.getGlobalIdleTime() < BROWSE_IDLE_SECONDS)
@@ -667,7 +674,8 @@ def _hold_while_browsing(media_type: MediaType, monitor: Any) -> None:
     if monitor is None or not _browsing():
         return
     started = time.monotonic()
-    while _browsing() and not monitor.abortRequested():
+    while (_browsing() and not monitor.abortRequested()
+           and not _stop_requested()):
         if monitor.waitForAbort(2):
             break
     log.debug(
@@ -1072,6 +1080,20 @@ def run_scan(
                 media_type=media_type.name,
                 processed=stats["processed"],
             )
+            stats["aborted"] = True
+            break
+
+        # Stop scan from the context menu: the pass ends before this item and,
+        # like a shutdown, leaves the cycle open so the next scan resumes here.
+        # Update now (reset) is the user's own action and ignores it.
+        if not reset and _stop_requested():
+            log.info(
+                "Scan stopped by the user",
+                event="scan.stopped",
+                media_type=media_type.name,
+                processed=stats["processed"],
+            )
+            stats["stopped"] = True
             stats["aborted"] = True
             break
 

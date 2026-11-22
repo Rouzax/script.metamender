@@ -25,6 +25,10 @@
                     <label>32594</label>
                     <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow)</visible>
                 </item>
+                <item library="context_stop.py">
+                    <label>32631</label>
+                    <visible>[String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow) | String.IsEqual(ListItem.DBType,season)] + !String.IsEmpty(Window(Home).Property(metamender_scan_lock))</visible>
+                </item>
             </menu>
         </menu>
     </extension>
