@@ -12,6 +12,14 @@ bottom left of the settings screen) to **Advanced**; they are marked
 
 ## Providers
 
+**Manual and help**
+:   Opens a window with a QR code and the address of this manual
+    (`rouzax.github.io/script.metamender/docs/`), to open on your phone or
+    computer. It is the first entry of the settings, so when you open them
+    the cursor already rests on it: press Left once to reach the list of
+    tabs. Nothing is changed or saved; **Close** (or Back) returns you to
+    Kodi.
+
 ### TMDB
 
 **TMDB API key**

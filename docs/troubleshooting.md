@@ -188,6 +188,9 @@ then try **Update now** again.
 
 ## Reporting a problem
 
+To read this manual from your phone, choose **Manual and help** at the top of
+the add-on settings and scan the QR code.
+
 If something still looks wrong, [open an issue on
 GitHub](https://github.com/Rouzax/script.metamender/issues) with:
 

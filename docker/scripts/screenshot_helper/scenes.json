@@ -258,5 +258,10 @@
     "preset": "episode-locked",
     "focus": "title",
     "button": true
+  },
+  "help": {
+    "group": "help",
+    "window": "script-metamender-help.xml",
+    "kind": "help"
   }
 }

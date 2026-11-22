@@ -44,6 +44,7 @@ from resources.lib.ui import details_window as dw
 from resources.lib.ui import setup_window as sw
 from resources.lib.ui.attention_window import show_attention_window
 from resources.lib.ui.details_model import build_rows, header_line
+from resources.lib.ui.help_window import show_help
 from resources.lib.ui.progress_window import show_progress_window
 from resources.lib.providers.tmdb import KEY_OK
 from resources.lib.utils import lang
@@ -214,7 +215,12 @@ def corner_bar(scene: dict) -> None:
     bar.close()
 
 
-KINDS = {"setup": setup, "details": details, "attention": attention_window,
+def help_window(scene: dict) -> None:
+    _watch(_close_dialogs)
+    show_help()
+
+
+KINDS = {"help": help_window, "setup": setup, "details": details, "attention": attention_window,
          "progress": progress, "corner-bar": corner_bar}
 
 

@@ -3,6 +3,16 @@
     <section id="script.metamender">
         <!-- Tab 1: Providers -->
         <category id="providers" label="32001">
+            <!-- First, and not a text field, so the dialog opens on it and Left
+                 reaches the category list in one press. -->
+            <group id="help">
+                <setting id="manual" type="action" label="32737" help="32738">
+                    <data>RunScript(script.metamender,manual)</data>
+                    <control type="button" format="action">
+                        <close>true</close>
+                    </control>
+                </setting>
+            </group>
             <group id="tmdb" label="32010">
                 <setting id="tmdb_api_key" type="string" label="32011" help="32012">
                     <default></default>

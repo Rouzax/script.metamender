@@ -1550,3 +1550,19 @@ msgstr ""
 msgctxt "#32736"
 msgid "Posters from fanart.tv. Posters in the library's language always come first, from either source."
 msgstr ""
+
+msgctxt "#32737"
+msgid "Manual and help"
+msgstr ""
+
+msgctxt "#32738"
+msgid "Shows a QR code and the address of MetaMender's manual, to open on your phone or computer."
+msgstr ""
+
+msgctxt "#32739"
+msgid "MetaMender manual"
+msgstr ""
+
+msgctxt "#32740"
+msgid "Scan the code with your phone, or open this address:"
+msgstr ""

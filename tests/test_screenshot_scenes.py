@@ -20,8 +20,8 @@ RUNNER = ROOT / "docker" / "scripts" / "screenshots.py"
 SCENES = json.loads((HELPER / "scenes.json").read_text(encoding="utf-8"))
 SHOTS = ROOT / "docs" / "screenshots"
 
-GROUPS = {"setup", "update-now", "attention", "details", "library"}
-KINDS = {"setup", "details", "attention", "progress", "corner-bar", "context"}
+GROUPS = {"setup", "update-now", "attention", "details", "library", "help"}
+KINDS = {"help", "setup", "details", "attention", "progress", "corner-bar", "context"}
 
 
 def test_every_window_has_a_scene():
