@@ -155,10 +155,25 @@ class ApiKeyError(Exception):
         super().__init__("Invalid API key for {}".format(provider))
 
 
-class TvdbAuthError(Exception):
+class ProviderAuthError(Exception):
+    """A provider refused our credentials for the rest of the cycle; other
+    providers are unaffected. ``provider`` names it."""
+
+    provider = ""
+
+
+class TvdbAuthError(ProviderAuthError):
     """TheTVDB login failed, or a request was still refused with 401 after one
     fresh login. TVDB is unusable for the rest of the cycle; other providers
     are unaffected."""
+
+    provider = "tvdb"
+
+
+class FanartAuthError(ProviderAuthError):
+    """fanart.tv rejected the API key (HTTP 401)."""
+
+    provider = "fanart"
 
 
 class TransientProviderError(Exception):

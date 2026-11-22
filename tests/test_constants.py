@@ -40,3 +40,9 @@ def test_the_tvdb_key_decodes_to_a_project_key():
     from resources.lib.constants import TVDB_API_KEY
     assert re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
                         TVDB_API_KEY)
+
+
+def test_fanart_key_is_obfuscated():
+    import re
+    from resources.lib.constants import FANART_API_KEY
+    assert re.fullmatch(r"[0-9a-f]{32}", FANART_API_KEY)

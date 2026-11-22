@@ -184,9 +184,9 @@ def test_episodes_paged_all_pages_merged():
             patch.object(tvdb, "provider_get", side_effect=_router(pages, gets)):
         result = tvdb.fetch_series_episodes("80767", "nld")
     assert result == {
-        "1": {"title": "T1", "plot": ""},
-        "2": {"title": "T2", "plot": "P2"},
-        "3": {"title": "T3", "plot": ""},
+        "1": {"title": "T1", "plot": "", "image": ""},
+        "2": {"title": "T2", "plot": "P2", "image": ""},
+        "3": {"title": "T3", "plot": "", "image": ""},
     }
     assert [g[0].split("?")[1] for g in gets] == ["page=0", "page=1"]
 
@@ -242,8 +242,8 @@ def test_episode_without_translation_yields_empty_text():
             patch.object(tvdb, "provider_get", side_effect=_router({"page=0": page})):
         result = tvdb.fetch_series_episodes("1", "nld")
     assert result == {
-        "5": {"title": "", "plot": ""},
-        "6": {"title": "Titel", "plot": "Plot"},
+        "5": {"title": "", "plot": "", "image": ""},
+        "6": {"title": "Titel", "plot": "Plot", "image": ""},
     }
 
 
@@ -343,7 +343,7 @@ def test_default_order_episodes_unchanged_by_shared_paging():
     pages = {"page=0": _page([1], None)}
     with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
             patch.object(tvdb, "provider_get", side_effect=_router(pages, gets)):
-        assert tvdb.fetch_series_episodes("80767", "nld") == {"1": {"title": "T1", "plot": ""}}
+        assert tvdb.fetch_series_episodes("80767", "nld") == {"1": {"title": "T1", "plot": "", "image": ""}}
     assert "/episodes/default/nld" in gets[0][0]
 
 
@@ -356,3 +356,27 @@ def test_series_original_language():
     with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
             patch.object(tvdb, "provider_get", side_effect=_router(_series_routes())):
         assert tvdb.fetch_series("80767", "nld")["original_language"] == ""
+
+
+def test_tvdb_episode_image_full_url():
+    page = {"data": {"episodes": [
+        {"id": 1, "image": "/banners/episodes/81189/3859781.jpg"},
+        {"id": 2, "image": "https://example.test/still.jpg"},
+        {"id": 3, "image": None},
+        {"id": 4},
+    ]}, "links": {"next": None}}
+    with patch.object(tvdb, "provider_post", side_effect=_post_ok), \
+            patch.object(tvdb, "provider_get", side_effect=_router({"page=0": page})):
+        result = tvdb.fetch_series_episodes("1", "nld")
+    assert result is not None
+    assert result["1"]["image"] == "https://artworks.thetvdb.com/banners/episodes/81189/3859781.jpg"
+    assert result["2"]["image"] == "https://example.test/still.jpg"
+    assert result["3"]["image"] == ""
+    assert result["4"]["image"] == ""
+
+
+def test_tvdb_auth_error_is_provider_auth_error():
+    from resources.lib.utils import ProviderAuthError
+    err = TvdbAuthError("x")
+    assert isinstance(err, ProviderAuthError)
+    assert err.provider == "tvdb"
