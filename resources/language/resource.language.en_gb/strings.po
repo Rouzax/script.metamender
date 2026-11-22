@@ -1448,7 +1448,7 @@ msgid "Posters"
 msgstr ""
 
 msgctxt "#32713"
-msgid "Posters for movies, shows and seasons."
+msgid "Fills empty posters and refreshes posters from TMDB or fanart.tv while a title is new. Local image files and posters you changed yourself stay as they are."
 msgstr ""
 
 msgctxt "#32714"
@@ -1456,7 +1456,7 @@ msgid "Episode thumbs"
 msgstr ""
 
 msgctxt "#32715"
-msgid "Thumbnail images for episodes."
+msgid "Replaces thumbs Kodi grabbed from the video, and broken or empty thumbs, with the official episode still."
 msgstr ""
 
 msgctxt "#32716"
@@ -1529,4 +1529,16 @@ msgstr ""
 
 msgctxt "#32733"
 msgid "{} · Season {}"
+msgstr ""
+
+msgctxt "#32734"
+msgid "Poster source"
+msgstr ""
+
+msgctxt "#32735"
+msgid "Posters from The Movie Database."
+msgstr ""
+
+msgctxt "#32736"
+msgid "Posters from fanart.tv. Posters in the library's language always come first, from either source."
 msgstr ""
