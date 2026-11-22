@@ -117,3 +117,61 @@ def test_request_and_clear_stop():
 def test_user_stopped_reads_the_pass_stats():
     assert stopscan.user_stopped([{"stopped": False}, {"stopped": True}])
     assert not stopscan.user_stopped([{"stopped": False}, {}])
+
+
+def _run_without_items(tmp_path, window, reset=False):
+    from resources.lib.data.tracker import TrackerDB
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    with patch("resources.lib.data.kodi.get_all_items", return_value=[]) as listing, \
+         patch("resources.lib.providers.tmdb.fetch_movie") as fetch, _home(window):
+        stats = run_scan(MOVIE, tracker, _libs(frozenset({"plot"})), "key",
+                         _make_settings(), monitor=_Monitor(), reset=reset)
+    tracker.close()
+    return stats, listing, fetch
+
+
+def test_a_stop_before_a_pass_skips_its_kodi_listing(tmp_path, kodi_stubs):
+    window = _Window()
+    window.setProperty(STOP_SCAN_PROPERTY, "1")
+    stats, listing, fetch = _run_without_items(tmp_path, window)
+    listing.assert_not_called()
+    fetch.assert_not_called()
+    assert stats["stopped"] and stats["aborted"]
+    assert stats["processed"] == 0
+
+
+def test_update_now_still_lists_when_a_stop_is_set(tmp_path, kodi_stubs):
+    window = _Window()
+    window.setProperty(STOP_SCAN_PROPERTY, "1")
+    stats, listing, _fetch = _run_without_items(tmp_path, window, reset=True)
+    listing.assert_called_once()
+    assert not stats["stopped"]
+
+
+def test_daemon_skips_the_remaining_passes_after_a_stop(kodi_stubs):
+    from resources.lib.data.media_types import EPISODE, SEASON, TVSHOW
+    from resources.lib.service import daemon
+    from tests.test_daemon import _AbortMonitor, _lib
+    from resources.lib.data.libraries import LibraryConfig
+
+    window = _Window()
+    tracker = MagicMock()
+    passes = []
+
+    def scan_pass(**kw):
+        passes.append(kw["media_type"])
+        window.setProperty(STOP_SCAN_PROPERTY, "1")
+        return {"stopped": True, "aborted": True, "processed": 0}
+
+    with patch.object(daemon, "_prepare_imdb_ratings", return_value=True), \
+            patch.object(daemon, "run_scan", side_effect=scan_pass) as run, \
+            patch.object(stopscan.xbmcgui, "Window", return_value=window):
+        stats = daemon._run_scan(
+            tracker, LibraryConfig([_lib("/m/", toggles=("posters",))]),
+            {"tmdb_api_key": "k"}, _AbortMonitor())
+    assert passes == [MOVIE]
+    assert run.call_count == 1
+    assert not {TVSHOW, SEASON, EPISODE} & set(passes)
+    tracker.get_show_id_map.assert_not_called()
+    assert list(stats) == ["movie"]
+    assert stopscan.user_stopped(stats.values())

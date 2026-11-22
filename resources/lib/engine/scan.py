@@ -1232,6 +1232,20 @@ def run_scan(
         reset=reset,
     )
 
+    # A stop requested before this pass (the previous pass ended on it, or it
+    # arrived between passes) ends it before Kodi is asked for its item list,
+    # which on a large library takes seconds. Update now ignores the stop.
+    if not reset and _stop_requested():
+        log.info(
+            "Scan stopped by the user",
+            event="scan.stopped",
+            media_type=media_type.name,
+            processed=0,
+        )
+        stats["stopped"] = True
+        stats["aborted"] = True
+        return stats
+
     if items is None and media_type is SEASON:
         items = _season_items(tracker, shared.show_id_map, new_only)
     elif items is None:

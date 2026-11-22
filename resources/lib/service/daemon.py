@@ -95,7 +95,7 @@ from resources.lib.service.lock import (
     clear_file_lock,
     release_scan_lock,
 )
-from resources.lib.service.stopscan import clear_stop, user_stopped
+from resources.lib.service.stopscan import clear_stop, stop_requested, user_stopped
 from resources.lib.ui.attention_window import show_attention_window
 from resources.lib.utils import (
     ApiKeyError,
@@ -420,6 +420,9 @@ def _run_scan(
     available for the season lookups. The season pass runs only when an
     included library manages season posters (scan.scans_seasons).
 
+    A Stop scan request ends the cycle after the pass it arrived in: the
+    later passes, and the show id map between them, are skipped.
+
     Returns:
         Dict keyed by media type name with stats dicts as values.
     """
@@ -455,6 +458,8 @@ def _run_scan(
             show_cache=show_cache,
         )
         all_stats[media_type.name] = stats
+        if stop_requested():
+            return all_stats
 
     show_id_map = tracker.get_show_id_map()
     log.info(
@@ -478,6 +483,8 @@ def _run_scan(
             fanart_cache=fanart_cache,
             show_cache=show_cache,
         )
+        if stop_requested():
+            break
 
     return all_stats
 
