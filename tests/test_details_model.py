@@ -501,3 +501,71 @@ def test_a_converted_age_rating_says_so():
     assert _cert_from("fsk", 1) == "FSK, converted"
     assert _cert_from("tmdb", 0) == "TMDB"
     assert _cert_from("bbfc", 0) == "BBFC"
+
+
+def _art_rows(item=None, fs=None, keep=None, media_type=EPISODE, field="thumb"):
+    item = dict({"title": "T", "showtitle": "S", "season": 1, "episode": 1}, **(item or {}))
+    fs_map = {field: _fs("updated", source="tmdb", written=fingerprint(item.get(field, "")))}
+    fs_map[field].update(fs or {})
+    return _by_key(build_rows(media_type, item, {}, fs_map, keep or {}, TODAY,
+                              language="Dutch", fields=[field]))[field]
+
+
+@pytest.mark.parametrize("url, text", [
+    ("", "No image"),
+    ("image://video@smb%3a%2f%2fnas%2fe.mkv", "Frame grab from the video"),
+    ("https://thetvdb.com/banners/episodes/1/", "Broken link"),
+    ("https://image.tmdb.org/t/p/original/a.jpg", "Image from TMDB"),
+    ("https://assets.fanart.tv/fanart/x.jpg", "Image from fanart.tv"),
+    ("https://example.org/a.jpg", "Image from another website"),
+    ("/media/poster.jpg", "Local image file"),
+])
+def test_art_value_text_never_shows_url(url, text):
+    row = _art_rows({"thumb": url})
+    assert row.label == "Episode thumb"
+    assert row.lines[0] == ("", text)
+    assert all("http" not in t and "/media" not in t for _l, t in row.lines)
+
+
+def test_poster_label():
+    row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
+                    media_type=MOVIE, field="poster")
+    assert row.label == "Poster"
+
+
+@pytest.mark.parametrize("original, text", [
+    ("", "empty"),
+    ("image://video@smb%3a%2f%2fnas%2fe.mkv", "was a frame grab"),
+    ("https://thetvdb.com/banners/episodes/1/", "was a broken link"),
+    ("https://example.org/old.jpg", "your scraper's value"),
+])
+def test_art_replaced_text_frame_grab(original, text):
+    keep = {"thumb": {"original": original, "has_original": True, "locked": False,
+                      "written_fp": None}}
+    row = _art_rows({"thumb": "https://image.tmdb.org/t/p/original/a.jpg"}, keep=keep)
+    assert dict(row.lines)["Replaced"] == text
+
+
+def test_poster_from_text_has_language():
+    row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
+                    media_type=MOVIE, field="poster")
+    assert dict(row.lines)["From"] == "TMDB, in Dutch"
+    row = _art_rows({"poster": "https://assets.fanart.tv/x.jpg"},
+                    fs={"source": "fanart"}, media_type=MOVIE, field="poster")
+    assert dict(row.lines)["From"] == "fanart.tv, in Dutch"
+    # An episode thumb has no language.
+    row = _art_rows({"thumb": "https://image.tmdb.org/t/p/original/a.jpg"})
+    assert dict(row.lines)["From"] == "TMDB"
+
+
+@pytest.mark.parametrize("reason, text", [
+    ("local_art", "Local image file, left as it is"),
+    ("other_art", "Image from another source, left as it is"),
+    ("changed_outside", "Changed outside MetaMender, left as it is"),
+])
+def test_why_changed_outside(reason, text):
+    keep = {"thumb": {"locked": reason == "changed_outside"}}
+    row = _art_rows({"thumb": "/media/x.jpg"}, keep=keep,
+                    fs={"last_reason": reason, "source": None, "written_value": None})
+    assert dict(row.lines)["Why"] == text
+    assert row.group == "left"

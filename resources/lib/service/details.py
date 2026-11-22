@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.libraries import LibraryConfig, load_libraries, resolve_country
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW, MediaType
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW, MediaType
 from resources.lib.data.presets import load_preset
 from resources.lib.data.tracker import REASON_LOCKED, TrackerDB
 from resources.lib.engine.scan import candidate_fields, item_fields
@@ -46,7 +46,9 @@ if TYPE_CHECKING:
 
 log = get_logger('details')
 
-_DBTYPE_TO_MEDIA_TYPE = {"movie": MOVIE, "episode": EPISODE, "tvshow": TVSHOW}
+_DBTYPE_TO_MEDIA_TYPE = {
+    "movie": MOVIE, "episode": EPISODE, "tvshow": TVSHOW, "season": SEASON,
+}
 # Certifications are scanned for movies and shows only (scan._cert_config).
 _CERT_TYPES = frozenset({"movie", "tvshow"})
 
@@ -229,6 +231,9 @@ def unlock_field(
         saved = (tracker.set_locked(media_type.name, identity, field, False)
                  and tracker.forget_field_fingerprint(media_type.name, identity, field))
         if saved:
+            # Art locked for "changed outside MetaMender" would otherwise be
+            # judged against the old first-seen URL and lock again.
+            tracker.forget_first_fp(media_type.name, identity, field)
             tracker.commit()
     except sqlite3.Error:
         log.exception("Failed to save the unlock", event="details.error",
@@ -255,13 +260,17 @@ class DetailsView:
 
 
 def _read_identity(
-    tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: int
+    tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: int,
+    show_id_map: dict[int, str],
 ) -> tuple[str, str]:
     """(the key the item's rows are under now, the key the scan uses), found
     the way scan._tracker_identity finds it but without its writes: opening
     the window must change nothing, so a row the next scan would adopt is
     read under its current identity. The two differ only for such a row."""
     identity = compute_identity(item, media_type)
+    if not identity:
+        # A season of a show with no TMDB id: the scan skips it, so it has no row.
+        return "", ""
     own = "{}|{}".format(identity, item.get("file", ""))
     if tracker.get_item(media_type.name, own) is not None:
         return own, own
@@ -276,9 +285,27 @@ def _read_identity(
     if holder is None or holder == kodi_id:
         return identity, identity
     other = kodi.get_item_by_id(media_type, holder)
+    if other and media_type is SEASON:
+        other["show_tmdb_id"] = show_id_map.get(int(other.get("tvshowid", -1)))
     if other and compute_identity(other, media_type) == identity:
         return own, own
     return identity, identity
+
+
+def _enrich_season(item: dict[str, Any]) -> dict[int, str]:
+    """Give a season what Kodi does not: its show's folder (which places it in
+    a library) and TMDB id, from the tracker's show map as the scan does.
+    Returns that map."""
+    tracker = TrackerDB(_get_db_path())
+    try:
+        show_id_map = tracker.get_show_id_map()
+    finally:
+        tracker.close()
+    show_id = int(item.get("tvshowid", -1))
+    show = kodi.get_item_by_id(TVSHOW, show_id)
+    item["file"] = str((show or {}).get("file") or "")
+    item["show_tmdb_id"] = show_id_map.get(show_id)
+    return show_id_map
 
 
 def certifications_on(media_type: MediaType, enabled_fields: frozenset[str]) -> bool:
@@ -320,6 +347,8 @@ def _shown_fields(
 
 
 def _heading(media_type: MediaType, item: dict[str, Any]) -> str:
+    if media_type.name == "season":
+        return lang(32733).format(item.get("showtitle", ""), item.get("season", 0))
     if media_type.name == "episode":
         return lang(32585).format(
             item.get("showtitle", ""), item.get("season", 0), item.get("episode", 0)
@@ -350,6 +379,9 @@ class DetailsSession:
         settings = _load_settings()
         ui_language = settings["ui_language"]
         libraries = load_libraries(_get_sources_config_path()) or LibraryConfig()
+        show_id_map: dict[int, str] = {}
+        if self.media_type is SEASON:
+            show_id_map = _enrich_season(item)
         file_path = item.get("file", "")
         lib = libraries.for_file(file_path)
         # The item's library settings as the scan uses them. A library that
@@ -367,7 +399,7 @@ class DetailsSession:
         tracker = TrackerDB(_get_db_path())
         try:
             identity, scan_identity = _read_identity(
-                tracker, self.media_type, item, self.kodi_id)
+                tracker, self.media_type, item, self.kodi_id, show_id_map)
             item_row = tracker.get_item(self.media_type.name, identity)
             fs_map = tracker.get_field_status_map(self.media_type.name, identity)
             keep = tracker.get_keep(self.media_type.name, identity)
@@ -375,7 +407,9 @@ class DetailsSession:
             tracker.close()
         self.identity = identity
         cert_usable = cert_country_usable(cert_country)
-        managed = managed_fields(self.media_type, enabled, cert_usable, scan_identity)
+        # A season with no identity (its show has no TMDB id) is never scanned.
+        managed = managed_fields(self.media_type, enabled, cert_usable, scan_identity) \
+            if scan_identity else []
         rows = build_rows(
             self.media_type, item, item_row, fs_map, keep, date.today().isoformat(),
             language=text_language,

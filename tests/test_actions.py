@@ -382,6 +382,6 @@ def test_addon_context_menu_is_one_metamender_submenu():
     assert strings[update.findtext("label")] == "Update now"
     assert _dbtypes(update.findtext("visible")) == {"movie", "episode", "tvshow", "season"}
     assert strings[details.findtext("label")] == "Details"
-    assert _dbtypes(details.findtext("visible")) == {"movie", "episode", "tvshow"}
+    assert _dbtypes(details.findtext("visible")) == {"movie", "episode", "tvshow", "season"}
     for library in items:
         assert (root_dir / library).is_file()

@@ -1470,3 +1470,63 @@ msgstr ""
 msgctxt "#32718"
 msgid "Poster: {}"
 msgstr ""
+
+msgctxt "#32719"
+msgid "Poster"
+msgstr ""
+
+msgctxt "#32720"
+msgid "Episode thumb"
+msgstr ""
+
+msgctxt "#32721"
+msgid "No image"
+msgstr ""
+
+msgctxt "#32722"
+msgid "Frame grab from the video"
+msgstr ""
+
+msgctxt "#32723"
+msgid "Broken link"
+msgstr ""
+
+msgctxt "#32724"
+msgid "Image from TMDB"
+msgstr ""
+
+msgctxt "#32725"
+msgid "Image from fanart.tv"
+msgstr ""
+
+msgctxt "#32726"
+msgid "Image from another website"
+msgstr ""
+
+msgctxt "#32727"
+msgid "Local image file"
+msgstr ""
+
+msgctxt "#32728"
+msgid "was a frame grab"
+msgstr ""
+
+msgctxt "#32729"
+msgid "was a broken link"
+msgstr ""
+
+msgctxt "#32730"
+msgid "Local image file, left as it is"
+msgstr ""
+
+msgctxt "#32731"
+msgid "Image from another source, left as it is"
+msgstr ""
+
+msgctxt "#32732"
+msgid "Changed outside MetaMender, left as it is"
+msgstr ""
+
+msgctxt "#32733"
+msgid "{} · Season {}"
+msgstr ""

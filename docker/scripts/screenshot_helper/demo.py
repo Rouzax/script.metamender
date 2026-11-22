@@ -28,6 +28,10 @@ DUTCH_PLOT = ("Agenten Mardik en Shannon worden opgeroepen voor een melding op "
                 "als routine, loopt snel uit de hand.")
 MOVIE_PLOT = ("A retired lighthouse keeper takes in a runaway who claims to have "
               "seen a ship that sank forty years ago.")
+# Art as the engine reads it: unwrapped URLs. Invented paths, nothing real.
+EPISODE_THUMB = "https://image.tmdb.org/t/p/original/demoThumb.jpg"
+MOVIE_POSTER = "https://assets.fanart.tv/fanart/movies/400001/movieposter/demo.jpg"
+FRAME_GRAB = "image://video@smb%3a%2f%2fnas%2fmedia%2fTV%2fThe%20Night%20Ferry%2fs01e01.mkv/"
 
 
 def _fs(reason: str, *, source: str | None = None, count: int = 1,
@@ -49,6 +53,7 @@ def episode() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any]
         "plot": EPISODE_PLOT, "rating": 7.4, "votes": 312, "runtime": 2700,
         "director": [], "writer": ["Sam Okafor"],
         "uniqueid": {"tvmaze": "1000001"},
+        "thumb": EPISODE_THUMB,
         "ratings": {"imdb": {"rating": 7.4, "votes": 312, "default": True}},
     }
     item_row = {
@@ -72,9 +77,14 @@ def episode() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any]
         "firstaired": _fs("unchanged", source="tmdb", count=3),
         "writer": _fs("unchanged", source="tmdb", next_retry="2026-11-19"),
         "director": _fs("nothing", next_retry="2026-11-15"),
+        "thumb": _fs("updated", source="tmdb", next_retry="2026-11-19",
+                     written=fingerprint(EPISODE_THUMB)),
     }
-    # The scraper had no plot: MetaMender filled the gap.
+    # The scraper had no plot: MetaMender filled the gap. Its thumb was a
+    # frame grab from the video.
     keep = {
+        "thumb": {"original": FRAME_GRAB, "has_original": True,
+                  "locked": False, "written_fp": fingerprint(EPISODE_THUMB)},
         "plot": {"original": "", "has_original": True,
                  "locked": False, "written_fp": fingerprint(EPISODE_PLOT)},
     }
@@ -127,7 +137,7 @@ def movie() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any],
         "tagline": "", "genre": ["Drama"], "studio": ["Harbour Light Films"],
         "uniqueid": {"tmdb": "400001", "imdb": "tt0000002"},
         "ratings": {"imdb": {"rating": 7.1, "votes": 48210, "default": True}},
-        "rating": 7.1, "votes": 48210,
+        "rating": 7.1, "votes": 48210, "poster": MOVIE_POSTER,
     }
     item_row = {"tmdb_id": "400001", "imdb_id": "tt0000002", "ids_checked": TODAY,
                 "last_seen": TODAY, "match_note": ""}
@@ -141,6 +151,8 @@ def movie() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any],
         "plot": _fs("nfo"),
         "genre": _fs("unchanged", source="tmdb", count=4),
         "tagline": _fs("nothing", next_retry="2026-11-26"),
+        "poster": _fs("updated", source="fanart", next_retry="2026-11-26",
+                      written=fingerprint(MOVIE_POSTER)),
     }
     keep = {"mpaa": {"original": "Rated PG-13", "has_original": True,
                      "locked": False, "written_fp": fingerprint("NL:12")}}

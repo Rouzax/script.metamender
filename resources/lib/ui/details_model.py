@@ -17,13 +17,27 @@ from typing import Any
 
 from resources.lib.data.media_types import MediaType
 from resources.lib.data.tracker import (
+    REASON_CHANGED_OUTSIDE,
     REASON_FILL_ONLY,
+    REASON_LOCAL_ART,
     REASON_LOCKED,
     REASON_NFO,
     REASON_NOTHING,
+    REASON_OTHER_ART,
     REASON_UNCHANGED,
     REASON_UNCHECKED,
     REASON_UPDATED,
+)
+from resources.lib.engine.art import (
+    ART_FIELDS,
+    BROKEN,
+    EMPTY,
+    FRAME_GRAB,
+    LOCAL,
+    WEB_FANART,
+    WEB_OTHER,
+    WEB_TMDB,
+    classify,
 )
 from resources.lib.engine.maturity import (
     FINAL,
@@ -64,7 +78,7 @@ _FIELD_LABELS = {
     "plot": 32511, "title": 32512, "rating": 32513, "runtime": 32514,
     "director": 32515, "writer": 32516, "genre": 32517, "studio": 32518,
     "country": 32519, "tagline": 32520, "trailer": 32521, "firstaired": 32522,
-    "mpaa": 32523,
+    "mpaa": 32523, "poster": 32719, "thumb": 32720,
 }
 
 # Brand names, not translated. A rating source is a Kodi rating slot name;
@@ -73,6 +87,7 @@ _FIELD_LABELS = {
 _SOURCE_NAMES = {
     "tmdb": "TMDB", "themoviedb": "TMDB", "tvdb": "TheTVDB", "thetvdb": "TheTVDB",
     "imdb": "IMDb", "bbfc": "BBFC", "fsk": "FSK", "medieraadet": "Medieraadet",
+    "fanart": "fanart.tv",
 }
 # "kodi" is a certification Kodi already held, which is the scraper's.
 _SCRAPER_SOURCE = "kodi"
@@ -91,7 +106,18 @@ _WHY = {
     REASON_NOTHING: 32543,
     REASON_UNCHECKED: 32544,
     REASON_LOCKED: 32545,
+    REASON_LOCAL_ART: 32730,
+    REASON_OTHER_ART: 32731,
+    REASON_CHANGED_OUTSIDE: 32732,
 }
+# What the art in a slot is, as the Details value line says it (never a URL).
+_ART_TEXT = {
+    EMPTY: 32721, FRAME_GRAB: 32722, BROKEN: 32723, WEB_TMDB: 32724,
+    WEB_FANART: 32725, WEB_OTHER: 32726, LOCAL: 32727,
+}
+_OTHER_ART_TEXT = 32726
+# The art an original was, when it was not a link worth naming.
+_ART_WAS_TEXT = {FRAME_GRAB: 32728, BROKEN: 32729}
 _NEVER_CHECKED = 32546
 _CHANGED_SINCE = 32576
 _UNLOCKED = 32577
@@ -170,6 +196,8 @@ def _source_name(source: str | None) -> str:
 
 def _value_text(field: str, item: dict[str, Any]) -> str:
     value = item.get(field)
+    if field in ART_FIELDS:
+        return lang(_ART_TEXT.get(classify(str(value or "")), _OTHER_ART_TEXT))
     if field == "rating":
         if is_empty(value):
             return lang(32574)
@@ -255,10 +283,12 @@ def _field_row(
     # An unlock leaves the "locked" reason until the next scan records one,
     # and makes the field due at that scan (details.unlock_field). Kodi then
     # holds the restored original, so this wins over "changed".
-    unlocked = reason == REASON_LOCKED and not locked
+    unlocked = reason in (REASON_LOCKED, REASON_CHANGED_OUTSIDE) and not locked
 
     if locked:
-        group, hint, why = GROUP_LEFT, lang(32548), _WHY[REASON_LOCKED]
+        group, hint = GROUP_LEFT, lang(32548)
+        why = _WHY[REASON_CHANGED_OUTSIDE if reason == REASON_CHANGED_OUTSIDE
+                   else REASON_LOCKED]
     elif not checked:
         group, hint, why = GROUP_WAITING, lang(32551), _NEVER_CHECKED
     elif unlocked:
@@ -275,7 +305,8 @@ def _field_row(
         group, hint, why = GROUP_UPDATED, _source_name(source), 0
     elif reason == REASON_UNCHECKED:
         group, hint, why = GROUP_WAITING, "", _WHY[REASON_UNCHECKED]
-    elif settled or reason in (REASON_UNCHANGED, REASON_NFO, REASON_FILL_ONLY):
+    elif settled or reason in (REASON_UNCHANGED, REASON_NFO, REASON_FILL_ONLY,
+                               REASON_LOCAL_ART, REASON_OTHER_ART):
         group = GROUP_LEFT
         why = _WHY.get(reason or "", 0)
         if settled and reason == REASON_NOTHING:
@@ -299,7 +330,7 @@ def _field_row(
     elif checked and not changed and not is_empty(current):
         lines.append((lang(32527), lang(32534)))
     if group == GROUP_UPDATED and not rating:
-        lines.append((lang(32528), _replaced_text(entry)))
+        lines.append((lang(32528), _replaced_text(field, entry)))
     if fs.get("fetched_at"):
         lines.append((lang(32529), long_date(fs["fetched_at"])))
     if checked and not locked:
@@ -341,18 +372,23 @@ def _from_text(field: str, source: str | None, fs: dict[str, Any], language: str
         # Another country's rating converted to this system: it is not
         # this country's own decision and is re-checked monthly.
         return lang(_CONVERTED).format(name)
-    if field not in LANGUAGE_FIELDS or source == _SCRAPER_SOURCE:
+    if (field not in LANGUAGE_FIELDS and field != "poster") or source == _SCRAPER_SOURCE:
         return name
     if fs.get("from_fallback"):
         return lang(32533).format(name)
     return lang(32532).format(name, language) if language else name
 
 
-def _replaced_text(entry: dict[str, Any]) -> str:
+def _replaced_text(field: str, entry: dict[str, Any]) -> str:
     if not entry.get("has_original"):
         return lang(32537)
-    if is_empty(entry.get("original")):
+    original = entry.get("original")
+    if is_empty(original):
         return lang(32536)
+    if field in ART_FIELDS:
+        was = _ART_WAS_TEXT.get(classify(str(original)))
+        if was:
+            return lang(was)
     return lang(32535)
 
 
@@ -382,6 +418,9 @@ def _ids_row(media_type: MediaType, item: dict[str, Any],
            if n.get("matched") and n.get("site") in ("tmdb", "tvdb")}
     lines: list[tuple[str, str]] = []
     from_kodi = found = False
+    if media_type.name == "season" and item.get("show_tmdb_id"):
+        # Kodi gives a season no ids; the show's is the one that finds it.
+        lines.append(("TMDB", str(item["show_tmdb_id"])))
     for name, kodi_id, stored, matchable in (
         ("TMDB", kodi_tmdb, row.get("tmdb_id"), True),
         # An `unknown` uniqueid is a TheTVDB id once the scan verified it.
