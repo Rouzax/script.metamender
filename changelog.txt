@@ -29,6 +29,26 @@ New Features:
   - Both ticks are off for every library, including libraries set up
     before this version.
 
+v1.2.1 (2026-11-22)
+-------------------
+New Features:
+  - Stop scan in the MetaMender context submenu, shown while a scan runs:
+    the scan stops after the item it is working on, and the next scan
+    carries on from there.
+
+Bug Fixes:
+  - While a scan runs, browsing the movie or TV show list no longer keeps
+    reloading it: Kodi reloads the list after every library change, so a
+    background scan now holds its changes while the Videos window is in
+    use and writes them once nothing has been pressed for a minute or the
+    window is left. Update now still writes straight away.
+
+Internal:
+  - New service/stopscan.py and context_stop.py; the request is the
+    metamender_stop_scan home window property, cleared by the service at
+    the start and end of every cycle. Constants VIDEO_NAV_WINDOW,
+    BROWSE_IDLE_SECONDS (60) and STOP_SCAN_PROPERTY.
+
 v1.2.0 (2026-11-22)
 -------------------
 New Features:

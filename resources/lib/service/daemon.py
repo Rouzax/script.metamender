@@ -95,6 +95,7 @@ from resources.lib.service.lock import (
     clear_file_lock,
     release_scan_lock,
 )
+from resources.lib.service.stopscan import clear_stop, user_stopped
 from resources.lib.ui.attention_window import show_attention_window
 from resources.lib.utils import (
     ApiKeyError,
@@ -802,6 +803,9 @@ def run() -> None:
                         )
 
                         tracker.begin_cycle(settings["resume_interrupted"])
+                        # A Stop scan chosen while no scan ran must not end
+                        # this one.
+                        clear_stop()
 
                         scan_start = time.perf_counter()
                         try:
@@ -901,10 +905,13 @@ def run() -> None:
                             _maybe_prune_orphans(tracker, settings, targeted,
                                                  scanned=all_stats.keys())
 
-                        # A pass stopped by Kodi shutting down says nothing
-                        # about whether scans work; any other early stop
-                        # (every provider down) counts as a failed attempt.
-                        shutdown = monitor.abortRequested()
+                        # A pass stopped by Kodi shutting down or by the
+                        # user's Stop scan says nothing about whether scans
+                        # work; any other early stop (every provider down)
+                        # counts as a failed attempt.
+                        stopped = user_stopped(all_stats.values())
+                        clear_stop()
+                        shutdown = monitor.abortRequested() or stopped
                         tvdb_rejected = tvdb_auth_failed(all_stats.values())
                         tmdb_answered = any(
                             s.get("tmdb_answered") for s in all_stats.values())

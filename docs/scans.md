@@ -21,6 +21,19 @@ when you start a video and carries on when you stop. If Kodi closes in the
 middle of a scan, the next one continues where it left off (switch this off
 with **Resume interrupted scans**).
 
+While you browse your movies or shows, a scan holds its changes: Kodi reloads
+the list on screen after every change, so MetaMender writes the next one when
+you have not pressed anything for a minute or when you leave the library.
+
+### Stopping a scan
+
+While a scan runs, the MetaMender submenu in the context menu of any movie,
+show, season or episode has **Stop scan**. The scan stops after the item it is
+working on; nothing is undone. The next scan, on the usual schedule or after
+a library update, carries on from where this one stopped (unless **Resume
+interrupted scans** is off, then it starts from the beginning). Update now is
+not affected.
+
 ## How often a field is checked
 
 MetaMender does not fetch everything every day. It remembers, per item and per

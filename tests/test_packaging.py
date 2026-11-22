@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 STAGE = ROOT / "docker" / "scripts" / "stage.py"
 TOP_LEVEL = {"addon.xml", "default.py", "service.py", "context.py", "context_details.py",
-             "LICENSE.txt", "changelog.txt", "resources", "icon.png", "fanart.jpg"}
+             "context_stop.py", "LICENSE.txt", "changelog.txt", "resources", "icon.png", "fanart.jpg"}
 # repository.rouzax/publish.py refuses a zip holding any of these.
 BANNED = (".git", ".github/", ".claude/", "CLAUDE.md", "README.md", "tests/", "docs/",
           "_temp/", "__pycache__/", ".env", "conftest.py", "pyrightconfig.json")
@@ -31,7 +31,7 @@ def test_a_staged_folder_holds_only_what_kodi_loads(tmp_path):
     _run("folder", str(tmp_path / "out"))
     shipped = _shipped(tmp_path / "out")
     assert {"addon.xml", "default.py", "service.py", "context.py", "context_details.py",
-            "LICENSE.txt", "changelog.txt", "icon.png"} <= shipped
+            "context_stop.py", "LICENSE.txt", "changelog.txt", "icon.png"} <= shipped
     assert "resources/settings.xml" in shipped
     assert "resources/lib/service/daemon.py" in shipped
     assert "resources/presets/AU.json" in shipped
