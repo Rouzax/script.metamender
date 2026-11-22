@@ -169,7 +169,8 @@ library.
 - **A season of a show without a TMDB id** is left alone, and a show without
   a TheTVDB id gets no posters from fanart.tv.
 - **fanart.tv did not answer** or rejected the key: posters that need it wait
-  until it does. If it rejected the key, a notification said so: *fanart.tv
+  until it does. If it rejected the key, a notification said so (once for
+  background scans, each time for a manual scan or Update now): *fanart.tv
   refused your personal API key* means the key in Settings, Providers is
   wrong (fix it, or clear it to use MetaMender's own key); *fanart.tv refused
   MetaMender's key* is not something you can fix, and posters resume once

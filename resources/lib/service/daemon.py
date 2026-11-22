@@ -623,11 +623,11 @@ def _record_cycle(
 ) -> None:
     """What a finished background cycle tells the problem record: the
     attempt for the failure streak (not when Kodi shut down), TheTVDB's
-    credentials, fanart.tv's key, and, after a full pass over the library, the folders and
-    the number of items in no library. A key or
-    credential problem clears only when that provider answered: a cycle
-    that never asked it proves nothing, and clearing would show the problem
-    again the next time it is hit."""
+    credentials, fanart.tv's key, and, after a full pass over the library,
+    the folders and the number of items in no library. A key or credential
+    problem clears only when that provider answered: a cycle that never
+    asked it proves nothing, and clearing would show the problem again the
+    next time it is hit."""
     if tmdb_answered:
         record.clear(attention.KEY_REJECTED)
     if not shutdown:
@@ -658,8 +658,9 @@ def _attention_tick(
     tracker: TrackerDB, monitor: Any, shown: set[tuple[str, str]],
 ) -> None:
     """Show what the problem record holds that was not shown yet: the
-    attention window, and the TheTVDB and fanart.tv toasts. Nothing while anything plays
-    (it waits for the next tick without playback) or while Kodi quits.
+    attention window, and the TheTVDB and fanart.tv toasts. Nothing while
+    anything plays (it waits for the next tick without playback) or while
+    Kodi quits.
 
     ``shown`` is what this service run already showed: should saving the
     record fail, the same window still never comes back within a session.

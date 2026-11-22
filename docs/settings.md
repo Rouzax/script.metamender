@@ -36,8 +36,9 @@ bottom left of the settings screen) to **Advanced**; they are marked
     without it, and it only matters for libraries with **Posters** ticked
     (see [Posters](libraries.md#posters)). If fanart.tv rejects the key,
     posters that need fanart.tv wait, with nothing changed, until it works
-    again; everything else carries on. A notification tells you once when
-    your personal key is refused: check it here, or clear the field to use
+    again; everything else carries on. A notification tells you when your
+    personal key is refused (once for background scans, each time for a
+    manual scan or Update now): check it here, or clear the field to use
     MetaMender's own key.
 
 ## Backfill

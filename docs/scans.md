@@ -101,14 +101,16 @@ When there is more than one problem, the most important one is shown and the
 others are listed under **Also**. **Later** closes the window; it does not come
 back for the same problem, but does for a new one.
 
-If TheTVDB stops accepting MetaMender's own key, a notification says so once.
-Titles and plots from TheTVDB are paused until it works again; TMDB carries on.
+If TheTVDB stops accepting MetaMender's own key, a notification says so once
+for background scans; Scan now, Update now and a show or season refresh say so
+each time they meet it. Titles and plots from TheTVDB are paused until it works again; TMDB carries on.
 
 If fanart.tv rejects its key (MetaMender's or your
 [personal key](settings.md#fanarttv)) or cannot be reached, posters whose
 choice depends on fanart.tv wait, with nothing changed, and are tried again at
 the next scan; everything else carries on. When fanart.tv rejects the key, a
-notification says so once, and says whether it was your personal key or
-MetaMender's own; it shows again only after fanart.tv has accepted a key in
-between. When fanart.tv simply cannot be reached there is no notification;
+notification says so, and says whether it was your personal key or
+MetaMender's own. A background scan shows it once, and again only after
+fanart.tv has accepted a key in between; a manual scan, Update now and a show
+or season refresh show it each time they meet the rejection. When fanart.tv simply cannot be reached there is no notification;
 Kodi's [log](troubleshooting.md#reporting-a-problem) records both.
