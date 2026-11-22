@@ -558,6 +558,18 @@ def test_toast_when_only_the_show_record_changed(strings):
     assert p.toast("Lost", stopped=False, could_not_finish=False) == "Updated: Lost"
 
 
+def test_fanart_rejection_is_part_of_the_outcome():
+    class AuthScan(FakeScan):
+        def __call__(self, *a, **kw):
+            stats = super().__call__(*a, **kw)
+            stats["fanart_auth_failed"] = True
+            return stats
+    outcome, _, _ = _run(Scope(7, None, "Lost"), AuthScan(), [_episode(1)])
+    assert outcome.fanart_auth_failed is True
+    outcome, _, _ = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)])
+    assert outcome.fanart_auth_failed is False
+
+
 def test_tvdb_rejection_is_part_of_the_outcome():
     class AuthScan(FakeScan):
         def __call__(self, *a, **kw):
@@ -590,6 +602,16 @@ def test_preparation_shows_the_real_count_and_honours_stop():
     assert seen == {"total": 2, "current": "Preparing IMDb ratings"}
     assert settings["imdb_ready"] is True
     assert outcome.stopped is True and scan.calls == []
+
+
+@pytest.mark.parametrize("key, text", [("mine", "#32742 {}"), ("", "#32743 {}")])
+def test_flow_reports_a_fanart_rejection(flow, monkeypatch, key, text):
+    home, notes, released, state = flow
+    monkeypatch.setattr(refresh, "_load_settings",
+                        lambda: {"tmdb_api_key": "k", "fanart_client_key": key})
+    state["outcome"] = refresh.RefreshOutcome(fanart_auth_failed=True)
+    refresh.open_refresh("tvshow", 7)
+    assert notes == ["#32351 Lost", text]
 
 
 def test_flow_reports_a_tvdb_rejection(flow):

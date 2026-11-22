@@ -39,6 +39,8 @@ from resources.lib.service.daemon import (
     _get_sources_config_path,
     _load_settings,
     _prepare_imdb_ratings,
+    fanart_auth_failed,
+    fanart_auth_string,
     tvdb_auth_failed,
 )
 from resources.lib.service.lock import (
@@ -218,6 +220,8 @@ class RefreshOutcome:
     aborted: bool = False
     # TheTVDB rejected the add-on's credentials during the refresh.
     tvdb_auth_failed: bool = False
+    # fanart.tv rejected the key during the refresh.
+    fanart_auth_failed: bool = False
     # TMDB answered at least once: the key works.
     tmdb_answered: bool = False
 
@@ -347,6 +351,7 @@ def run_refresh(
         could_not_finish=not shutdown and any(s.get("aborted") for s in passes),
         aborted=shutdown,
         tvdb_auth_failed=tvdb_auth_failed(passes),
+        fanart_auth_failed=fanart_auth_failed(passes),
         tmdb_answered=any(s.get("tmdb_answered") for s in passes),
     )
     log.info("Refresh finished", event="refresh.finish", tvshowid=scope.tvshowid,
@@ -520,6 +525,9 @@ def open_refresh(dbtype: str, dbid: int) -> None:
                 notify(progress.toast(scope.title, outcome.stopped, outcome.could_not_finish))
                 if outcome.tvdb_auth_failed:
                     notify(lang(32352))  # TheTVDB rejected the credentials
+                if outcome.fanart_auth_failed:
+                    notify(lang(fanart_auth_string(
+                        bool(settings.get("fanart_client_key")))))
     finally:
         home.clearProperty(_RUNNING_SHOW)
         home.clearProperty(_REOPEN)

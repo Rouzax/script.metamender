@@ -262,6 +262,18 @@ def test_update_now_tvdb_auth_failure_notified(update_patched, monkeypatch):
     assert "s32341" not in notified
 
 
+@pytest.mark.parametrize("key, text", [("mine", "s32742"), ("", "s32743")])
+def test_update_now_fanart_auth_failure_names_the_key_in_use(
+        update_patched, monkeypatch, key, text):
+    monkeypatch.setattr(actions, "lang", lambda i: "s{}".format(i))
+    monkeypatch.setattr(actions, "_load_settings", lambda: {
+        "tmdb_api_key": "key", "rate_limit": 0.0, "fanart_client_key": key})
+    update_patched["run_scan"].return_value = {"updated": 0, "fanart_auth_failed": True}
+    actions.update_now("movie", "7")
+    notified = [c.args[0] for c in update_patched["notify"].call_args_list]
+    assert notified.count(text) == 1
+
+
 def test_update_now_opens_wizard_before_setup(update_patched, monkeypatch):
     monkeypatch.setattr(actions, "is_setup_complete", MagicMock(return_value=False))
     actions.update_now("movie", "7")
