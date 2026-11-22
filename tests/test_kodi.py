@@ -9,10 +9,11 @@ import pytest
 from resources.lib.data.kodi import (
     get_all_items,
     get_item_by_id,
+    flatten_art,
     update_item,
     _build_properties,
 )
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 
 
 def test_get_all_movies(kodi_stubs):
@@ -332,3 +333,67 @@ def test_get_episode_show_id(kodi_stubs):
     kodi_stubs["xbmc"].executeJSONRPC = _answers({"VideoLibrary.GetEpisodeDetails": {
         "result": {"episodedetails": {"episodeid": 100, "tvshowid": 7}}}})
     assert get_episode_show_id(100) == 7
+
+
+def test_build_properties_season_has_no_file_or_uniqueid():
+    assert _build_properties(SEASON) == [
+        "season", "showtitle", "tvshowid", "art", "title",
+    ]
+
+
+@pytest.mark.parametrize("media_type", [MOVIE, TVSHOW, EPISODE])
+def test_build_properties_request_art(media_type):
+    assert "art" in _build_properties(media_type)
+
+
+def test_flatten_art_unwraps_poster():
+    item = {"art": {"poster": "image://https%3a%2f%2fa%2fb.jpg/", "fanart": "x"}}
+    assert flatten_art(item, MOVIE)["poster"] == "https://a/b.jpg"
+    assert flatten_art({}, MOVIE)["poster"] == ""
+    assert flatten_art({"art": {"thumb": "t"}}, EPISODE)["thumb"] == "t"
+    assert "thumb" not in flatten_art({"art": {"thumb": "t"}}, MOVIE)
+
+
+def test_get_all_items_flattens_art(kodi_stubs):
+    response = {"result": {"movies": [
+        {"movieid": 1, "art": {"poster": "image://https%3a%2f%2fa%2fb.jpg/"}},
+    ]}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps(response))
+    assert get_all_items(MOVIE)[0]["poster"] == "https://a/b.jpg"
+
+
+def test_get_item_by_id_flattens_art(kodi_stubs):
+    response = {"result": {"seasondetails": {
+        "seasonid": 5, "art": {"poster": "image://https%3a%2f%2fa%2fb.jpg/"},
+    }}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps(response))
+    assert get_item_by_id(SEASON, 5)["poster"] == "https://a/b.jpg"
+
+
+def _sent_params(kodi_stubs):
+    return json.loads(kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0])["params"]
+
+
+def test_update_item_sends_art_param(kodi_stubs):
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps({"result": "OK"}))
+    assert update_item(1, MOVIE, "x", poster="https://a/b.jpg", plot="p") is True
+    assert _sent_params(kodi_stubs) == {
+        "movieid": 1, "plot": "p", "art": {"poster": "https://a/b.jpg"},
+    }
+
+
+def test_update_item_empty_art_sends_null(kodi_stubs):
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps({"result": "OK"}))
+    update_item(2, EPISODE, "x", thumb="")
+    assert _sent_params(kodi_stubs) == {"episodeid": 2, "art": {"thumb": None}}
+
+
+def test_get_all_seasons_drops_all_seasons_entry(kodi_stubs):
+    response = {"result": {"seasons": [
+        {"seasonid": -1, "season": -1, "art": {}},
+        {"seasonid": 7, "season": 1, "art": {"poster": "p"}},
+    ]}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps(response))
+    items = get_all_items(SEASON, tvshowid=3)
+    assert [i["seasonid"] for i in items] == [7]
+    assert items[0]["poster"] == "p"

@@ -91,7 +91,7 @@ def test_rows_grouped_like_the_mockup():
     assert [(r.key, r.group) for r in rows[1:]] == [
         ("plot", "updated"), ("rating", "updated"), ("runtime", "updated"),
         ("firstaired", "left"), ("title", "left"),
-        ("director", "waiting"), ("writer", "waiting"),
+        ("director", "waiting"), ("thumb", "waiting"), ("writer", "waiting"),
     ]
     hints = {r.key: r.hint for r in rows}
     assert hints["ids"] == "matched by number"

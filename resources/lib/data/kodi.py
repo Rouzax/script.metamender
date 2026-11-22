@@ -18,7 +18,8 @@ from typing import Any
 
 import xbmc
 
-from resources.lib.data.media_types import MediaType
+from resources.lib.data.media_types import SEASON, MediaType
+from resources.lib.engine.art import ART_FIELDS, unwrap
 from resources.lib.utils import KodiQueryError, get_logger, log_timing
 
 log = get_logger('kodi')
@@ -44,18 +45,39 @@ _EXTRA_PROPERTIES = {
     ],
 }
 
+# Kodi has no rating, uniqueid or date on a season.
+_SEASON_PROPERTIES = ["season", "showtitle", "tvshowid", "art", "title"]
+
+# Kodi's "All seasons" pseudo-entry.
+_ALL_SEASONS = -1
+
 
 def _build_properties(media_type: MediaType) -> list[str]:
     """Build the JSON-RPC property list for a media type.
 
     Combines the base properties with media-type-specific extras
-    and the date field (premiered or firstaired).
+    the date field (premiered or firstaired) and the art map. Seasons get
+    their own short list.
     """
+    if media_type is SEASON:
+        return list(_SEASON_PROPERTIES)
     props = list(_BASE_PROPERTIES)
     props.append(media_type.date_field)
-    extras = _EXTRA_PROPERTIES.get(media_type.name, [])
-    props.extend(extras)
+    props.append("art")
+    props.extend(_EXTRA_PROPERTIES.get(media_type.name, []))
     return props
+
+
+def flatten_art(item: dict[str, Any], media_type: MediaType) -> dict[str, Any]:
+    """Expose the art slots MetaMender manages as plain top-level fields.
+
+    Kodi returns art as a map of ``image://`` wrapped values; the engine reads
+    the unwrapped URL from ``item["poster"]`` / ``item["thumb"]``.
+    """
+    art = item.get("art") or {}
+    for field in media_type.backfill_fields & ART_FIELDS:
+        item[field] = unwrap(art.get(field))
+    return item
 
 
 def get_all_items(
@@ -123,6 +145,11 @@ def get_all_items(
 
     result = data.get("result", {})
     items = result.get(media_type.kodi_result_key, [])
+    if media_type is SEASON:
+        items = [i for i in items if i.get("season") != _ALL_SEASONS]
+    if not ids_only:
+        for item in items:
+            flatten_art(item, media_type)
 
     total = result.get("limits", {}).get("total", 0)
     if total >= 99999:
@@ -200,7 +227,7 @@ def get_item_by_id(
     detail = data.get("result", {}).get(media_type.kodi_detail_key)
     if not detail:
         return None
-    return detail
+    return flatten_art(detail, media_type)
 
 
 def _details(method: str, id_field: str, item_id: int, key: str,
@@ -254,8 +281,12 @@ def update_item(
     Returns:
         True on success, False on failure.
     """
-    params = {media_type.kodi_id_field: item_id}
+    params: dict[str, Any] = {media_type.kodi_id_field: item_id}
+    art = {f: (fields.pop(f) or None) for f in ART_FIELDS & fields.keys()}
     params.update(fields)
+    if art:
+        # An empty string clears the slot: Kodi removes a key set to null.
+        params["art"] = art
 
     query = {
         "jsonrpc": "2.0",
