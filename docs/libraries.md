@@ -195,6 +195,8 @@ setting uses.
 
 Shown while **Posters** is ticked.
 
+![The Posters group on the page of the TV Shows library](screenshots/setup/setup-library-page-posters.png)
+
 **Poster source**
 :   The site MetaMender takes movie, show and season posters from first:
     **TMDB** (the default) or **fanart.tv**. Choose fanart.tv if you prefer
