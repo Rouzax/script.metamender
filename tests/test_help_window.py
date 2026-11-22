@@ -28,21 +28,21 @@ def _build_art():
     return module
 
 
-def test_manual_is_the_first_setting_and_an_action():
+def test_help_is_the_first_setting_and_an_action():
     root = ET.parse(_ROOT / "resources/settings.xml").getroot()
     first = root.find("section/category/group/setting")
-    assert first is not None and first.get("id") == "manual"
+    assert first is not None and first.get("id") == "help"
     assert first.get("type") == "action"
-    assert (first.findtext("data") or "").strip() == "RunScript(script.metamender,manual)"
+    assert (first.findtext("data") or "").strip() == "RunScript(script.metamender,help)"
     assert first.find("control[@type='button']/close") is not None
 
 
-def test_manual_argument_opens_the_help_window(monkeypatch):
+def test_help_argument_opens_the_help_window(monkeypatch):
     show = MagicMock()
     run = MagicMock()
     monkeypatch.setattr(entry, "show_help", show)
     monkeypatch.setattr(entry, "run", run)
-    entry.main(["manual"])
+    entry.main(["help"])
     show.assert_called_once_with()
     run.assert_not_called()
 

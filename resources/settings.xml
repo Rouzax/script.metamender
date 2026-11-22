@@ -6,8 +6,8 @@
             <!-- First, and not a text field, so the dialog opens on it and Left
                  reaches the category list in one press. -->
             <group id="help">
-                <setting id="manual" type="action" label="32737" help="32738">
-                    <data>RunScript(script.metamender,manual)</data>
+                <setting id="help" type="action" label="32737" help="32738">
+                    <data>RunScript(script.metamender,help)</data>
                     <control type="button" format="action">
                         <close>true</close>
                     </control>

@@ -28,7 +28,7 @@ def main(argv: list[str]) -> None:
         update_now(argv[1] if len(argv) > 1 else "", argv[2] if len(argv) > 2 else "")
     elif action == "details":
         open_details(argv[1] if len(argv) > 1 else "", argv[2] if len(argv) > 2 else "")
-    elif action == "manual":
+    elif action == "help":
         show_help()
     elif action == WIZARD:
         open_setup(WIZARD)
