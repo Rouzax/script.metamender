@@ -241,3 +241,52 @@ def test_manual_without_libraries_scans_nothing(monkeypatch, patched):
     patched["run_scan"].assert_not_called()
     patched["tracker"].begin_cycle.assert_not_called()
     manual.release_scan_lock.assert_called_once_with()
+
+
+
+@pytest.fixture
+def stop_window(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from resources.lib.constants import STOP_SCAN_PROPERTY  # noqa: F401
+    from resources.lib.service import stopscan
+    from tests.test_stop_scan import _Window
+    win = _Window()
+    monkeypatch.setattr(stopscan.xbmcgui, "Window", lambda _id: win)
+    return win
+
+
+def test_manual_scan_ends_after_a_stop_and_leaves_the_cycle_open(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock], stop_window: Any
+) -> None:
+    from resources.lib.constants import STOP_SCAN_PROPERTY
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    # The request lands after the movie pass's last per-item check.
+    def scan_pass(**kw):
+        stop_window.setProperty(STOP_SCAN_PROPERTY, "1")
+        return {"updated": 0}
+    patched["run_scan"].side_effect = scan_pass
+
+    manual.run()
+
+    assert [c.kwargs["media_type"] for c in patched["run_scan"].call_args_list] == [MOVIE]
+    patched["tracker"].get_show_id_map.assert_not_called()
+    patched["tracker"].mark_cycle_complete.assert_not_called()
+
+
+def test_manual_scan_clears_a_stale_stop_when_it_starts_and_ends(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock], stop_window: Any
+) -> None:
+    from resources.lib.constants import STOP_SCAN_PROPERTY
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    stop_window.setProperty(STOP_SCAN_PROPERTY, "1")
+    seen = []
+    def scan_pass(**kw):
+        seen.append(stop_window.getProperty(STOP_SCAN_PROPERTY))
+        if kw["media_type"] is TVSHOW:
+            stop_window.setProperty(STOP_SCAN_PROPERTY, "1")
+        return {"updated": 0}
+    patched["run_scan"].side_effect = scan_pass
+
+    manual.run()
+
+    assert seen == ["", ""]
+    assert stop_window.getProperty(STOP_SCAN_PROPERTY) == ""

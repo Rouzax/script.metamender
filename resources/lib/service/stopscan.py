@@ -37,3 +37,13 @@ def stop_requested() -> bool:
 def user_stopped(all_stats: Iterable[dict[str, Any]]) -> bool:
     """Whether a pass of the cycle ended on the user's Stop."""
     return any(s.get("stopped") for s in all_stats)
+
+
+def mark_stopped(all_stats: dict[str, dict[str, Any]]) -> None:
+    """Record a stop that arrived between or after a pass on the last pass
+    that ran, so the cycle counts as cut short (left open, like a shutdown)
+    even though no per-item check saw the request."""
+    if all_stats:
+        last = all_stats[next(reversed(all_stats))]
+        last["stopped"] = True
+        last["aborted"] = True

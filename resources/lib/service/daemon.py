@@ -95,7 +95,12 @@ from resources.lib.service.lock import (
     clear_file_lock,
     release_scan_lock,
 )
-from resources.lib.service.stopscan import clear_stop, stop_requested, user_stopped
+from resources.lib.service.stopscan import (
+    clear_stop,
+    mark_stopped,
+    stop_requested,
+    user_stopped,
+)
 from resources.lib.ui.attention_window import show_attention_window
 from resources.lib.utils import (
     ApiKeyError,
@@ -459,6 +464,7 @@ def _run_scan(
         )
         all_stats[media_type.name] = stats
         if stop_requested():
+            mark_stopped(all_stats)
             return all_stats
 
     show_id_map = tracker.get_show_id_map()
@@ -484,6 +490,7 @@ def _run_scan(
             show_cache=show_cache,
         )
         if stop_requested():
+            mark_stopped(all_stats)
             break
 
     return all_stats
