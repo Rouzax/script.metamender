@@ -196,12 +196,18 @@ def demo_libraries() -> list[Library]:
 def setup_state(scene: dict[str, Any]) -> SetupState:
     """The setup state a setup scene opens with: the demo libraries, as
     Kodi lists them and as sources.json holds them, and the page of the
-    scene's "library" (a label) when it names one."""
+    scene's "library" (a label) when it names one. The scene's "toggles"
+    replace that library's, so one scene can show a group without changing
+    the library every other scene shows."""
     libraries = demo_libraries()
+    label = scene.get("library")
+    toggles = scene.get("toggles")
+    if label and toggles is not None:
+        libraries = [replace(lib, toggles=frozenset(toggles)) if lib.label == label else lib
+                     for lib in libraries]
     found = [{"path": lib.path, "label": lib.label} for lib in libraries]
     state = initial_state({"tmdb_api_key": DEMO_KEY}, LibraryConfig(libraries), found,
                           DEMO_UI_LANGUAGE)
-    label = scene.get("library")
     if label:
         state.open_library = next(lib.path for lib in libraries if lib.label == label)
     return state
