@@ -97,10 +97,10 @@
             <control type="grouplist" id="30">
                 <left>50</left><top>150</top><width>1160</width><height>590</height>
                 <orientation>vertical</orientation>
-                <itemgap>48</itemgap>
+                <itemgap>40</itemgap>
                 <usecontrolcoords>true</usecontrolcoords>
                 <control type="textbox">
-                    <left>30</left><top>0</top><width>1080</width><height min="36" max="116">auto</height>
+                    <left>30</left><top>0</top><width>1080</width><height min="36" max="126">auto</height>
                     <align>center</align>
                     <font>font12</font>
                     <textcolor>FFA8AEB8</textcolor>
