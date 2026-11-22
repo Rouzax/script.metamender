@@ -22,9 +22,13 @@ bottom left of the settings screen) to **Advanced**; they are marked
 ### fanart.tv
 
 **Personal fanart.tv API key**
-:   Optional. A free personal key from fanart.tv (create an account on
-    fanart.tv and copy the key from your account page) makes new images
-    reach you sooner. MetaMender works without it.
+:   Optional. MetaMender asks fanart.tv for posters with its own key; with
+    your own personal key as well, new images reach you sooner. fanart.tv
+    gives you a personal key with an account on its website. MetaMender works
+    without it, and it only matters for libraries with **Posters** ticked
+    (see [Posters](libraries.md#posters)). If fanart.tv rejects the key,
+    posters that need fanart.tv wait, with nothing changed, until it works
+    again; everything else carries on.
 
 ## Backfill
 

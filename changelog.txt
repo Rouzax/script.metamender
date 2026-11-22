@@ -1,6 +1,33 @@
 MetaMender Changelog
 ====================
 
+v1.3.0 (unreleased)
+-------------------
+New Features:
+  - Posters, per library: with Posters ticked, MetaMender fills empty
+    movie, show and season posters and refreshes posters from TMDB or
+    fanart.tv while a title is new. It picks a poster in the library's
+    language first (from the chosen Poster source, then the other site),
+    then the fallback language, then a poster without text; the best
+    voted TMDB poster or most liked fanart.tv poster wins, and a current
+    poster stays unless a better one clearly leads. A poster without
+    votes or likes never replaces one that has them.
+  - Episode thumbs, per library: with Episode thumbs ticked, a thumb Kodi
+    grabbed from the video (washed out on HDR files), a broken link or an
+    empty thumb gets TMDB's episode still, or TheTVDB's episode image when
+    TMDB has none.
+  - Local image files (such as those Artwork Dump saved), posters from
+    other websites, art from an NFO file and a poster changed outside
+    MetaMender are left alone. A poster changed outside MetaMender is
+    locked; Details shows why and can unlock it. MetaMender writes no
+    image files.
+  - Poster source per library: TMDB (the default) or fanart.tv.
+  - Optional Personal fanart.tv API key setting.
+  - Seasons have a Details window, and Update now on a season or show
+    refreshes the season posters too.
+  - Both ticks are off for every library, including libraries set up
+    before this version.
+
 v1.2.0 (2026-11-22)
 -------------------
 New Features:

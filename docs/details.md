@@ -1,15 +1,15 @@
 # The Details window
 
 The Details window answers "why does this field look like this?" for one movie,
-TV show or episode: where each value came from, what it replaced, when
+TV show, season or episode: where each value came from, what it replaced, when
 MetaMender last checked it and when it checks again, and why it left a field
 alone. Opening it changes nothing.
 
 ## Opening it
 
-Open the context menu of a movie, show or episode in your library and choose
-**MetaMender > Details**. (Seasons have no fields of their own, so they have no
-Details.)
+Open the context menu of a movie, show, season or episode in your library and
+choose **MetaMender > Details**. A season has one field, its poster, so its
+window is short; the season's **Ids** are its show's.
 
 ![The Details window for an episode](screenshots/details/details-plot-updated.png)
 
@@ -23,8 +23,8 @@ list with the remote, and right to reach the buttons.
 The first entry is **Ids**; below it the fields are grouped by what happened:
 
 - **Updated by MetaMender**: MetaMender wrote this value. The hint on the
-  right says where it came from (TMDB, TheTVDB, IMDb, or a country's age
-  rating site).
+  right says where it came from (TMDB, TheTVDB, IMDb, fanart.tv, or a
+  country's age rating site).
 - **Left as it is**: MetaMender looked and left the value alone. The hint says
   why in one word, for example *scraper* (the value your scraper set),
   *NFO*, *settled* or *locked* (with a padlock).
@@ -60,18 +60,46 @@ Select a field to see on the right:
 | You locked this field, so MetaMender leaves it alone. | See [Restore original and the lock](#restore-original-and-the-lock). |
 | Changed since MetaMender's update (your edit or a re-scrape). | Someone or something changed the value after MetaMender wrote it. |
 | Kodi lost MetaMender's value (a refresh or a re-scrape), so the next scan fills it again. | The field was emptied, for example by refreshing the item in Kodi. |
+| Local image file, left as it is | A poster or thumb that is an image file, for example one Artwork Dump saved. MetaMender never replaces those. |
+| Image from another source, left as it is | An episode thumb that is already an image on a website, or a poster from a website other than TMDB or fanart.tv. |
+| Changed outside MetaMender, left as it is | The poster changed after MetaMender first saw it, so you or something else chose it. It is locked; see [Posters and episode thumbs](#posters-and-episode-thumbs). |
 
 A field that is switched off for the item's library (for example Credits) says so
 instead of promising a next check.
 
 ![A field left alone because an NFO file sets it](screenshots/details/details-plot-protected.png)
 
+## Posters and episode thumbs
+
+A poster or episode thumb shows as a field like any other, but its value is
+a description instead of a link: **Image from TMDB**, **Image from
+fanart.tv**, **Image from another website**, **Local image file**, **Frame
+grab from the video**, **Broken link** or **No image**.
+
+- **From** names the site and, for a poster, its language, for example
+  "fanart.tv, in Dutch". A poster without text also shows "in the fallback
+  language": it is checked again monthly for a while, so a poster in the
+  library's language can replace it.
+- **Replaced** says what was there before: *empty*, *was a frame grab*, *was
+  a broken link*, or *your scraper's value* for an earlier poster.
+
+**Restore original** puts the earlier poster or thumb back and locks the
+field, as for text.
+
+A poster that changed outside MetaMender, by your hand, another add-on or a
+refresh in Kodi, is locked with a padlock and the reason **Changed outside
+MetaMender, left as it is**. **Let MetaMender update this again** unlocks it:
+at the next scan MetaMender treats the poster Kodi holds as the one it first
+saw, and may then replace it with a better one. See
+[Posters and episode thumbs](libraries.md#posters-and-episode-thumbs) for
+what MetaMender changes and what it leaves alone.
+
 ## Ids
 
 ![The Ids entry](screenshots/details/details-ids.png)
 
 The **Ids** entry lists the item's TMDB, TheTVDB and IMDb ids and how each was
-found:
+found (for a season, its show's TMDB and TheTVDB ids):
 
 - **from Kodi**: your scraper stored it.
 - **found by MetaMender** or **from TMDB's id list**: MetaMender looked it up.

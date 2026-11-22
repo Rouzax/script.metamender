@@ -43,8 +43,11 @@ Some exceptions:
   country) are settled after one answer: they do not change. An age rating
   MetaMender had to work out from another country's rating is checked again
   every month for about a year, in case the real one appears.
-- **A text from the fallback language** is checked again every month for about
-  a year, so a version in your own language replaces it when one appears.
+- **A text from the fallback language**, and a poster in the fallback
+  language or without text, is checked again every month for about a year, so
+  a version in your own language replaces it when one appears.
+- **A season's poster** follows the season's age: the air date of its first
+  episode.
 - **A field MetaMender could not check** (a site did not answer) is tried
   again at the next scan; a failed check never counts as a check.
 
@@ -86,3 +89,9 @@ back for the same problem, but does for a new one.
 
 If TheTVDB stops accepting MetaMender's own key, a notification says so once.
 Titles and plots from TheTVDB are paused until it works again; TMDB carries on.
+
+If fanart.tv rejects its key (MetaMender's or your
+[personal key](settings.md#fanarttv)) or cannot be reached, posters whose
+choice depends on fanart.tv wait, with nothing changed, and are tried again at
+the next scan; everything else carries on. There is no notification; Kodi's
+[log](troubleshooting.md#reporting-a-problem) records it.

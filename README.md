@@ -16,6 +16,11 @@ background:
   votes come in, instead of staying at its first-week number forever.
 - **Age ratings you can trust.** Movies and shows get their age rating in
   your own country's system, for ten countries.
+- **Posters and episode thumbs, if you want them.** Washed-out frame grabs
+  and broken episode thumbs get the official still (TMDB, else TheTVDB), and
+  movie, show and season posters are filled and refreshed while a title is
+  new, in your library's language, from TMDB or fanart.tv. Local image files
+  and posters you chose stay.
 
 It respects what is yours (items with an NFO file keep their values, and a
 replaced value can be put back), and its Details window shows, for any item,
@@ -43,6 +48,14 @@ Requires Kodi 21 (Omega) or Kodi 22 (Piers). Full instructions:
 **[rouzax.github.io/script.metamender](https://rouzax.github.io/script.metamender/)**,
 including [where your data comes from](https://rouzax.github.io/script.metamender/docs/where-data-comes-from/)
 and [troubleshooting](https://rouzax.github.io/script.metamender/docs/troubleshooting/).
+
+## Data sources
+
+Metadata comes from [TMDB](https://www.themoviedb.org) and
+[TheTVDB](https://thetvdb.com), ratings also from IMDb's public data. Posters
+come from TMDB and [fanart.tv](https://fanart.tv), episode thumbs from TMDB
+and TheTVDB. See
+[where your data comes from](https://rouzax.github.io/script.metamender/docs/where-data-comes-from/#image-credits).
 
 ## Support
 

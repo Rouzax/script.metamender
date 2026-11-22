@@ -26,12 +26,19 @@ your own country.
     official rating sites, or converted from neighbouring countries. Useful
     when you decide what the kids may watch. [Age ratings](age-ratings.md)
 
+**Posters and episode thumbs, if you want them.**
+:   Washed-out frame grabs and broken episode thumbs get the official episode
+    still. Empty posters of movies, shows and seasons are filled, and early
+    placeholder posters are replaced while a title is new, in your library's
+    language, from TMDB or fanart.tv. Local image files and posters you chose
+    stay. [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs)
+
 ## Highlights
 
 - **Respects what is yours.** Items with an NFO file keep their values, and
   a value MetaMender replaced can be put back from the Details window.
   [The Details window](details.md)
-- **Shows its work.** For any movie, show or episode, the Details window says
+- **Shows its work.** For any movie, show, season or episode, the Details window says
   where each value came from and why a field was left alone.
   [The Details window](details.md)
 - **Careful with episodes.** Episodes from scrapers that store no ids, such as
@@ -61,7 +68,7 @@ New here? [Install](install.md) MetaMender, then walk through the
 |---|---|
 | [Install](install.md) | What you need, the official Kodi repository, the Rouzax repository, a zip file |
 | [Setup](setup.md) | The TMDB key, the libraries MetaMender looks after, the summary |
-| [Libraries](libraries.md) | Each library's choices: language, what to fill, which rating to show, where plots and titles come from, original titles, the age rating country |
+| [Libraries](libraries.md) | Each library's choices: language, what to fill, which rating to show, where plots and titles come from, original titles, posters and episode thumbs, the age rating country |
 | [Scans](scans.md) | When MetaMender scans, how often a field is checked, what you see |
 | [Update now](update-now.md) | Refreshing one item, show or season right away |
 | [The Details window](details.md) | Why a field looks the way it does; Restore original and the lock |

@@ -12,8 +12,8 @@ In your library, open the context menu of a movie, TV show, season or episode
 
 ![The MetaMender submenu in the context menu](screenshots/library/context-submenu.png)
 
-The **MetaMender** submenu also has **Details** for movies, shows and episodes;
-see [the Details window](details.md). Right after installing MetaMender the
+The **MetaMender** submenu also has **Details**; see
+[the Details window](details.md). Right after installing MetaMender the
 submenu is not there yet; it appears once Kodi has been restarted.
 
 ## What it does
@@ -27,13 +27,18 @@ item's normal refresh schedule: the next scheduled check stays where it was.
 - **A movie or an episode** is refreshed at once. A notification says
   **Updated**, **No changes**, or **Could not check now** when a site did not
   answer (the item is then checked again on its normal schedule).
-- **A TV show** refreshes the show itself and every episode in it.
-- **A season** refreshes every episode of that season.
+- **A TV show** refreshes the show itself, its season posters and every
+  episode in it.
+- **A season** refreshes its poster and every episode of that season.
+
+Season posters are only refreshed in a library with **Posters** ticked, and
+only for a show whose TMDB id MetaMender knows; a season of a show without
+one is left as it is.
 
 ## Following a show or season
 
-For a show or a season a window shows the progress: the episode it is working
-on, how many are done, an estimate of the time left, and how many episodes were
+For a show or a season a window shows the progress: the season poster or
+episode it is working on, how many are done, an estimate of the time left, and how many episodes were
 updated, unchanged, or could not be checked.
 
 ![The Update now progress window](screenshots/update-now/update-now-progress.png)

@@ -4,7 +4,7 @@ This page explains where MetaMender gets each value, where it puts it, and
 what it never touches. The short version is the picture; the table and the
 examples below fill in the details.
 
-![MetaMender reads your Kodi library, TMDB, TheTVDB, IMDb's ratings, the age rating sites and whether an item has an NFO file, and writes only to your Kodi library and its own records](assets/data-flow.svg)
+![MetaMender reads your Kodi library, TMDB, TheTVDB, fanart.tv, IMDb's ratings, the age rating sites and whether an item has an NFO file, and writes only to your Kodi library and its own records](assets/data-flow.svg)
 
 ## The big picture
 
@@ -14,7 +14,10 @@ examples below fill in the details.
   (TMDB, TheTVDB, IMDb).
 - **TMDB** (The Movie Database): most fields, in the language of the library
   an item is in.
-- **TheTVDB**: TV show and episode titles and plots.
+- **TheTVDB**: TV show and episode titles and plots, and episode images
+  when TMDB has no still for an episode.
+- **fanart.tv**: movie, show and season posters, for libraries with
+  **Posters** ticked (see [Image credits](#image-credits)).
 - **IMDb's ratings**, from IMDb's public data, which the IMDb Ratings module
   downloads and keeps up to date on your device.
 - **The FSK, BBFC and Medieraadet websites**, for age ratings.
@@ -27,13 +30,17 @@ examples below fill in the details.
   you ticked for that library (see [What to fill](libraries.md#what-to-fill)).
 - **Its own records**, kept in the add-on's data folder: the ids it found,
   when it checked each field and when the next check is due, the value a field
-  had before MetaMender first changed it, and the fields you locked.
+  had before MetaMender first changed it, the poster an item had when
+  MetaMender first saw it, and the fields you locked.
 
 **MetaMender never:**
 
 - changes or creates NFO files, or changes your scraper or its settings;
-- sends anything about your library to TMDB, TheTVDB, IMDb or the rating
-  sites, other than the lookups themselves (an id or a title to look up);
+- downloads images or writes image files: for posters and thumbs it only
+  changes which image Kodi points at, and Kodi fetches the image;
+- sends anything about your library to TMDB, TheTVDB, fanart.tv, IMDb or the
+  rating sites, other than the lookups themselves (an id or a title to look
+  up);
 - adds ids it found to Kodi: they stay in its own records;
 - overwrites a value of an item that has an NFO file (it only fills empty
   fields there), or a field you locked.
@@ -59,6 +66,8 @@ page.
 | Runtime | Movies, episodes | TMDB | Replaces a different value. |
 | First aired | Episodes | TMDB | Replaces a different date. |
 | Trailer | Movies | TMDB | Replaces a different link. |
+| Poster | Movies, shows, seasons | TMDB and fanart.tv (order: **Poster source**): library language, then fallback, then a poster without text; see [Posters](libraries.md#posters) | Fills an empty or broken poster. Replaces a poster from TMDB or fanart.tv when a better one clearly leads; never a local file, a poster from another website, or one changed outside MetaMender. See [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs). |
+| Episode thumb | Episodes | TMDB's episode still, then TheTVDB's episode image | Replaces a frame grab, a broken link or an empty thumb. A local file or an image from a website stays. |
 | Age rating | Movies, shows | TMDB for your country, your country's rating site, then other countries converted ([details](age-ratings.md#where-a-rating-comes-from)) | Fills an empty rating; replaces a rating from another country's system (switch off with **Replace other countries' ratings**). |
 
 Every row has the same three exceptions:
@@ -67,14 +76,35 @@ Every row has the same three exceptions:
   MetaMender filled there is its own, so it keeps refreshing it.
 - **In a folder without a language** (only possible by editing
   MetaMender's `sources.json` file), the text fields (plot, titles, tagline,
-  genre) are only filled when empty, because MetaMender cannot tell which
-  language the existing text is in. Again, what MetaMender filled it keeps
-  refreshing.
+  genre) and the poster are only filled when empty, because MetaMender cannot
+  tell which language the existing text is in. Again, what MetaMender filled
+  it keeps refreshing.
 - **A locked field** is never written.
 
 "Replaces a different value" only happens while a field is not yet settled; see
 [how often a field is checked](scans.md#how-often-a-field-is-checked). Once
 settled, MetaMender does not look at it again.
+
+## Image credits
+
+MetaMender's posters and episode thumbs come from these sites, and the
+Details window names the site each one came from:
+
+- **[TMDB](https://www.themoviedb.org)**: movie, show and season posters, and
+  episode stills.
+- **[fanart.tv](https://fanart.tv)**: movie, show and season posters, for
+  libraries with **Posters** ticked. MetaMender asks fanart.tv only for an
+  item whose poster is due for a check and whose choice could depend on it,
+  and asks once per show and scan for the show and all its seasons.
+- **[TheTVDB](https://thetvdb.com)**: episode images, for an episode TMDB has
+  no still for.
+
+The images stay on these sites: Kodi downloads each one when it shows it.
+
+MetaMender uses its own fanart.tv key. A personal key of your own is
+optional: see [Personal fanart.tv API key](settings.md#fanarttv). When
+fanart.tv rejects the key or cannot be reached, posters that need it wait
+until it works again, with nothing changed, and everything else carries on.
 
 ## How MetaMender knows which item it is
 
