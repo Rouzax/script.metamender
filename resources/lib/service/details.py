@@ -294,17 +294,19 @@ def _read_identity(
 
 def _enrich_season(item: dict[str, Any]) -> dict[int, str]:
     """Give a season what Kodi does not: its show's folder (which places it in
-    a library) and TMDB id, from the tracker's show map as the scan does.
-    Returns that map."""
+    a library) and TMDB and TheTVDB ids, from the tracker's show maps as the
+    scan does (kodi.get_seasons_for_scan). Returns the TMDB map."""
     tracker = TrackerDB(_get_db_path())
     try:
         show_id_map = tracker.get_show_id_map()
+        show_tvdb_map = tracker.get_show_tvdb_map()
     finally:
         tracker.close()
     show_id = int(item.get("tvshowid", -1))
     show = kodi.get_item_by_id(TVSHOW, show_id)
     item["file"] = str((show or {}).get("file") or "")
     item["show_tmdb_id"] = show_id_map.get(show_id)
+    item["show_tvdb_id"] = show_tvdb_map.get(show_id)
     return show_id_map
 
 

@@ -773,11 +773,11 @@ SEASON_ITEM = {
 }
 
 
-def _open_season(opened, monkeypatch, *, show_tmdb="250000"):
+def _open_season(opened, monkeypatch, *, show_tmdb="250000", show_tvdb=None):
     opened["settings"]["toggles"] = frozenset({"posters"})
     tracker = TrackerDB(opened["db_path"])
     tracker.upsert_item("tvshow", "tmdb:250000" if show_tmdb else "Het gouden uur", "Het gouden uur",
-                        kodi_id=5, tmdb_id=show_tmdb)
+                        kodi_id=5, tmdb_id=show_tmdb, tvdb_id=show_tvdb)
     tracker.commit()
     tracker.close()
     real = details.kodi.get_item_by_id
@@ -794,6 +794,12 @@ def test_details_opens_for_season(opened, monkeypatch):
     assert session.identity == "tmdb:250000/S02"
     ids = view.rows[0]
     assert ("TMDB", "250000") in [(n, t.split(",")[0]) for n, t in ids.lines]
+
+
+def test_details_of_an_unscanned_season_shows_its_show_tvdb_id(opened, monkeypatch):
+    _open_season(opened, monkeypatch, show_tvdb="81189")
+    _session, view = opened["shown"][0]
+    assert ("TheTVDB", "81189") in view.rows[0].lines
 
 
 def test_details_of_a_season_of_a_show_without_tmdb_id_has_no_fields(opened, monkeypatch):
