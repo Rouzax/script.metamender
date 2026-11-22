@@ -1566,3 +1566,7 @@ msgstr ""
 msgctxt "#32740"
 msgid "Scan the code with your phone, or open this address:"
 msgstr ""
+
+msgctxt "#32741"
+msgid "{}, without text"
+msgstr ""

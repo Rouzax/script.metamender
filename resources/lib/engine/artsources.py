@@ -12,7 +12,11 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from resources.lib.constants import FANART_API_KEY
-from resources.lib.engine.art import is_placeholder_art, pick_poster
+from resources.lib.engine.art import (
+    TEXTLESS_SOURCE_SUFFIX,
+    is_placeholder_art,
+    pick_poster,
+)
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome
 from resources.lib.engine.fetch import _Primary
 from resources.lib.engine.ids import _Ids
@@ -118,7 +122,8 @@ def resolve_art(
     folder_lang: str,
     fallback_lang: str,
 ) -> tuple[FieldOutcome, str | None]:
-    """The field's outcome and the provider of its value.
+    """The field's outcome and the provider of its value (a textless
+    poster's with art.TEXTLESS_SOURCE_SUFFIX).
 
     A poster needs TMDB's answer, whatever the poster source: TMDB's posters
     are always a candidate tier, so without them the pick could be wrong. No
@@ -141,4 +146,4 @@ def resolve_art(
     if pick is None:
         return _ANSWERED_EMPTY, None
     outcome = FieldOutcome(transient=False, value=pick.url, from_fallback=pick.from_fallback)
-    return outcome, pick.provider
+    return outcome, pick.provider + (TEXTLESS_SOURCE_SUFFIX if pick.textless else "")

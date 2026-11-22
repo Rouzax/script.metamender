@@ -1107,3 +1107,20 @@ def test_broken_tmdb_still_falls_through_to_tvdb(
     tracker.close()
 
     assert _written(mock_update, "thumb") == TVDB_IMAGE
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_textless_poster_source_records_it(mock_movie, mock_update, tmp_path, kodi_stubs):
+    textless = "https://image.tmdb.org/t/p/original/textless.jpg"
+    item = _movie("")
+    mock_movie.side_effect = _movie_fetch([_tmdb(textless, None)])
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert _written(mock_update, "poster") == textless
+    assert fs_map["poster"]["source"] == "tmdb:textless"
+    assert fs_map["poster"]["from_fallback"] == 1

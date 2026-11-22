@@ -558,6 +558,17 @@ def test_poster_from_text_has_language():
     assert dict(row.lines)["From"] == "TMDB"
 
 
+def test_poster_from_text_says_without_text_for_a_textless_poster():
+    for source, name in (("tmdb:textless", "TMDB"), ("fanart:textless", "fanart.tv")):
+        row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
+                        fs={"source": source, "from_fallback": 1},
+                        media_type=MOVIE, field="poster")
+        assert dict(row.lines)["From"] == name + ", without text"
+    row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
+                    fs={"from_fallback": 1}, media_type=MOVIE, field="poster")
+    assert dict(row.lines)["From"] == "TMDB, in the fallback language"
+
+
 @pytest.mark.parametrize("reason, text", [
     ("local_art", "Local image file, left as it is"),
     ("other_art", "Image from another source, left as it is"),

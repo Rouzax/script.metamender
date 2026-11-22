@@ -34,6 +34,7 @@ from resources.lib.engine.art import (
     EMPTY,
     FRAME_GRAB,
     LOCAL,
+    TEXTLESS_SOURCE_SUFFIX,
     WEB_FANART,
     WEB_OTHER,
     WEB_TMDB,
@@ -91,6 +92,8 @@ _SOURCE_NAMES = {
 }
 # "kodi" is a certification Kodi already held, which is the scraper's.
 _SCRAPER_SOURCE = "kodi"
+# "{}, without text": where a textless poster came from.
+_WITHOUT_TEXT = 32741
 
 # Short month names, January first; then "12 Nov 2026", "12 Nov" and the
 # separator between the header's two parts.
@@ -187,6 +190,7 @@ def _parse(iso: str | None) -> date | None:
 def _source_name(source: str | None) -> str:
     if not source:
         return ""
+    source = source.removesuffix(TEXTLESS_SOURCE_SUFFIX)
     if source == _SCRAPER_SOURCE:
         return lang(32534)
     if source.startswith("tmdb-"):
@@ -375,6 +379,8 @@ def _from_text(field: str, source: str | None, fs: dict[str, Any], language: str
         return lang(_CONVERTED).format(name)
     if (field not in LANGUAGE_FIELDS and field != "poster") or source == _SCRAPER_SOURCE:
         return name
+    if field == "poster" and (source or "").endswith(TEXTLESS_SOURCE_SUFFIX):
+        return lang(_WITHOUT_TEXT).format(name)
     if fs.get("from_fallback"):
         return lang(32533).format(name)
     return lang(32532).format(name, language) if language else name

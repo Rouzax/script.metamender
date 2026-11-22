@@ -54,6 +54,13 @@ class PosterPick(NamedTuple):
     url: str
     provider: str
     from_fallback: bool
+    textless: bool
+
+
+# Appended to a textless poster's provider in field_status.source, so
+# Details can tell it from one in the fallback language: both carry
+# from_fallback, which drives the monthly recheck.
+TEXTLESS_SOURCE_SUFFIX = ":textless"
 
 
 def unwrap(value: Optional[str]) -> str:
@@ -190,7 +197,7 @@ def pick_poster(
         # The current poster at another size is still the current poster, so
         # it is kept as Kodi holds it rather than rewritten.
         url = current_url if is_current(poster) else poster.url
-        return PosterPick(url, poster.provider, poster.lang != lang)
+        return PosterPick(url, poster.provider, poster.lang != lang, poster.lang is None)
 
     pick: Optional[Poster] = None
     for code, provider in _tiers(source, lang, fallback):

@@ -50,7 +50,9 @@ def test_pick_poster_order_chosen_source_first_within_language():
 def test_pick_poster_fallback_and_textless_set_from_fallback():
     tm = [Poster("t_null", "tmdb", None, (5.0, 3))]
     p = pick_poster(tm, list, "tmdb", "nl", "en", "")
-    assert p.url == "t_null" and p.from_fallback is True
+    assert p.url == "t_null" and p.from_fallback is True and p.textless is True
+    p = pick_poster([Poster("t_en", "tmdb", "en", (5.0, 3))], list, "tmdb", "nl", "en", "")
+    assert p.from_fallback is True and p.textless is False
 
 def test_pick_poster_does_not_call_fanart_when_tmdb_answers_in_language():
     called = []
