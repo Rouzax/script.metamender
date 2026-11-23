@@ -60,11 +60,11 @@ def test_sub_lines_go_with_their_option():
     assert [(i.label, i.detail) for i in items] == [("a", "sub a"), ("b", "sub b")]
 
 
-def test_properties_carry_heading_cancel_and_theme():
+def test_properties_carry_heading_and_cancel():
     props = select_properties("Language")
     assert props["MM.Heading"] == "Language"
     assert props["MM.Cancel"] == _STRINGS[32408]
-    assert THEMES[0].items() <= props.items()
+    assert not set(THEMES[0]) & set(props)  # theme colours live on the Home window
 
 
 def test_skin_has_the_list_cancel_and_both_markers():

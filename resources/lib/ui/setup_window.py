@@ -75,7 +75,7 @@ from resources.lib.ui.setup_model import (
     page_groups,
     settings_to_write,
 )
-from resources.lib.ui.theme import theme_colours
+from resources.lib.ui.theme import publish_theme
 from resources.lib.utils import (
     display_path,
     get_addon,
@@ -700,7 +700,6 @@ def window_properties(c: SetupController) -> dict[str, str]:
         "MM.StepIndex": str(c.flow.index(c.state)) if wizard else "",
         "MM.StepTotal": str(c.flow.total(c.state)) if wizard else "",
     }
-    props.update(theme_colours())
     return props
 
 
@@ -815,6 +814,7 @@ def run_setup(mode: str, config_path: str,
     addon = get_addon()
     window = SetupWindow(_XML, addon.getAddonInfo("path"), "Default", "1080i")
     window.controller = controller
+    publish_theme()
     window.doModal()
     del window
     if not controller.finished:

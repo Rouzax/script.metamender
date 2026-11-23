@@ -30,7 +30,7 @@
             </control>
             <control type="image" id="12">
                 <left>0</left><top>0</top><width>1000</width><height>780</height>
-                <texture border="20" colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/frame.png</texture>
+                <texture border="20" colordiffuse="$INFO[Window(Home).Property(MetaMender.Accent)]">metamender/frame.png</texture>
             </control>
 
             <!-- Heading: the heartbeat badge and the title, centred together. -->
@@ -42,20 +42,20 @@
                 <usecontrolcoords>true</usecontrolcoords>
                 <control type="group">
                     <top>6</top><width>44</width><height>44</height>
-                    <control type="image"><width>44</width><height>44</height><texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/badge.png</texture></control>
+                    <control type="image"><width>44</width><height>44</height><texture colordiffuse="$INFO[Window(Home).Property(MetaMender.Accent)]">metamender/badge.png</texture></control>
                     <control type="image"><width>44</width><height>44</height><texture colordiffuse="FF060607">metamender/pulse.png</texture></control>
                 </control>
                 <control type="label">
                     <width>auto</width><height>56</height>
                     <aligny>center</aligny>
                     <font>font13</font>
-                    <textcolor>$INFO[Window.Property(MM.Accent)]</textcolor>
+                    <textcolor>$INFO[Window(Home).Property(MetaMender.Accent)]</textcolor>
                     <label>[B]$INFO[Window.Property(MM.Heading)][/B]</label>
                 </control>
             </control>
             <control type="image">
                 <left>100</left><top>102</top><width>800</width><height>3</height>
-                <texture colordiffuse="$INFO[Window.Property(MM.Accent)]">metamender/divider.png</texture>
+                <texture colordiffuse="$INFO[Window(Home).Property(MetaMender.Accent)]">metamender/divider.png</texture>
                 <animation effect="fade" start="70" end="70" time="0" condition="true">Conditional</animation>
             </control>
 
@@ -75,7 +75,7 @@
                 <left>40</left><top>572</top><width>920</width><height>60</height>
                 <align>center</align><aligny>center</aligny>
                 <font>font13</font>
-                <textcolor>$INFO[Window.Property(MM.Accent)]</textcolor>
+                <textcolor>$INFO[Window(Home).Property(MetaMender.Accent)]</textcolor>
                 <label>[B]$INFO[Window.Property(MM.Url)][/B]</label>
             </control>
 
@@ -84,11 +84,11 @@
                 <align>center</align><aligny>center</aligny>
                 <font>font13</font>
                 <textcolor>FFF1F3F5</textcolor>
-                <focusedcolor>$INFO[Window.Property(MM.ButtonTextFocused)]</focusedcolor>
+                <focusedcolor>$INFO[Window(Home).Property(MetaMender.ButtonTextFocused)]</focusedcolor>
                 <pulseonselect>false</pulseonselect>
                 <label>[B]$INFO[Window.Property(MM.Primary)][/B]</label>
                 <texturenofocus border="20" colordiffuse="FF2A2F38">metamender/button.png</texturenofocus>
-                <texturefocus border="20" colordiffuse="$INFO[Window.Property(MM.ButtonFocus)]">metamender/button.png</texturefocus>
+                <texturefocus border="20" colordiffuse="$INFO[Window(Home).Property(MetaMender.ButtonFocus)]">metamender/button.png</texturefocus>
             </control>
         </control>
     </controls>

@@ -65,10 +65,9 @@ def test_every_window_kind_has_both_texts():
         assert _STRINGS.get(ALSO_TEXT[kind]), kind
 
 
-def test_accent_colours_are_set():
+def test_accent_colours_are_not_window_properties():
     props = attention_properties(Problem(SETUP, ""), [])
-    for key, value in GOLDEN_HOUR.items():
-        assert props[key] == value
+    assert not set(GOLDEN_HOUR) & set(props)  # theme colours live on the Home window
 
 
 def test_window_xml_reads_every_property():

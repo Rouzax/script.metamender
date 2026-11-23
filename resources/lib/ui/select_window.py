@@ -15,7 +15,7 @@ from typing import Any, Optional, cast
 
 import xbmcgui
 
-from resources.lib.ui.theme import theme_colours
+from resources.lib.ui.theme import publish_theme
 from resources.lib.utils import get_addon, lang
 
 _XML = "script-metamender-select.xml"
@@ -79,7 +79,6 @@ def select_items(options: list[str], details: Optional[list[str]], preselect: in
 def select_properties(heading: str) -> dict[str, str]:
     """Every window property the XML reads."""
     props = {"MM.Heading": heading, "MM.Cancel": lang(32408)}
-    props.update(theme_colours())
     return props
 
 
@@ -136,6 +135,7 @@ def show_select(heading: str, options: list[str], preselect: int,
     window.preselect = preselect
     for key, value in select_properties(heading).items():
         window.setProperty(key, value)
+    publish_theme()
     window.doModal()
     result = window.result
     del window

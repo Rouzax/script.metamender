@@ -47,7 +47,7 @@ def test_help_argument_opens_the_help_window(monkeypatch):
     run.assert_not_called()
 
 
-def test_help_properties_carry_the_address_the_image_and_the_colours(monkeypatch):
+def test_help_properties_carry_the_address_and_the_image(monkeypatch):
     monkeypatch.setattr(help_window, "lang", lambda i: "#%d" % i)
     monkeypatch.setattr(help_window, "kodi_lang", lambda i: "Close")
     props = help_window.help_properties()
@@ -55,7 +55,7 @@ def test_help_properties_carry_the_address_the_image_and_the_colours(monkeypatch
     assert props["MM.Qr"] == "metamender/manual-qr.png"
     assert props["MM.Primary"] == "Close"
     assert props["MM.Heading"].startswith("#") and props["MM.Message"].startswith("#")
-    assert THEMES[0].items() <= props.items()
+    assert not set(THEMES[0]) & set(props)  # theme colours live on the Home window
 
 
 def test_the_shown_address_is_the_qr_target_without_its_scheme():

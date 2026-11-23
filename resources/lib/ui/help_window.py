@@ -11,7 +11,7 @@ from typing import Any
 import xbmcgui
 
 from resources.lib.ui.message_window import kodi_lang
-from resources.lib.ui.theme import theme_colours
+from resources.lib.ui.theme import publish_theme
 from resources.lib.utils import get_addon, lang
 
 _XML = "script-metamender-help.xml"
@@ -34,7 +34,6 @@ def help_properties() -> dict[str, str]:
         "MM.Qr": _QR_TEXTURE,
         "MM.Primary": kodi_lang(_KODI_CLOSE),
     }
-    props.update(theme_colours())
     return props
 
 
@@ -55,5 +54,6 @@ def show_help() -> None:
     window = HelpWindow(_XML, get_addon().getAddonInfo("path"), "Default", "1080i")
     for key, value in help_properties().items():
         window.setProperty(key, value)
+    publish_theme()
     window.doModal()
     del window

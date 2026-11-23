@@ -693,7 +693,7 @@ def test_window_properties_always_carry_every_key():
     c, _ = _controller(key="abc")
     props = window_properties(c)
     assert set(props) == {"MM.Heading", "MM.Text", "MM.Next", "MM.Back", "MM.Cancel",
-                          "MM.StepIndex", "MM.StepTotal", *GOLDEN_HOUR}
+                          "MM.StepIndex", "MM.StepTotal"}
     assert props["MM.StepIndex"] == "1" and props["MM.StepTotal"] == "3"
     assert props["MM.Back"] == "" and c.marker_kind() == ""
 
@@ -762,7 +762,7 @@ def test_skin_draws_header_rows_in_both_layouts():
     for layout in ("itemlayout", "focusedlayout"):
         body = xml[xml.index("<%s" % layout):xml.index("</%s>" % layout)]
         accent_label = re.search(
-            r"<control type=\"label\">(?:(?!</control>).)*MM\.Accent(?:(?!</control>).)*"
+            r"<control type=\"label\">(?:(?!</control>).)*MetaMender\.Accent(?:(?!</control>).)*"
             r"String\.IsEqual\(ListItem\.Property\(marker\),header\)", body, re.DOTALL)
         assert accent_label, layout
 

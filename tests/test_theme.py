@@ -1,8 +1,7 @@
 """The window colour themes and the setting that picks one."""
 import pytest
 
-from resources.lib.service.refresh import RefreshProgress
-from resources.lib.ui import attention_window, progress_window, setup_window, theme
+from resources.lib.ui import theme
 
 GOLDEN_HOUR = theme.THEMES[0]
 
@@ -60,26 +59,20 @@ class _StepController:
         return ""
 
 
-def test_setup_window_uses_the_chosen_theme(monkeypatch):
-    monkeypatch.setattr(setup_window, "theme_colours", lambda: theme.THEMES[2])
-    monkeypatch.setattr(setup_window, "lang", lambda i: "")
-    props = setup_window.window_properties(_StepController())  # type: ignore[arg-type]
-    assert props["MM.Accent"] == "FFF87171"
+def test_every_window_publishes_the_theme_before_it_opens():
+    # A window module that opens a window without publishing first shows the
+    # colours of whatever theme the last window published, or none at all.
+    from pathlib import Path
 
-
-def test_attention_window_uses_the_chosen_theme(monkeypatch):
-    from resources.lib.service.attention import SETUP, Problem
-    monkeypatch.setattr(attention_window, "theme_colours", lambda: theme.THEMES[2])
-    monkeypatch.setattr(attention_window, "lang", lambda i: "")
-    props = attention_window.attention_properties(Problem(SETUP, ""), [])
-    assert props["MM.Accent"] == "FFF87171"
-
-
-def test_progress_window_uses_the_chosen_theme(monkeypatch):
-    _pick(monkeypatch, 3)
-    monkeypatch.setattr(progress_window, "lang", lambda i: "{}")
-    props = progress_window.progress_properties(RefreshProgress(), "Show", 0.0)
-    assert props["MM.Accent"] == theme.THEMES[3]["MM.Accent"]
+    ui = Path(__file__).resolve().parent.parent / "resources/lib/ui"
+    modules = sorted(ui.glob("*_window.py"))
+    assert modules
+    for path in modules:
+        lines = [line.strip() for line in path.read_text().splitlines()]
+        opens = [i for i, line in enumerate(lines) if line == "window.doModal()"]
+        assert opens, path.name
+        for i in opens:
+            assert lines[i - 1] == "publish_theme()", path.name
 
 
 def test_theme_setting_has_its_own_appearance_group():
@@ -94,3 +87,47 @@ def test_theme_setting_has_its_own_appearance_group():
     assert group.find("setting/control") is not None
     po = (root_dir / "resources/language/resource.language.en_gb/strings.po").read_text()
     assert re.search(r'msgctxt "#{}"\nmsgid "Appearance"'.format(group.get("label")), po)
+
+
+class _Home:
+    def __init__(self) -> None:
+        self.props: dict[str, str] = {}
+
+    def setProperty(self, name: str, value: str) -> None:
+        self.props[name] = value
+
+
+def test_publish_theme_sets_the_chosen_colours_on_the_home_window(monkeypatch):
+    _pick(monkeypatch, 2)
+    home = _Home()
+    opened = []
+    monkeypatch.setattr(theme.xbmcgui, "Window",
+                        lambda window_id: opened.append(window_id) or home)
+    theme.publish_theme()
+    assert opened == [10000]
+    assert home.props == {"MetaMender.Accent": "FFF87171",
+                          "MetaMender.ButtonFocus": "FFEF4444",
+                          "MetaMender.ButtonTextFocused": "FFFFFFFF"}
+
+
+def test_skin_colours_never_read_the_topmost_window():
+    # Kodi reads a colour's $INFO without a window context, so an unqualified
+    # Window.Property() comes from whichever dialog is on top: every library
+    # write redraws the Videos window behind ours, and for that frame the
+    # accent is empty. Colours name the Home window instead.
+    import re
+    from pathlib import Path
+
+    skins = Path(__file__).resolve().parent.parent / "resources/skins/Default/1080i"
+    colour = re.compile(
+        r'(?:colordiffuse="[^"]*"|<(textcolor|focusedcolor|selectedcolor|disabledcolor|'
+        r'shadowcolor|invalidcolor|colordiffuse)>[^<]*<)')
+    files = sorted(skins.glob("*.xml"))
+    assert files
+    themed = 0
+    for path in files:
+        for match in colour.finditer(path.read_text()):
+            text = match.group(0)
+            assert "Window.Property(" not in text, (path.name, text)
+            themed += "Window(Home).Property(MetaMender." in text
+    assert themed

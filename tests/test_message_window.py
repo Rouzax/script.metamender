@@ -54,7 +54,7 @@ def test_question_has_no_and_yes():
     assert props["MM.Heading"] == "Libraries"
     assert props["MM.Message"] == "Save your changes?"
     assert (props["MM.Primary"], props["MM.Secondary"]) == ("Yes", "No")
-    assert THEMES[0].items() <= props.items()
+    assert not set(THEMES[0]) & set(props)  # theme colours live on the Home window
 
 
 def test_message_has_only_ok():

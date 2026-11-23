@@ -34,6 +34,10 @@ New Features:
     and the address of the online manual, to open on a phone or computer.
 
 Bug Fixes:
+  - MetaMender's windows no longer flash grey while a scan or Update now
+    writes to the library: every write made Kodi redraw the list behind
+    the window, and for that moment the theme colours were read from
+    another dialog.
   - Stop scan takes effect before the next part of the scan asks Kodi for
     its list of items, which on a large library takes seconds, and a stop
     that arrives between two parts ends the scan there.

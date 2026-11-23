@@ -23,7 +23,7 @@ from resources.lib.service.attention import (
     UNMATCHED,
     Problem,
 )
-from resources.lib.ui.theme import theme_colours
+from resources.lib.ui.theme import publish_theme
 from resources.lib.utils import get_addon, lang
 
 _XML = "script-metamender-attention.xml"
@@ -85,7 +85,6 @@ def attention_properties(main: Problem, others: list[Problem]) -> dict[str, str]
         "MM.Action": lang(_FIX_LABEL[fix_for(main.kind)]) if fix_for(main.kind) else "",
         "MM.Later": lang(32503),
     }
-    props.update(theme_colours())
     return props
 
 
@@ -122,6 +121,7 @@ def show_attention_window(main: Problem, others: list[Problem]) -> str:
     window.fix = fix_for(main.kind)
     for key, value in window.props.items():
         window.setProperty(key, value)
+    publish_theme()
     window.doModal()
     result = window.result
     del window
