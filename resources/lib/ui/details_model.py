@@ -32,6 +32,7 @@ from resources.lib.engine.art import (
     ART_FIELDS,
     BROKEN,
     EMPTY,
+    ENGLISH_SOURCE_SUFFIX,
     FRAME_GRAB,
     LOCAL,
     TEXTLESS_SOURCE_SUFFIX,
@@ -94,6 +95,9 @@ _SOURCE_NAMES = {
 _SCRAPER_SOURCE = "kodi"
 # "{}, without text": where a textless poster came from.
 _WITHOUT_TEXT = 32741
+# "{}, in English as a last resort": art filled from English for want of
+# anything in the library's languages or without text.
+_ENGLISH_LAST_RESORT = 32754
 
 # Short month names, January first; then "12 Nov 2026", "12 Nov" and the
 # separator between the header's two parts.
@@ -190,7 +194,7 @@ def _parse(iso: str | None) -> date | None:
 def _source_name(source: str | None) -> str:
     if not source:
         return ""
-    source = source.removesuffix(TEXTLESS_SOURCE_SUFFIX)
+    source = source.removesuffix(TEXTLESS_SOURCE_SUFFIX).removesuffix(ENGLISH_SOURCE_SUFFIX)
     if source == _SCRAPER_SOURCE:
         return lang(32534)
     if source.startswith("tmdb-"):
@@ -377,6 +381,8 @@ def _from_text(field: str, source: str | None, fs: dict[str, Any], language: str
         # Another country's rating converted to this system: it is not
         # this country's own decision and is re-checked monthly.
         return lang(_CONVERTED).format(name)
+    if field in ART_FIELDS and (source or "").endswith(ENGLISH_SOURCE_SUFFIX):
+        return lang(_ENGLISH_LAST_RESORT).format(name)
     if (field not in LANGUAGE_FIELDS and field != "poster") or source == _SCRAPER_SOURCE:
         return name
     if field == "poster" and (source or "").endswith(TEXTLESS_SOURCE_SUFFIX):

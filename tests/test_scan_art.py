@@ -54,6 +54,9 @@ USER_POSTER = "https://image.tmdb.org/t/p/original/userpick.jpg"
 FANART_NL = "https://assets.fanart.tv/fanart/movies/1/movieposter/nl.jpg"
 
 _DUTCH = {"sources": [], "default_language": "nl-NL", "fallback_language": "en-US"}
+_DUTCH_ONLY = {"sources": [], "default_language": "nl-NL", "fallback_language": ""}
+FANART_EN = "https://assets.fanart.tv/fanart/movies/1/movieposter/en.jpg"
+BETTER_EN = "https://image.tmdb.org/t/p/original/better_en.jpg"
 
 
 @pytest.fixture(autouse=True)
@@ -1124,3 +1127,156 @@ def test_textless_art_source_records_it(mock_movie, mock_update, tmp_path, kodi_
     assert _written(mock_update, "poster") == textless
     assert fs_map["poster"]["source"] == "tmdb:textless"
     assert fs_map["poster"]["from_fallback"] == 1
+
+
+# ---------------------------------------------------------------------------
+# English as a last resort
+# ---------------------------------------------------------------------------
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_english_fills_empty_poster_in_dutch_library_without_fallback(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    item = _movie("")
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en")])
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH_ONLY), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert mock_movie.call_args.kwargs["image_languages"] == ("nl", "en")
+    assert _written(mock_update, "poster") == EN_POSTER
+    assert fs_map["poster"]["source"] == "tmdb:english"
+    assert fs_map["poster"]["from_fallback"] == 1
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_art")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_english_last_resort_never_replaces_existing_art(
+    mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    item = _movie(FANART_NL)
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en")])
+    mock_fanart.return_value = {"poster": [_fanart(FANART_EN, "en", likes=9)]}
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH_ONLY), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert not mock_update.called
+    assert _reason(fs_map, "poster") == REASON_NOTHING
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_english_last_resort_also_after_a_fallback_language(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    item = _movie("")
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en")])
+    tracker = _make_tracker(tmp_path)
+    german = dict(_DUTCH_ONLY, fallback_language="de-DE")
+
+    _scan_movies(tracker, _libs(frozenset({"poster"}), german), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert mock_movie.call_args.kwargs["image_languages"] == ("nl", "de", "en")
+    assert _written(mock_update, "poster") == EN_POSTER
+    assert fs_map["poster"]["source"] == "tmdb:english"
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_english_pick_replaced_when_library_language_appears(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    item = _movie("")
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en")])
+    tracker = _make_tracker(tmp_path)
+    libs = _libs(frozenset({"poster"}), _DUTCH_ONLY)
+    _scan_movies(tracker, libs, [item])
+    assert _written(mock_update, "poster") == EN_POSTER
+    mock_update.reset_mock()
+
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en"), _tmdb(NL_POSTER, "nl")])
+    _make_due(tracker)
+    _scan_movies(tracker, libs, [dict(item, poster=EN_POSTER)])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert _written(mock_update, "poster") == NL_POSTER
+    assert fs_map["poster"]["source"] == "tmdb"
+    assert fs_map["poster"]["from_fallback"] == 0
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_english_pick_may_move_to_better_english(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    item = _movie("")
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en", 5.0, 2)])
+    tracker = _make_tracker(tmp_path)
+    libs = _libs(frozenset({"poster"}), _DUTCH_ONLY)
+    _scan_movies(tracker, libs, [item])
+    assert _written(mock_update, "poster") == EN_POSTER
+    mock_update.reset_mock()
+
+    mock_movie.side_effect = _movie_fetch([
+        _tmdb(EN_POSTER, "en", 5.0, 2), _tmdb(BETTER_EN, "en", 9.0, 200),
+    ])
+    _make_due(tracker)
+    _scan_movies(tracker, libs, [dict(item, poster=EN_POSTER)])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert _written(mock_update, "poster") == BETTER_EN
+    assert fs_map["poster"]["source"] == "tmdb:english"
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_english_pick_changed_outside_is_not_ours_any_more(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    """A poster set after MetaMender's English pick is existing art: the
+    English step no longer applies to it."""
+    item = _movie("")
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en")])
+    tracker = _make_tracker(tmp_path)
+    libs = _libs(frozenset({"poster"}), _DUTCH_ONLY)
+    _scan_movies(tracker, libs, [item])
+    mock_update.reset_mock()
+
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en"), _tmdb(BETTER_EN, "en")])
+    _make_due(tracker)
+    _scan_movies(tracker, libs, [dict(item, poster=FANART_NL)])
+    tracker.close()
+
+    assert _written(mock_update, "poster") is None
+
+
+def test_english_allowed_rules():
+    from resources.lib.engine.scan import _english_allowed
+
+    ours = {"source": "tmdb:english", "written_value": fingerprint(EN_POSTER)}
+    assert _english_allowed("poster", {"poster": ""}, {}, {}, set())
+    assert _english_allowed("poster", {"poster": FRAME_GRAB}, {}, {}, set())
+    assert _english_allowed("poster", {"poster": "smb://nas/poster.jpg"}, {}, {}, {"poster"})
+    assert not _english_allowed("poster", {"poster": "smb://nas/poster.jpg"}, {}, {}, set())
+    assert not _english_allowed("poster", {"poster": EN_POSTER}, {}, {}, set())
+    assert _english_allowed("poster", {"poster": EN_POSTER}, ours, {}, set())
+    # A pick MetaMender wrote in another language is not an English pick.
+    assert not _english_allowed(
+        "poster", {"poster": EN_POSTER}, dict(ours, source="tmdb"), {}, set())
+    # Kodi holds something else than the English pick.
+    assert not _english_allowed("poster", {"poster": NL_POSTER}, ours, {}, set())
+    # field_keep's written_fp outlives field_status's.
+    assert _english_allowed(
+        "poster", {"poster": NL_POSTER}, ours, {"written_fp": fingerprint(NL_POSTER)}, set())

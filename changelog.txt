@@ -25,6 +25,11 @@ New Features:
     poster picked before Posters was ticked may be replaced once; Restore
     original puts it back. MetaMender writes no image files.
   - Art source per library: TMDB (the default) or fanart.tv.
+  - English as a last resort for empty posters: when neither site has a
+    poster in the library's language, the fallback language or without
+    text, an empty poster is filled with an English one. An English
+    poster never replaces one the item already has; one MetaMender
+    filled this way is replaced once a better poster appears.
   - Optional Personal fanart.tv API key setting.
   - Seasons have a Details window, and Update now on a season or show
     refreshes the season posters too.

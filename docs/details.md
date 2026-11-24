@@ -77,9 +77,11 @@ fanart.tv**, **Image from another website**, **Local image file**, **Frame
 grab from the video**, **Broken link** or **No image**.
 
 - **From** names the site and, for a poster, its language, for example
-  "fanart.tv, in Dutch", or "TMDB, without text" for a poster with no text
-  on it. A poster in the fallback language or without text is checked again
-  monthly for a while, so a poster in the library's language can replace it.
+  "fanart.tv, in Dutch", "TMDB, without text" for a poster with no text
+  on it, or "TMDB, in English as a last resort" for an English poster that
+  filled an empty one. A poster in the fallback language, without text or in
+  English as a last resort is checked again monthly for a while, so a poster
+  in the library's language can replace it.
 - **Replaced** says what was there before: *empty*, *was a frame grab*, *was
   a broken link*, or *your scraper's value* for an earlier poster.
 

@@ -209,10 +209,19 @@ MetaMender takes the first of these that exists:
    the other site.
 2. The same in the fallback language, if the library has one.
 3. A poster without text, art source first.
+4. Only when the item has no poster (empty, a frame grab or a broken link):
+   an English poster, art source first. This last resort also applies when
+   the library has a fallback language, and it adds nothing for an English
+   library.
 
 Within one site the best rated poster wins: on TMDB by its votes, weighted so
 that a poster with only a few votes counts for less than one with many, and on
-fanart.tv by its likes. If neither site has a poster, the current one stays.
+fanart.tv by its likes. If neither site has a poster, the current one stays:
+an English poster never replaces a poster the item already has.
+
+An English poster MetaMender filled this way counts as its own pick: on a
+later check it may be swapped for a better English poster, and it is
+replaced as soon as a poster from one of the first three steps appears.
 
 !!! example
     A Dutch library with English as its fallback and TMDB as its art source.

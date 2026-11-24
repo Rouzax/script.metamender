@@ -1618,3 +1618,7 @@ msgstr ""
 msgctxt "#32753"
 msgid "Art"
 msgstr ""
+
+msgctxt "#32754"
+msgid "{}, in English as a last resort"
+msgstr ""

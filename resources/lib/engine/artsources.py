@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from resources.lib.constants import FANART_API_KEY
 from resources.lib.engine.art import (
+    ENGLISH_SOURCE_SUFFIX,
     TEXTLESS_SOURCE_SUFFIX,
     is_placeholder_art,
     pick_art,
@@ -122,9 +123,15 @@ def resolve_art(
     field: str,
     folder_lang: str,
     fallback_lang: str,
+    current: str,
+    english: bool,
 ) -> tuple[FieldOutcome, str | None]:
     """The field's outcome and the provider of its value (a textless
-    poster's with art.TEXTLESS_SOURCE_SUFFIX).
+    pick's with art.TEXTLESS_SOURCE_SUFFIX, an English last-resort pick's
+    with art.ENGLISH_SOURCE_SUFFIX).
+
+    ``current`` is the art the pick compares with ("" when its local file
+    no longer exists); ``english`` allows the English last resort.
 
     A poster needs TMDB's answer, whatever the art source: TMDB's posters
     are always a candidate tier, so without them the pick could be wrong. No
@@ -140,12 +147,15 @@ def resolve_art(
         "poster",
         (primary.tmdb or {}).get("posters") or [],
         lambda: _fanart_posters(ctx, sources.item, primary, ids, identity),
-        ctx.art_source, lang, fallback,
-        str(sources.item.get("poster") or ""),
+        ctx.art_source, lang, fallback, current, english,
     )
     if pick is TRANSIENT:
         return _TRANSIENT_OUTCOME, None
     if pick is None:
         return _ANSWERED_EMPTY, None
     outcome = FieldOutcome(transient=False, value=pick.url, from_fallback=pick.from_fallback)
-    return outcome, pick.provider + (TEXTLESS_SOURCE_SUFFIX if pick.textless else "")
+    if pick.textless:
+        return outcome, pick.provider + TEXTLESS_SOURCE_SUFFIX
+    if pick.english:
+        return outcome, pick.provider + ENGLISH_SOURCE_SUFFIX
+    return outcome, pick.provider

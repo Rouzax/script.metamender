@@ -122,9 +122,12 @@ from resources.lib.data.tracker import (
 )
 from resources.lib.engine.art import (
     ART_FIELDS,
+    ENGLISH,
+    ENGLISH_SOURCE_SUFFIX,
     GATE_CHANGED,
     GATE_LOCAL,
     art_gate,
+    is_placeholder_art,
 )
 from resources.lib.engine.artsources import image_language, resolve_art
 from resources.lib.engine.breaker import CircuitBreaker
@@ -527,11 +530,15 @@ def _resolve_fields(
     fallback_lang: str,
     fields: list[str],
     reopened: set[str],
+    english: set[str],
+    missing: set[str],
 ) -> tuple[dict[str, FieldOutcome], dict[str, Any], dict[str, str | None]]:
     """Per-field verdicts for the non-rating fields.
 
     A field in ``reopened`` runs its chain as if empty, so a fallback step may
-    replace its current value (see _reopened_fallbacks).
+    replace its current value (see _reopened_fallbacks). An art field in
+    ``english`` may take the English last resort (_english_allowed); one in
+    ``missing`` (its local file no longer exists) is picked as if empty.
 
     Returns (outcomes keyed by Kodi field, provider values keyed by TMDB key
     for _extract_fields, winning provider per Kodi field).
@@ -559,8 +566,10 @@ def _resolve_fields(
             current = None if f in reopened else item.get(f)
             outcome, provider = _text_chain(ctx, text, f, folder_lang, fallback_lang, current)
         elif f in ART_FIELDS:
+            current_art = "" if f in missing else str(item.get(f) or "")
             outcome, provider = resolve_art(
                 ctx, text, primary, ids, identity, f, folder_lang, fallback_lang,
+                current_art, f in english,
             )
         else:
             value = None if tmdb_transient else tmdb_data.get(key)
@@ -649,14 +658,39 @@ def _field_reason(
 
 
 def _image_languages(language: str, fallback_lang: str) -> tuple[str, ...]:
-    """The languages to ask posters in: the folder's, then its fallback when
-    different (textless ones always come along)."""
+    """The languages to ask images in: the folder's, then its fallback when
+    different, then English for the last resort (textless ones always come
+    along)."""
     codes = [image_language(language)]
     if fallback_lang.strip():
-        fallback = image_language(fallback_lang)
-        if fallback not in codes:
-            codes.append(fallback)
-    return tuple(codes)
+        codes.append(image_language(fallback_lang))
+    codes.append(ENGLISH)
+    return tuple(dict.fromkeys(codes))
+
+
+def _english_allowed(
+    field: str,
+    item: dict[str, Any],
+    fs: dict[str, Any],
+    keep_entry: dict[str, Any],
+    missing: set[str],
+) -> bool:
+    """Whether the English last resort may fill this art slot: it holds no
+    art worth keeping (empty, a placeholder, a local file that no longer
+    exists), or Kodi still holds MetaMender's own English pick, which may
+    then move to a better English image or give way to a higher step.
+    English never replaces any other existing art. MetaMender's own is
+    recognised by field_keep's written_fp first, which outlives Reset
+    tracker, as _gate_art does."""
+    if field in missing:
+        return True
+    current = kodi_form(item.get(field) or "")
+    if is_placeholder_art(current):
+        return True
+    if not str(fs.get("source") or "").endswith(ENGLISH_SOURCE_SUFFIX):
+        return False
+    written_fp = keep_entry.get("written_fp") or fs.get("written_value")
+    return written_fp is not None and fingerprint(current) == written_fp
 
 
 def _art_reason(
@@ -1642,9 +1676,17 @@ def run_scan(
             age = content_age_days(item, media_type, today)
 
         reopened = _reopened_fallbacks(item, fs_map, rebaseline)
+        # Art fields whose local file no longer exists.
+        missing: set[str] = set()
+        art_due = sorted(ART_FIELDS.intersection(nonfinal))
+        due_keep = tracker.get_keep(media_type.name, identity) if art_due else {}
+        english = {
+            f for f in art_due
+            if _english_allowed(f, item, fs_map.get(f) or {}, due_keep.get(f) or {}, missing)
+        }
         outcomes, values, providers = _resolve_fields(
             ctx, item, identity, primary, ids, language, fallback_lang, nonfinal,
-            reopened,
+            reopened, english, missing,
         )
         cert_value: str | None = None
         cert_kept = False
