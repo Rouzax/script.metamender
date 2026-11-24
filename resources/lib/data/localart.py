@@ -4,11 +4,11 @@ A missing file is fair game to fill, so "missing" is only concluded when the
 storage the file lives on is known to answer. A folder that exists is not
 enough: a share mounted at a local path (fstab or systemd mounts on
 LibreELEC and OSMC) leaves an empty mount point behind when it is down. So
-the item's media must exist, and the art must lie under the media's folder
-or in a folder that exists and is not empty; an item without media needs the
-non-empty folder alone. Anything else (a sleeping NAS, a share on another
-host that does not answer) is ``UNREACHABLE``, which the scan treats as
-transient. Everything goes through
+the item's media must exist (a show folder must also hold something), and
+the art must lie under the media's folder or in a folder that exists and is
+not empty; an item without media needs the non-empty folder alone. Anything
+else (a sleeping NAS, a share on another host that does not answer) is
+``UNREACHABLE``, which the scan treats as transient. Everything goes through
 ``xbmcvfs`` so SMB, NFS and other VFS paths work; ``xbmcvfs.exists`` checks a
 path ending in a separator as a folder and anything else as a file.
 
@@ -79,7 +79,10 @@ def local_art_state(art_path: str, media_path: str) -> str:
             return EXISTS
         media = _first_media_path(media_path) if media_path else ""
         if media:
-            if not _exists(media):
+            # A show or season's media is the show folder, which always
+            # holds its episodes; an empty one is an unmounted mount point.
+            is_folder = media.endswith(_sep(media))
+            if not (_folder_holds_something(media) if is_folder else _exists(media)):
                 return UNREACHABLE
             under = _media_folder(media)
             if under and art_path.startswith(under):

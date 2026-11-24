@@ -77,6 +77,18 @@ def test_unmounted_mount_point_is_unreachable(vfs, tmp_path):
     assert local_art_state(art, str(root / "Film (2020).mkv")) == UNREACHABLE
 
 
+def test_empty_show_folder_mount_point_is_unreachable(vfs, tmp_path):
+    """A source whose root is one show's folder, mounted at a local path:
+    when the share is down the folder exists but is empty, which says
+    nothing about the show's art."""
+    show = tmp_path / "media" / "nas-show"
+    show.mkdir(parents=True)
+    fanart = str(show / "fanart.jpg")
+    assert local_art_state(fanart, str(show) + "/") == UNREACHABLE
+    vfs("media", "nas-show", "Season 1", "s01e01.mkv")
+    assert local_art_state(fanart, str(show) + "/") == MISSING
+
+
 def test_empty_folder_without_media_is_unreachable(vfs, tmp_path):
     (tmp_path / "Sets").mkdir()
     assert local_art_state(str(tmp_path / "Sets" / "poster.jpg"), "") == UNREACHABLE
