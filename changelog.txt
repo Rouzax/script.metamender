@@ -1,6 +1,18 @@
 MetaMender Changelog
 ====================
 
+v1.3.1 (unreleased)
+-------------------
+Bug Fixes:
+  - Background, Stop and Back in the Update now progress window now
+    respond while a show or season is updated from the Videos window.
+    Every change made Kodi reload the list behind the window, and during
+    a reload Kodi ignores the remote; on a slow device the reloads ran
+    back to back. Update now pauses its changes while you are
+    pressing keys, so the next press reaches the window; when you leave
+    the remote alone it runs at full speed. After Background, browsing
+    the library pauses it the same way.
+
 v1.3.0 (2026-11-24)
 -------------------
 New Features:
