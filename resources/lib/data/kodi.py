@@ -192,7 +192,9 @@ def get_seasons_for_scan(
     show folder as ``file`` (which places it in a library and holds the
     tvshow.nfo that governs it), and ``show_tmdb_id`` / ``show_tvdb_id`` from
     the tracker's show maps, None when unknown. A season of a show Kodi did
-    not list keeps an empty ``file``.
+    not list keeps an empty ``file``. ``show_seasons`` lists the season
+    numbers Kodi has for that show ("All seasons" excluded), the reference
+    for the fanart.tv season poster tie-break.
     """
     if tvshowid is None:
         shows = get_all_items(TVSHOW, art=False)
@@ -202,8 +204,14 @@ def get_seasons_for_scan(
     folders = {s.get("tvshowid"): str(s.get("file") or "") for s in shows}
     tvdb_map = show_tvdb_map or {}
     seasons = get_all_items(SEASON, tvshowid=tvshowid)
+    numbers: dict[int, list[int]] = {}
+    for season in seasons:
+        number = int(season.get("season", 0) or 0)
+        if number != _ALL_SEASONS:
+            numbers.setdefault(int(season.get("tvshowid", -1)), []).append(number)
     for season in seasons:
         show_id = int(season.get("tvshowid", -1))
+        season["show_seasons"] = sorted(numbers.get(show_id, []))
         season["file"] = folders.get(show_id, "")
         season["show_tmdb_id"] = show_id_map.get(show_id)
         season["show_tvdb_id"] = tvdb_map.get(show_id)

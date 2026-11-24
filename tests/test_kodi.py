@@ -425,6 +425,19 @@ def test_get_seasons_for_scan_enriches_with_the_show(kodi_stubs):
     assert all("firstaired" not in i for i in items)
 
 
+def test_seasons_for_scan_list_show_seasons(kodi_stubs):
+    from resources.lib.data.kodi import get_seasons_for_scan
+    seasons = {"result": {"seasons": _SEASONS["result"]["seasons"] + [
+        {"seasonid": 32, "season": -1, "tvshowid": 3, "showtitle": "Lost", "art": {}},
+        {"seasonid": 33, "season": 2, "tvshowid": 3, "showtitle": "Lost", "art": {}},
+    ]}}
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({
+        "VideoLibrary.GetTVShows": _SHOWS, "VideoLibrary.GetSeasons": seasons})
+    items = get_seasons_for_scan({3: "4607"})
+    assert {i["seasonid"]: i["show_seasons"] for i in items} == {
+        30: [0, 1, 2], 31: [0, 1, 2], 33: [0, 1, 2], 41: [1]}
+
+
 def test_get_seasons_for_scan_of_one_show(kodi_stubs):
     from resources.lib.data.kodi import get_seasons_for_scan
     show = {"result": {"tvshowdetails": _SHOWS["result"]["tvshows"][0]}}

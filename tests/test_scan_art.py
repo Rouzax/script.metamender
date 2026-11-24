@@ -737,7 +737,7 @@ def test_empty_season_poster_filled(
 ):
     from resources.lib.engine import scan as scan_module
 
-    mock_show.return_value = dict(_tmdb_tvshow_response(),
+    mock_show.return_value = dict(_tmdb_tvshow_response(), posters=[],
                                   season_air_dates={1: "2025-01-01"})
     mock_posters.return_value = [_tmdb(SEASON_POSTER, "en")]
     tracker = _make_tracker(tmp_path)
@@ -1527,3 +1527,86 @@ def test_settings_fingerprint_new_art_fields():
         assert json.loads(settings_fingerprint(field, settings, "nl-NL", "movie", "en")) == {
             "folder_language": "nl-NL", "fallback_language": "en",
         }
+
+
+# ---------------------------------------------------------------------------
+# Season poster refinements
+# ---------------------------------------------------------------------------
+
+def _batch_url(name, stamp):
+    return "https://assets.fanart.tv/fanart/tv/777/seasonposter/{}-{:08x}abcde.jpg".format(
+        name, stamp)
+
+
+def _fanart_season_scan(tmp_path, answer, current, number=1, seasons=(1, 2, 3)):
+    """Scan one season with Art source fanart.tv; returns the poster written."""
+    with patch("resources.lib.data.kodi.update_item", return_value=True) as update, \
+            patch("resources.lib.providers.tmdb.fetch_season_posters", return_value=[]), \
+            patch("resources.lib.providers.tmdb.fetch_tvshow") as show, \
+            patch("resources.lib.providers.fanart.fetch_show_art", return_value=answer):
+        show.return_value = dict(_tmdb_tvshow_response(), posters=[], season_air_dates={})
+        tracker = _make_tracker(tmp_path)
+        libs = one_library(frozenset({"poster"}), art_source=ART_SOURCE_FANART)
+        item = _season(number, poster=current, show_seasons=list(seasons))
+        _scan_seasons(tracker, [item], libs=libs)
+        tracker.close()
+    return _written(update, "poster")
+
+
+def test_season_tie_break_prefers_batch_with_other_seasons(tmp_path, kodi_stubs):
+    batch = 0x60000000
+    lone, together = _batch_url("a", batch + 10 * 86400), _batch_url("b", batch)
+    answer = {"show": {}, "seasons": {
+        1: [_fanart(lone, "en", likes=3), _fanart(together, "en", likes=3)],
+        2: [_fanart(_batch_url("c", batch + 100), "en", likes=1)],
+        3: [_fanart(_batch_url("d", batch + 200), "en", likes=1)],
+    }}
+    assert _fanart_season_scan(tmp_path, answer, "") == together
+
+
+def test_season_tie_break_never_beats_more_likes(tmp_path, kodi_stubs):
+    batch = 0x60000000
+    liked, together = _batch_url("a", batch + 10 * 86400), _batch_url("b", batch)
+    answer = {"show": {}, "seasons": {
+        1: [_fanart(liked, "en", likes=9), _fanart(together, "en", likes=3)],
+        2: [_fanart(_batch_url("c", batch + 100), "en", likes=1)],
+    }}
+    assert _fanart_season_scan(tmp_path, answer, "", seasons=(1, 2)) == liked
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_tmdb_season_poster_same_file_as_show_poster_skipped(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    shared = "https://image.tmdb.org/t/p/original/shared.jpg"
+    mock_show.return_value = dict(
+        _tmdb_tvshow_response(), season_air_dates={},
+        posters=[_tmdb("https://image.tmdb.org/t/p/w500/shared.jpg", "en")])
+    mock_posters.return_value = [_tmdb(shared, "en", avg=9.0), _tmdb(SEASON_POSTER, "en")]
+    tracker = _make_tracker(tmp_path)
+
+    _scan_seasons(tracker, [_season(1)])
+    tracker.close()
+
+    assert _written(mock_update, "poster") == SEASON_POSTER
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters", return_value=[])
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_season_refetches_show_images_when_cache_has_none(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    cache = {"55555": dict(_tmdb_tvshow_response(), season_air_dates={})}
+    mock_show.return_value = dict(_tmdb_tvshow_response(), posters=[],
+                                  season_air_dates={})
+    tracker = _make_tracker(tmp_path)
+
+    _scan_seasons(tracker, [_season(1), _season(2)], show_cache=cache)
+    tracker.close()
+
+    assert mock_show.call_count == 1
+    assert mock_show.call_args.kwargs["image_languages"] == ("en",)
+    assert "posters" in cache["55555"]

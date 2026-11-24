@@ -43,6 +43,10 @@ New Features:
     (shows) are filled and refreshed. fanart.tv's HD logos and clear art
     come before the SD ones.
   - Optional Personal fanart.tv API key setting.
+  - Season posters: a TMDB season poster that is the same file as one of
+    its show's posters is skipped, and among equally liked fanart.tv
+    season posters the one uploaded together with the show's other
+    seasons' posters is preferred.
   - Seasons have a Details window, and Update now on a season or show
     refreshes the season posters too.
   - Posters, Episode thumbs, Fanart and Other art are off for every

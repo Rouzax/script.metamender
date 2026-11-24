@@ -11,6 +11,7 @@ from typing import Any
 from resources.lib.constants import (
     PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
 )
+from resources.lib.engine.art import drop_show_copies
 from resources.lib.engine.chain import TRANSIENT
 from resources.lib.engine.ids import (
     _enrich_imdb_id,
@@ -264,12 +265,18 @@ def _fetch_episode(
 def _show_record(ctx: _ScanCtx, show_tmdb_id: str, language: str, identity: str) -> Any:
     """The show's TMDB record (None when TMDB has no such show), fetched once
     per show in the cycle (the show pass may already have it), or
-    TRANSIENT."""
-    if show_tmdb_id in ctx.show_cache:
-        return ctx.show_cache[show_tmdb_id]
+    TRANSIENT. The record carries the show's posters (the season pass drops
+    season posters that are the same file); a cached one without them, from a
+    show pass that did not ask for images, is fetched again and replaced."""
+    cached = ctx.show_cache.get(show_tmdb_id)
+    if show_tmdb_id in ctx.show_cache and (
+        cached is None or "posters" in cached or not ctx.image_languages
+    ):
+        return cached
+    images = {"image_languages": ctx.image_languages} if ctx.image_languages else {}
     record = _call_provider(
         "tmdb",
-        lambda: tmdb.fetch_tvshow(show_tmdb_id, ctx.tmdb_api_key, language),
+        lambda: tmdb.fetch_tvshow(show_tmdb_id, ctx.tmdb_api_key, language, **images),
         ctx, identity,
     )
     if record is not TRANSIENT:
@@ -289,6 +296,7 @@ def _fetch_season(
     """Fetch a season's poster candidates and its TMDB air date.
 
     The record is {"posters": [...]}: no posters when TMDB has no such season.
+    Posters that are the same file as one of the show's own are left out.
     The season's air date, from its show's record, becomes the item's
     ``firstaired`` and the tracker row's ``premiered``, so the content age of
     this and later scans has it; a season TMDB gives no date keeps an unknown
@@ -311,7 +319,9 @@ def _fetch_season(
                 ),
                 ctx, identity,
             )
-            tmdb_data = TRANSIENT if posters is TRANSIENT else {"posters": posters or []}
+            tmdb_data = TRANSIENT if posters is TRANSIENT else {
+                "posters": drop_show_copies(posters or [], show.get("posters") or []),
+            }
             air_date = (show.get("season_air_dates") or {}).get(season)
             if air_date:
                 item[ctx.media_type.date_field] = air_date

@@ -16,8 +16,10 @@ from resources.lib.constants import FANART_API_KEY
 from resources.lib.engine.art import (
     ENGLISH_SOURCE_SUFFIX,
     TEXTLESS_SOURCE_SUFFIX,
+    Poster,
     is_placeholder_art,
     pick_art,
+    season_tie_break,
 )
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome
 from resources.lib.engine.fetch import _Primary
@@ -126,6 +128,28 @@ def _resolve_thumb(
     return _ANSWERED_EMPTY, None
 
 
+def _season_tie_break(
+    ctx: _ScanCtx, item: dict[str, Any], ids: _Ids,
+) -> Callable[[Poster], int] | None:
+    """The tie-break for a season's fanart.tv posters, or None for any other
+    type. Its reference is every fanart.tv poster of the show's other library
+    seasons. It is first used after the cached show answer was fetched, which
+    is when the reference can be read."""
+    if ctx.media_type.name != "season":
+        return None
+    season = int(item.get("season", 0) or 0)
+    others = [n for n in item.get("show_seasons") or [] if n != season]
+    cached: list[Callable[[Poster], int]] = []
+
+    def tie_break(poster: Poster) -> int:
+        if not cached:
+            answer = ctx.fanart_cache.get(("tv", str(ids.tvdb))) or {}
+            seasons = answer.get("seasons") or {}
+            cached.append(season_tie_break([seasons.get(n, []) for n in others]))
+        return cached[0](poster)
+    return tie_break
+
+
 def resolve_art(
     ctx: _ScanCtx,
     sources: _TextSources,
@@ -163,6 +187,7 @@ def resolve_art(
         ((primary.tmdb or {}).get(images) or []) if images else [],
         lambda: _fanart_images(ctx, sources.item, primary, ids, identity, field),
         ctx.art_source, lang, fallback, current, english,
+        tie_break=_season_tie_break(ctx, sources.item, ids),
     )
     if pick is TRANSIENT:
         return _TRANSIENT_OUTCOME, None

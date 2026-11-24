@@ -370,6 +370,13 @@ it once its tick is on, before the next scan.
 
 A season is left alone while MetaMender does not know its show's TMDB id.
 
+A season poster that is the same TMDB file as one of its show's posters is
+skipped, so a season does not simply repeat the show's poster; copies that
+were uploaded as separate files are not detected, and a poster you pick
+yourself is kept. When several fanart.tv season posters are equally liked,
+the one from the same upload batch as posters of the show's other seasons
+is preferred, so a show's seasons keep one look.
+
 ### If you use Artwork Dump
 
 MetaMender writes no image files. The art it sets is a link to the image on
