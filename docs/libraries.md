@@ -109,6 +109,8 @@ never changed, whatever you tick here.
 | Trailers | Trailer links from TMDB |
 | Taglines | Movie taglines in the library's language |
 | Posters | Fills empty posters of movies, shows and seasons, and refreshes posters from TMDB or fanart.tv while a title is new; see [Posters and episode thumbs](#posters-and-episode-thumbs) |
+| Fanart | Fills the main background image (fanart) of movies and shows, and refreshes it from TMDB or fanart.tv while a title is new, preferring one without text; only the main fanart, never the extra fanart (`fanart1`, `fanart2` and so on); see [Art](#art) |
+| Other art | Fills and refreshes the other art types: clear logo, key art, landscape, banner, disc art (movies only) and clear art, and character art (shows only); see [Art](#art) |
 | Episode thumbs | Replaces an episode thumb Kodi grabbed from the video, and a broken or empty one, with the official episode still |
 | Details | Genre, studio, country, runtime and first aired date |
 
@@ -193,17 +195,19 @@ setting uses.
 
 ### Art
 
-Shown while **Posters** is ticked.
+Shown while **Posters**, **Fanart** or **Other art** is ticked.
 
 ![The Art group on the page of the TV Shows library](screenshots/setup/setup-library-page-posters.png)
 
 **Art source**
-:   The site MetaMender takes movie, show and season posters from first:
-    **TMDB** (the default) or **fanart.tv**. Choose fanart.tv if you prefer
-    its posters; with either choice, a poster in the library's language
-    comes first, whichever site has it.
+:   The site MetaMender asks first, **TMDB** (the default) or
+    **fanart.tv**, for the art both sites have: posters, fanart, clear logos
+    and key art. Choose fanart.tv if you prefer its images; with either
+    choice, a poster in the library's language comes first, whichever site
+    has it. Landscape, banner, disc art, clear art and character art only
+    exist on fanart.tv, so the art source does not change them.
 
-MetaMender takes the first of these that exists:
+For a poster, MetaMender takes the first of these that exists:
 
 1. A poster in the library's language from the art source, then one from
    the other site.
@@ -243,8 +247,32 @@ text. A poster in the fallback language or without text is checked again
 every month for about a year, so a poster in the library's language replaces
 it once one appears.
 
+The other art types follow the same rules (best rated first, a current
+image stays unless a better one clearly leads, an unrated image never
+replaces a rated one in the same language), in their own order:
+
+| Art | Order | Sites |
+|---|---|---|
+| Fanart | Without text first, then the library's language, then the fallback language, then English for an empty fanart only | Art source first, then the other site |
+| Clear logo | As posters: library language, fallback language, without text, then English for an empty logo only | Art source first, then the other site |
+| Key art | Only a poster without text; key art has no language | Art source first, then the other site |
+| Landscape, banner, disc art, clear art, character art | As posters: library language, fallback language, without text, then English for empty art only | fanart.tv only |
+
+A fanart with text is checked again monthly for a while, like a poster in
+the fallback language, so a fanart without text replaces it once one
+appears. Where fanart.tv has a logo or clear art in HD and in the older,
+smaller SD size, an SD image is only used when no HD one exists in the same
+language. TMDB stores some logos as SVG files, which Kodi cannot show;
+MetaMender skips those.
+
+Disc art exists only for movies and character art only for shows. Fanart
+means the item's main background image: the extra fanart (`fanart1`,
+`fanart2` and so on) that some skins show as a slideshow is never changed.
+
 fanart.tv finds a movie by its TMDB or IMDb id and a show by its TheTVDB id.
-A show without a TheTVDB id only gets posters from TMDB.
+A show without a TheTVDB id only gets art from TMDB, and so none of the
+types only fanart.tv has. One fanart.tv request per item serves all its art
+types.
 
 ### Age ratings
 
@@ -284,8 +312,8 @@ for the countries, where ratings come from and what MetaMender writes.
 
 ## Posters and episode thumbs
 
-**Posters** and **Episode thumbs** are off until you tick them, also in a
-library you set up before MetaMender handled art. MetaMender changes only
+**Posters**, **Fanart**, **Other art** and **Episode thumbs** are off until
+you tick them, also in a library you set up before MetaMender handled art. MetaMender changes only
 which image Kodi points at: it does not download images or save image files.
 
 ### What MetaMender changes
@@ -294,47 +322,51 @@ which image Kodi points at: it does not download images or save image files.
 |---|---|
 | Episode thumb | Empty, a frame grab Kodi took from the video, or a broken link. It gets TMDB's episode still, or TheTVDB's episode image when TMDB has none. |
 | Movie, show or season poster | Empty or a broken link: filled. A poster from TMDB or fanart.tv: replaced when a better one leads (see [Art](#art)), while the title is new. |
+| Fanart and other art of movies and shows | As posters: filled when empty or a broken link, and an image from TMDB or fanart.tv replaced when a better one leads, while the title is new. |
 
 A frame grab is the picture Kodi takes from the video file when an episode
 has no thumb; on HDR and Dolby Vision files it looks washed out. A broken
 link points at a site but at no image, so Kodi shows nothing.
 
-Posters and thumbs are checked on the same schedule as other fields: once
+Art is checked on the same schedule as other fields: once
 when MetaMender first sees an item, then again while the title is new, then
 never again (see [how often a field is checked](scans.md#how-often-a-field-is-checked)).
 A title that is already old gets one check. For a season, its age is that of its first episode.
 
 ### What MetaMender leaves alone
 
-- **Local image files**, such as the posters and thumbs the Artwork Dump
-  add-on saved next to your videos. MetaMender cannot tell one you picked
+- **Local image files**, such as the posters, fanart, logos and thumbs the
+  Artwork Dump add-on saved next to your videos. MetaMender cannot tell one you picked
   from the rest, so it changes none of them.
 - **An episode thumb that is already an image on a website**, such as a TMDB
   still your scraper chose.
-- **A poster from any other website** than TMDB or fanart.tv.
-- **A poster that changed outside MetaMender.** MetaMender remembers the
-  poster an item had when it first looked at it with **Posters** ticked. If
-  the poster is later something other than that one or the one MetaMender
-  wrote, you (or another add-on, or a refresh in Kodi that brings a different
-  poster) chose it, and MetaMender locks it for good.
+- **A poster, fanart or other art from any other website** than TMDB or
+  fanart.tv.
+- **Art that changed outside MetaMender.** MetaMender remembers the poster
+  (or fanart, or logo) an item had when it first looked at it with that art
+  ticked. If it is later something other than that one or the one MetaMender
+  wrote, you (or another add-on, or a refresh in Kodi that brings different
+  art) chose it, and MetaMender locks it for good.
   The [Details window](details.md#posters-and-episode-thumbs) says so, and
   **Let MetaMender update this again** unlocks it: MetaMender then treats
   the poster it finds as the one it first saw.
 - **Art from an NFO file.** On an item with an NFO file, MetaMender only fills
-  a poster or thumb that is empty, a frame grab or a broken link. A season
+  art that is empty, a frame grab or a broken link. A season
   follows its show's NFO file.
 - **A field you locked** in the Details window.
 - **In a folder without a language** (only possible by editing MetaMender's
-  `sources.json` file), posters are only filled when empty or broken.
+  `sources.json` file), posters, fanart and the other art types are only
+  filled when empty or broken. Key art, which has no text, is refreshed as
+  usual.
 
-One case MetaMender cannot recognise: a poster you picked in Kodi before
-you ticked **Posters** for the library. If it comes from TMDB or fanart.tv,
-it looks like your scraper's choice and may be replaced once, at the first
-scan after ticking. Ticking **Posters** accepts that. To get such a poster
-back, open the item's Details window and choose **Restore original**: it
-puts the poster back and locks it. To protect one before it is replaced,
-choose **Keep this value** on it once **Posters** is ticked, before the next
-scan.
+One case MetaMender cannot recognise: a poster (or fanart, or other art)
+you picked in Kodi before you ticked **Posters** (or **Fanart**, or **Other
+art**) for the library. If it comes from TMDB or fanart.tv, it looks like
+your scraper's choice and may be replaced once, at the first scan after
+ticking. Ticking accepts that. To get such art back, open the item's
+Details window and choose **Restore original**: it puts the art back and
+locks it. To protect it before it is replaced, choose **Keep this value** on
+it once its tick is on, before the next scan.
 
 A season is left alone while MetaMender does not know its show's TMDB id.
 

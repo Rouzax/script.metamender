@@ -30,7 +30,8 @@ MOVIE = MediaType(
     backfill_fields=frozenset({
         "rating", "votes", "plot", "tagline", "director", "writer",
         "genre", "studio", "country", "trailer", "runtime", "mpaa", "title",
-        "poster",
+        "poster", "fanart", "clearlogo", "keyart", "landscape", "banner",
+        "discart", "clearart",
     }),
     date_field="premiered",
 )
@@ -46,6 +47,8 @@ TVSHOW = MediaType(
     kodi_detail_key="tvshowdetails",
     backfill_fields=frozenset({
         "rating", "votes", "plot", "genre", "mpaa", "title", "poster",
+        "fanart", "clearlogo", "keyart", "landscape", "banner", "clearart",
+        "characterart",
     }),
     date_field="premiered",
 )

@@ -52,6 +52,14 @@ _TMDB_TO_KODI = {
     # Art: the URLs engine/artsources.py picks, under the Kodi field names.
     "poster": "poster",
     "thumb": "thumb",
+    "fanart": "fanart",
+    "clearlogo": "clearlogo",
+    "keyart": "keyart",
+    "landscape": "landscape",
+    "banner": "banner",
+    "discart": "discart",
+    "clearart": "clearart",
+    "characterart": "characterart",
 }
 
 _KODI_TO_TMDB = {v: k for k, v in _TMDB_TO_KODI.items()}

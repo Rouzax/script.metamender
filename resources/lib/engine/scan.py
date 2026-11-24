@@ -124,8 +124,11 @@ from resources.lib.engine.art import (
     ART_FIELDS,
     ENGLISH,
     ENGLISH_SOURCE_SUFFIX,
+    FANART_ONLY_FIELDS,
     GATE_CHANGED,
     GATE_LOCAL,
+    TEXT_ART_FIELDS,
+    TMDB_ART_FIELDS,
     art_gate,
     is_placeholder_art,
 )
@@ -222,9 +225,11 @@ def settings_fingerprint(
     for ratings; for title and plot the folder's language and fallback
     language ("" when it has none), plus the provider and fallback orders on
     shows and episodes (movies ask TMDB only), plus the library's title mode
-    for a show's or movie's title; an episode thumb depends on no setting; a
-    poster on the art source, the folder language and the fallback
-    language; for every other field, one TMDB step, the folder language.
+    for a show's or movie's title; an episode thumb depends on no setting;
+    art both sites offer on the art source, the folder language and the
+    fallback language, except key art, which has no text and so depends on
+    the art source alone; fanart.tv-only art on the two languages; for every
+    other field, one TMDB step, the folder language.
     """
     if field in RATING_FIELDS:
         inputs: dict[str, Any] = {
@@ -255,9 +260,16 @@ def settings_fingerprint(
             inputs["title_mode"] = title_mode
     elif field == "thumb":
         inputs = {}
-    elif field == "poster":
+    elif field == "keyart":
+        inputs = {"art_source": settings.get("art_source", "tmdb")}
+    elif field in TMDB_ART_FIELDS:
         inputs = {
             "art_source": settings.get("art_source", "tmdb"),
+            "folder_language": folder_language,
+            "fallback_language": fallback_language.strip(),
+        }
+    elif field in FANART_ONLY_FIELDS:
+        inputs = {
             "folder_language": folder_language,
             "fallback_language": fallback_language.strip(),
         }
@@ -300,7 +312,7 @@ def _make_stats() -> dict[str, Any]:
         "tmdb_answered": False,
         "tvdb_answered": False,
         # fanart.tv rejected the key this cycle / gave a real answer; the
-        # posters that need it wait, so the caller tells the user.
+        # art that needs it waits, so the caller tells the user.
         "fanart_auth_failed": False,
         "fanart_answered": False,
     }
@@ -1442,10 +1454,10 @@ def run_scan(
             continue
 
         # A folder without a configured language is fetched in Kodi's
-        # interface language, a guess, so its text and posters only fill
-        # empty fields.
+        # interface language, a guess, so its text and its art with text
+        # only fill empty fields. Key art has no text, so it is not held back.
         language = folder_language or ui_language
-        fill_only = frozenset() if folder_language else LANGUAGE_FIELDS | {"poster"}
+        fill_only = frozenset() if folder_language else LANGUAGE_FIELDS.union(TEXT_ART_FIELDS)
         if fill_only and "language_unconfigured" not in ctx.logged_once:
             ctx.logged_once.add("language_unconfigured")
             log.info(
@@ -1663,8 +1675,9 @@ def run_scan(
 
         # Non-final fields are refreshed (overwrite-on-diff); final ones are not.
         nonfinal = [f for f, d in decisions.items() if d != FINAL]
-        if "poster" in nonfinal:
-            # The primary fetch brings the poster candidates along.
+        if TMDB_ART_FIELDS.intersection(nonfinal):
+            # The primary fetch brings TMDB's posters, backdrops and logos
+            # along; fanart.tv-only art does not need them.
             ctx = replace(ctx, image_languages=_image_languages(language, fallback_lang))
         tmdb_lang = tmdb_language(language)
         fetch_primary = {

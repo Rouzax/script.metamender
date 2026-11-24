@@ -1280,3 +1280,250 @@ def test_english_allowed_rules():
     # field_keep's written_fp outlives field_status's.
     assert _english_allowed(
         "poster", {"poster": NL_POSTER}, ours, {"written_fp": fingerprint(NL_POSTER)}, set())
+
+
+# ---------------------------------------------------------------------------
+# Fanart and other art
+# ---------------------------------------------------------------------------
+
+NONE_BD = "https://image.tmdb.org/t/p/original/textless_bd.jpg"
+NL_BD = "https://image.tmdb.org/t/p/original/nl_bd.jpg"
+EN_LOGO = "https://image.tmdb.org/t/p/original/en_logo.png"
+FANART_HD_LOGO = "https://assets.fanart.tv/fanart/movies/1/hdmovielogo/nl.png"
+FANART_SD_LOGO = "https://assets.fanart.tv/fanart/movies/1/movielogo/nl.png"
+FANART_BANNER = "https://assets.fanart.tv/fanart/movies/1/moviebanner/nl.jpg"
+_OTHER = frozenset({
+    "clearlogo", "keyart", "landscape", "banner", "discart", "clearart", "characterart",
+})
+
+
+def _art_fetch(**images):
+    """tmdb.fetch_movie / fetch_tvshow stand-in: the given image lists
+    (posters, backdrops, logos) only when images were asked for."""
+    def fetch(tmdb_id, api_key, language="en-US", image_languages=()):
+        data = _tmdb_movie_response()
+        if image_languages:
+            for key in ("posters", "backdrops", "logos"):
+                data[key] = list(images.get(key, ()))
+        return data
+    return fetch
+
+
+def _art_movie(recent=False, **art):
+    item = _movie("", recent=recent)
+    item.update(art)
+    return item
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_fanart_textless_backdrop_written(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _art_movie(fanart="")
+    mock_movie.side_effect = _art_fetch(
+        posters=[_tmdb(NL_POSTER, "nl", 9.0, 100)],
+        backdrops=[_tmdb(NL_BD, "nl", 9.0, 100), _tmdb(NONE_BD, None, 6.0, 5)],
+    )
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(frozenset({"fanart"}), _DUTCH), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert mock_movie.call_args.kwargs["image_languages"] == ("nl", "en")
+    assert mock_update.call_args.kwargs == {"fanart": NONE_BD}
+    assert fs_map["fanart"]["source"] == "tmdb:textless"
+    # A backdrop without text is fanart's first choice, not a fallback.
+    assert fs_map["fanart"]["from_fallback"] == 0
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_fanart1_never_touched(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = kodi.flatten_art(dict(_make_movie_item(), art={
+        "fanart1": "smb://server/movies/fanart1.jpg",
+    }), MOVIE)
+    mock_movie.side_effect = _art_fetch(backdrops=[_tmdb(NONE_BD, None)])
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(frozenset({"fanart"}), _DUTCH), [item])
+    tracker.close()
+
+    assert "fanart1" not in item
+    assert mock_update.call_args.kwargs == {"fanart": NONE_BD}
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_art")
+@patch("resources.lib.providers.tmdb.provider_get")
+def test_clearlogo_skips_to_fanart_hd_when_tmdb_logo_is_svg(
+    mock_get, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    item = _art_movie(clearlogo="")
+    mock_get.return_value = {"title": "Test Movie", "images": {"logos": [
+        {"file_path": "/logo.svg", "iso_639_1": "nl", "vote_average": 9.0, "vote_count": 50},
+    ]}}
+    mock_fanart.return_value = {"clearlogo": [
+        Poster(FANART_HD_LOGO, "fanart", "nl", (1,)),
+        Poster(FANART_SD_LOGO, "fanart", "nl", (9,), sd=True),
+    ]}
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(_OTHER, _DUTCH), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert _written(mock_update, "clearlogo") == FANART_HD_LOGO
+    assert fs_map["clearlogo"]["source"] == "fanart"
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_art")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_keyart_is_a_textless_poster_of_either_site(
+    mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    textless = "https://assets.fanart.tv/fanart/movies/1/movieposter/00.jpg"
+    item = _art_movie(keyart="")
+    mock_movie.side_effect = _art_fetch(posters=[_tmdb(NL_POSTER, "nl", 9.0, 100)])
+    mock_fanart.return_value = {"poster": [_fanart(FANART_NL, "nl", 9), _fanart(textless, None)]}
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(_OTHER, _DUTCH), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert _written(mock_update, "keyart") == textless
+    assert fs_map["keyart"]["from_fallback"] == 0
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_show_art")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_show_characterart_from_fanart_tv(
+    mock_show, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    url = "https://assets.fanart.tv/fanart/tv/777/characterart/a.png"
+    item = _make_tvshow_item()
+    item["uniqueid"] = {"tmdb": "99999", "tvdb": "777"}
+    item["characterart"] = ""
+    mock_show.return_value = dict(_tmdb_tvshow_response(), posters=[], backdrops=[], logos=[])
+    mock_fanart.return_value = {"show": {"characterart": [_fanart(url, None)]}, "seasons": {}}
+    tracker = _make_tracker(tmp_path)
+
+    run_scan(TVSHOW, tracker, _libs(_OTHER), "k", _make_settings(), items=[item])
+    tracker.close()
+
+    assert mock_fanart.call_args.args[0] == "777"
+    assert _written(mock_update, "characterart") == url
+
+
+def test_discart_not_managed_for_shows():
+    assert "discart" not in TVSHOW.backfill_fields
+    assert "characterart" not in MOVIE.backfill_fields
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_art")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_other_art_local_file_left_alone(
+    mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    local = {f: "smb://server/movies/test-{}.png".format(f)
+             for f in _OTHER & MOVIE.backfill_fields}
+    item = _art_movie(**local)
+    mock_movie.side_effect = _art_fetch(logos=[_tmdb(EN_LOGO, "nl")])
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(_OTHER, _DUTCH), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    mock_movie.assert_not_called()
+    mock_fanart.assert_not_called()
+    mock_update.assert_not_called()
+    assert {f: _reason(fs_map, f) for f in local} == {f: REASON_LOCAL_ART for f in local}
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_other_art_changed_outside_locks(mock_movie, mock_update, tmp_path, kodi_stubs):
+    nl_logo = "https://image.tmdb.org/t/p/original/nl_logo.png"
+    user_logo = "https://image.tmdb.org/t/p/original/user_logo.png"
+    item = _art_movie(recent=True, clearlogo=EN_LOGO)
+    mock_movie.side_effect = _art_fetch(logos=[_tmdb(nl_logo, "nl")])
+    tracker = _make_tracker(tmp_path)
+    libs = _libs(_OTHER, _DUTCH)
+    identity = compute_identity(item, MOVIE)
+    _scan_movies(tracker, libs, [item])
+    assert _written(mock_update, "clearlogo") == nl_logo
+    mock_update.reset_mock()
+
+    picked = dict(item, clearlogo=user_logo)
+    _make_due(tracker)
+    _scan_movies(tracker, libs, [picked])
+    locked = tracker.locked_fields("movie", identity)
+    reason = _reason(_fs(tracker, MOVIE, item), "clearlogo")
+    tracker.close()
+
+    assert _written(mock_update, "clearlogo") is None
+    assert "clearlogo" in locked
+    assert reason == REASON_CHANGED_OUTSIDE
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_art")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_fanart_only_type_waits_when_fanart_tv_is_down(
+    mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    item = _art_movie(banner="")
+    mock_movie.side_effect = _art_fetch()
+    mock_fanart.side_effect = TransientProviderError("down")
+    tracker = _make_tracker(tmp_path)
+
+    _scan_movies(tracker, _libs(_OTHER, _DUTCH), [item])
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert mock_fanart.called
+    assert _written(mock_update, "banner") is None
+    assert _count(fs_map, "banner") == 0
+    assert _reason(fs_map, "banner") == REASON_UNCHECKED
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_art")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_unconfigured_language_other_art_only_fills(
+    mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    fanart_bd = "https://assets.fanart.tv/fanart/movies/1/moviebackground/a.jpg"
+    keyart = "https://image.tmdb.org/t/p/original/keyart.jpg"
+    item = _art_movie(banner=FANART_BANNER, fanart=fanart_bd, keyart=keyart)
+    mock_movie.side_effect = _art_fetch(posters=[_tmdb(NONE_BD, None, 9.0, 100)])
+    tracker = _make_tracker(tmp_path)
+    libs = one_library(frozenset({"fanart"} | _OTHER), language="")
+    settings = dict(_make_settings(), ui_language="en-US")
+
+    _scan_movies(tracker, libs, [item], settings=settings)
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert _reason(fs_map, "banner") == REASON_FILL_ONLY
+    assert _reason(fs_map, "fanart") == REASON_FILL_ONLY
+    # Key art has no text, so the guessed language does not matter.
+    assert _written(mock_update, "keyart") == NONE_BD
+
+
+def test_settings_fingerprint_new_art_fields():
+    settings = {"art_source": "fanart"}
+    both = {"art_source": "fanart", "folder_language": "nl-NL", "fallback_language": "en"}
+    for field in ("poster", "fanart", "clearlogo"):
+        assert json.loads(settings_fingerprint(field, settings, "nl-NL", "movie", "en")) == both
+    assert json.loads(settings_fingerprint("keyart", settings, "nl-NL", "movie", "en")) == {
+        "art_source": "fanart",
+    }
+    for field in ("landscape", "banner", "discart", "clearart", "characterart"):
+        assert json.loads(settings_fingerprint(field, settings, "nl-NL", "movie", "en")) == {
+            "folder_language": "nl-NL", "fallback_language": "en",
+        }

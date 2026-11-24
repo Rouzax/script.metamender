@@ -24,17 +24,29 @@ New Features:
     locked, and Details shows why and can unlock it. A TMDB or fanart.tv
     poster picked before Posters was ticked may be replaced once; Restore
     original puts it back. MetaMender writes no image files.
-  - Art source per library: TMDB (the default) or fanart.tv.
+  - Art source per library: TMDB (the default) or fanart.tv, the site
+    asked first for posters, fanart, clear logos and key art.
   - English as a last resort for empty posters: when neither site has a
     poster in the library's language, the fallback language or without
     text, an empty poster is filled with an English one. An English
     poster never replaces one the item already has; one MetaMender
     filled this way is replaced once a better poster appears.
+  - Fanart, per library: with Fanart ticked, the main background image
+    of movies and shows is filled and refreshed from TMDB or fanart.tv
+    while a title is new, preferring one without text, then the
+    library's language, then the fallback language. Only the main
+    fanart is touched, never the extra fanart (fanart1, fanart2...).
+  - Other art, per library: with Other art ticked, clear logos (picked
+    like posters; TMDB's SVG logos, which Kodi cannot show, are
+    skipped), key art (a poster without text) and, from fanart.tv only,
+    landscape, banner, disc art (movies), clear art and character art
+    (shows) are filled and refreshed. fanart.tv's HD logos and clear art
+    come before the SD ones.
   - Optional Personal fanart.tv API key setting.
   - Seasons have a Details window, and Update now on a season or show
     refreshes the season posters too.
-  - Both ticks are off for every library, including libraries set up
-    before this version.
+  - Posters, Episode thumbs, Fanart and Other art are off for every
+    library, including libraries set up before this version.
   - Manual and help at the top of the settings: a window with a QR code
     and the address of the online manual, to open on a phone or computer.
 

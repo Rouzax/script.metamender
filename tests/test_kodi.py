@@ -469,3 +469,24 @@ def test_get_seasons_for_scan_lists_shows_without_art(kodi_stubs):
             for c in kodi_stubs["xbmc"].executeJSONRPC.call_args_list}
     assert "art" not in sent["VideoLibrary.GetTVShows"]
     assert "art" in sent["VideoLibrary.GetSeasons"]
+
+
+def test_flatten_art_exposes_fanart_but_not_extra_fanart():
+    item = {"art": {"fanart": "image://https%3a%2f%2fa%2fbd.jpg/", "fanart1": "smb://x/f1.jpg",
+                    "clearlogo": "image://https%3a%2f%2fa%2flogo.png/"}}
+    flat = flatten_art(item, MOVIE)
+    assert flat["fanart"] == "https://a/bd.jpg"
+    assert flat["clearlogo"] == "https://a/logo.png"
+    assert flat["banner"] == ""
+    assert "fanart1" not in flat
+
+
+def test_update_item_sends_only_the_given_art_keys(kodi_stubs, monkeypatch):
+    # monkeypatch puts the shared stub back, so later tests do not get "OK"
+    # for a listing.
+    monkeypatch.setattr(kodi_stubs["xbmc"], "executeJSONRPC",
+                        MagicMock(return_value=json.dumps({"result": "OK"})))
+    assert update_item(1, MOVIE, "x", fanart="https://a/bd.jpg", clearlogo="") is True
+    assert _sent_params(kodi_stubs) == {
+        "movieid": 1, "art": {"fanart": "https://a/bd.jpg", "clearlogo": None},
+    }

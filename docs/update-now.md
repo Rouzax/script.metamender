@@ -59,7 +59,7 @@ item in a library that is left out, or in no library, it changes nothing and
 a notification says the library is not included.
 
 If fanart.tv refuses the key, a second notification says so and whether it
-was your personal key; posters that need fanart.tv wait. See
+was your personal key; art that needs fanart.tv waits. See
 [Personal fanart.tv API key](settings.md#fanarttv).
 
 Only one scan runs at a time. If a background scan is busy, Update now says

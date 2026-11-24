@@ -413,7 +413,7 @@ def tvdb_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
 
 def fanart_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
     """True when any pass of a cycle reports that fanart.tv rejected the
-    key. Posters that need fanart.tv wait (they are never swapped to
+    key. Art that needs fanart.tv waits (it is never swapped to
     TMDB), so the user is told."""
     return any(s.get("fanart_auth_failed") for s in all_stats)
 

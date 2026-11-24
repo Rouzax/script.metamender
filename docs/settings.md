@@ -30,12 +30,13 @@ bottom left of the settings screen) to **Advanced**; they are marked
 ### fanart.tv
 
 **Personal fanart.tv API key**
-:   Optional. MetaMender asks fanart.tv for posters with its own key; with
+:   Optional. MetaMender asks fanart.tv for art with its own key; with
     your own personal key as well, new images reach you sooner. fanart.tv
     gives you a personal key with an account on its website. MetaMender works
-    without it, and it only matters for libraries with **Posters** ticked
-    (see [Posters](libraries.md#art)). If fanart.tv rejects the key,
-    posters that need fanart.tv wait, with nothing changed, until it works
+    without it, and it only matters for libraries with **Posters**,
+    **Fanart** or **Other art** ticked (see [Art](libraries.md#art)). If
+    fanart.tv rejects the key, art that needs fanart.tv waits, with nothing
+    changed, until it works
     again; everything else carries on. A notification tells you when your
     personal key is refused (once for background scans, each time for a
     manual scan or Update now): check it here, or clear the field to use

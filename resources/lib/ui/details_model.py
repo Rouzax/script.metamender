@@ -35,6 +35,7 @@ from resources.lib.engine.art import (
     ENGLISH_SOURCE_SUFFIX,
     FRAME_GRAB,
     LOCAL,
+    TEXT_ART_FIELDS,
     TEXTLESS_SOURCE_SUFFIX,
     WEB_FANART,
     WEB_OTHER,
@@ -80,7 +81,9 @@ _FIELD_LABELS = {
     "plot": 32511, "title": 32512, "rating": 32513, "runtime": 32514,
     "director": 32515, "writer": 32516, "genre": 32517, "studio": 32518,
     "country": 32519, "tagline": 32520, "trailer": 32521, "firstaired": 32522,
-    "mpaa": 32523, "poster": 32719, "thumb": 32720,
+    "mpaa": 32523, "poster": 32719, "thumb": 32720, "fanart": 32744,
+    "clearlogo": 32755, "keyart": 32756, "landscape": 32757, "banner": 32758,
+    "discart": 32759, "clearart": 32760, "characterart": 32761,
 }
 
 # Brand names, not translated. A rating source is a Kodi rating slot name;
@@ -93,7 +96,7 @@ _SOURCE_NAMES = {
 }
 # "kodi" is a certification Kodi already held, which is the scraper's.
 _SCRAPER_SOURCE = "kodi"
-# "{}, without text": where a textless poster came from.
+# "{}, without text": where textless art came from.
 _WITHOUT_TEXT = 32741
 # "{}, in English as a last resort": art filled from English for want of
 # anything in the library's languages or without text.
@@ -383,10 +386,16 @@ def _from_text(field: str, source: str | None, fs: dict[str, Any], language: str
         return lang(_CONVERTED).format(name)
     if field in ART_FIELDS and (source or "").endswith(ENGLISH_SOURCE_SUFFIX):
         return lang(_ENGLISH_LAST_RESORT).format(name)
-    if (field not in LANGUAGE_FIELDS and field != "poster") or source == _SCRAPER_SOURCE:
+    if (field not in LANGUAGE_FIELDS and field not in TEXT_ART_FIELDS) \
+            or source == _SCRAPER_SOURCE:
         return name
-    if field == "poster" and (source or "").endswith(TEXTLESS_SOURCE_SUFFIX):
+    if field in TEXT_ART_FIELDS and (source or "").endswith(TEXTLESS_SOURCE_SUFFIX):
         return lang(_WITHOUT_TEXT).format(name)
+    if field == "fanart":
+        # Fanart with text comes after the textless step whatever its
+        # language, so from_fallback cannot tell the library's language
+        # from the fallback one: no language is named.
+        return name
     if fs.get("from_fallback"):
         return lang(32533).format(name)
     return lang(32532).format(name, language) if language else name

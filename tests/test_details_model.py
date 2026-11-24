@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from resources.lib.data.media_types import EPISODE, MOVIE, SEASON
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.engine.protect import fingerprint
 from resources.lib.ui import details_model
 from resources.lib.ui.details_model import build_rows, header_line
@@ -597,3 +597,31 @@ def test_season_ids_show_each_id_once_when_the_row_holds_them():
     row = {"tmdb_id": "250000", "tvdb_id": "9001", "last_seen": TODAY}
     ids = build_rows(SEASON, item, row, {}, {}, TODAY, fields=["poster"])[0]
     assert ids.lines == [("TMDB", "250000"), ("TheTVDB", "9001")]
+
+
+@pytest.mark.parametrize("field, label", [
+    ("fanart", "Fanart"), ("clearlogo", "Clear logo"), ("keyart", "Key art"),
+    ("landscape", "Landscape"), ("banner", "Banner"), ("discart", "Disc art"),
+    ("clearart", "Clear art"), ("characterart", "Character art"),
+])
+def test_details_labels_for_new_art(field, label):
+    media_type = TVSHOW if field == "characterart" else MOVIE
+    row = _art_rows({field: "https://assets.fanart.tv/x.png"}, fs={"source": "fanart"},
+                    media_type=media_type, field=field)
+    assert row.label == label
+
+
+def test_details_source_of_new_art():
+    url = "https://image.tmdb.org/t/p/original/a.jpg"
+    row = _art_rows({"clearlogo": url}, media_type=MOVIE, field="clearlogo")
+    assert dict(row.lines)["From"] == "TMDB, in Dutch"
+    row = _art_rows({"fanart": url}, fs={"source": "tmdb:textless"},
+                    media_type=MOVIE, field="fanart")
+    assert dict(row.lines)["From"] == "TMDB, without text"
+    # Fanart with text is a step after the textless one, whatever its
+    # language, so Details does not name one.
+    row = _art_rows({"fanart": url}, fs={"from_fallback": 1}, media_type=MOVIE, field="fanart")
+    assert dict(row.lines)["From"] == "TMDB"
+    # Key art never has text.
+    row = _art_rows({"keyart": url}, fs={"source": "tmdb"}, media_type=MOVIE, field="keyart")
+    assert dict(row.lines)["From"] == "TMDB"

@@ -60,9 +60,9 @@ Select a field to see on the right:
 | You locked this field, so MetaMender leaves it alone. | See [Restore original and the lock](#restore-original-and-the-lock). |
 | Changed since MetaMender's update (your edit or a re-scrape). | Someone or something changed the value after MetaMender wrote it. |
 | Kodi lost MetaMender's value (a refresh or a re-scrape), so the next scan fills it again. | The field was emptied, for example by refreshing the item in Kodi. |
-| Local image file, left as it is | A poster or thumb that is an image file, for example one Artwork Dump saved. MetaMender never replaces those. |
-| Image from another source, left as it is | An episode thumb that is already an image on a website, or a poster from a website other than TMDB or fanart.tv. |
-| Changed outside MetaMender, left as it is | The poster changed after MetaMender first saw it, so you or something else chose it. It is locked; see [Posters and episode thumbs](#posters-and-episode-thumbs). |
+| Local image file, left as it is | Art that is an image file, for example one Artwork Dump saved. MetaMender never replaces those. |
+| Image from another source, left as it is | An episode thumb that is already an image on a website, or other art from a website other than TMDB or fanart.tv. |
+| Changed outside MetaMender, left as it is | The art changed after MetaMender first saw it, so you or something else chose it. It is locked; see [Posters and episode thumbs](#posters-and-episode-thumbs). |
 
 A field that is switched off for the item's library (for example Credits) says so
 instead of promising a next check.
@@ -71,27 +71,33 @@ instead of promising a next check.
 
 ## Posters and episode thumbs
 
-A poster or episode thumb shows as a field like any other, but its value is
-a description instead of a link: **Image from TMDB**, **Image from
-fanart.tv**, **Image from another website**, **Local image file**, **Frame
-grab from the video**, **Broken link** or **No image**.
+Art shows as fields like any other: **Poster**, **Fanart**, **Clear logo**,
+**Key art**, **Landscape**, **Banner**, **Disc art**, **Clear art**,
+**Character art** and **Episode thumb**, each while its tick is on for the
+item's library (disc art only on a movie, character art only on a show).
+Its value is a description instead of a link: **Image from TMDB**, **Image
+from fanart.tv**, **Image from another website**, **Local image file**,
+**Frame grab from the video**, **Broken link** or **No image**.
 
-- **From** names the site and, for a poster, its language, for example
-  "fanart.tv, in Dutch", "TMDB, without text" for a poster with no text
-  on it, or "TMDB, in English as a last resort" for an English poster that
-  filled an empty one. A poster in the fallback language, without text or in
-  English as a last resort is checked again monthly for a while, so a poster
-  in the library's language can replace it.
+- **From** names the site and, for art that can carry text, its language,
+  for example "fanart.tv, in Dutch", "TMDB, without text" for a poster with
+  no text on it, or "TMDB, in English as a last resort" for an English
+  poster that filled an empty one. Fanart with text names only the site,
+  since fanart without text comes first whatever the language; key art,
+  which never has text, and an episode thumb name only the site too. A
+  poster in the fallback language, without text or in English as a last
+  resort, and fanart with text, is checked again monthly for a while, so
+  better art can replace it.
 - **Replaced** says what was there before: *empty*, *was a frame grab*, *was
-  a broken link*, or *your scraper's value* for an earlier poster.
+  a broken link*, or *your scraper's value* for earlier art.
 
-**Restore original** puts the earlier poster or thumb back and locks the
+**Restore original** puts the earlier art back and locks the
 field, as for text.
 
-A poster that changed outside MetaMender, by your hand, another add-on or a
-refresh in Kodi that brings a different poster, is locked with a padlock and the reason **Changed outside
+Art that changed outside MetaMender, by your hand, another add-on or a
+refresh in Kodi that brings different art, is locked with a padlock and the reason **Changed outside
 MetaMender, left as it is**. **Let MetaMender update this again** unlocks it:
-at the next scan MetaMender treats the poster Kodi holds as the one it first
+at the next scan MetaMender treats the art Kodi holds as the one it first
 saw, and may then replace it with a better one. See
 [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs) for
 what MetaMender changes and what it leaves alone.

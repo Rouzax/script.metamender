@@ -1572,11 +1572,11 @@ msgid "{}, without text"
 msgstr ""
 
 msgctxt "#32742"
-msgid "fanart.tv refused your personal API key. Posters that need fanart.tv wait until it works. Check the key in Settings, Providers, or clear it to use MetaMender's own key."
+msgid "fanart.tv refused your personal API key. Art that needs fanart.tv waits until it works. Check the key in Settings, Providers, or clear it to use MetaMender's own key."
 msgstr ""
 
 msgctxt "#32743"
-msgid "fanart.tv refused MetaMender's key. Posters that need fanart.tv wait until it works again; everything else carries on."
+msgid "fanart.tv refused MetaMender's key. Art that needs fanart.tv waits until it works again; everything else carries on."
 msgstr ""
 
 msgctxt "#32744"
@@ -1621,4 +1621,32 @@ msgstr ""
 
 msgctxt "#32754"
 msgid "{}, in English as a last resort"
+msgstr ""
+
+msgctxt "#32755"
+msgid "Clear logo"
+msgstr ""
+
+msgctxt "#32756"
+msgid "Key art"
+msgstr ""
+
+msgctxt "#32757"
+msgid "Landscape"
+msgstr ""
+
+msgctxt "#32758"
+msgid "Banner"
+msgstr ""
+
+msgctxt "#32759"
+msgid "Disc art"
+msgstr ""
+
+msgctxt "#32760"
+msgid "Clear art"
+msgstr ""
+
+msgctxt "#32761"
+msgid "Character art"
 msgstr ""

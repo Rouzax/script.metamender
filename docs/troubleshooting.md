@@ -28,9 +28,8 @@ Sometimes, on purpose, and never where you told it not to:
 NFO files, leaving a library out, or switching a field off for a library,
 protect values from the start.
 
-Posters and episode thumbs have stricter rules: local image files, posters
-from other websites and a poster that changed outside MetaMender are never
-replaced. See
+Art has stricter rules: local image files, art from other websites and art
+that changed outside MetaMender are never replaced. See
 [What MetaMender leaves alone](libraries.md#what-metamender-leaves-alone).
 
 ### Why did it leave this field alone?
@@ -150,36 +149,44 @@ library.
 - **It was converted from another country's rating**: MetaMender replaces it
   when your country's real rating appears. See [Age ratings](age-ratings.md).
 
-### A poster or episode thumb did not change
+### Art did not change
 
-- **Posters** or **Episode thumbs** is not ticked for the library; both are
-  off until you tick them.
+This covers posters, fanart, the other art types (clear logo, key art,
+landscape, banner, disc art, clear art, character art) and episode thumbs.
+
+- **Its tick is off for the library**: **Posters**, **Fanart**, **Other
+  art** and **Episode thumbs** are all off until you tick them.
 - **The art is a local image file**, for example one Artwork Dump saved, or
-  a poster from a website other than TMDB or fanart.tv. MetaMender leaves
+  art from a website other than TMDB or fanart.tv. MetaMender leaves
   those alone; the Details window says *Local image file, left as it is* or
   *Image from another source, left as it is*.
 - **An episode thumb from a website that MetaMender did not set**, such as
   a TMDB still your scraper chose, is kept: only frame grabs, broken links
   and empty thumbs are replaced.
-- **The poster changed outside MetaMender**, so it is locked. Choose **Let
+- **The art changed outside MetaMender**, so it is locked. Choose **Let
   MetaMender update this again** in the Details window to unlock it.
-- **The current poster is still as good**: a poster is only replaced when a
-  better one clearly leads, and one without votes or likes never replaces one
-  that has them.
+- **The current image is still as good**: art is only replaced when a
+  better image clearly leads, and one without votes or likes never replaces
+  one that has them.
+- **Neither site has that art type** for the item. Landscape, banner, disc
+  art, clear art and character art come from fanart.tv only, so a movie or
+  show fanart.tv does not know keeps what it has. Disc art is only managed
+  for movies and character art only for shows; the extra fanart
+  (`fanart1` and so on) is never changed.
 - **A season of a show without a TMDB id** is left alone, and a show without
-  a TheTVDB id gets no posters from fanart.tv.
-- **fanart.tv did not answer** or rejected the key: posters that need it wait
+  a TheTVDB id gets no art from fanart.tv.
+- **fanart.tv did not answer** or rejected the key: art that needs it waits
   until it does. If it rejected the key, a notification said so (once for
   background scans, each time for a manual scan or Update now): *fanart.tv
   refused your personal API key* means the key in Settings, Providers is
   wrong (fix it, or clear it to use MetaMender's own key); *fanart.tv refused
-  MetaMender's key* is not something you can fix, and posters resume once
+  MetaMender's key* is not something you can fix, and art resumes once
   fanart.tv accepts the key again. See
   [Personal fanart.tv API key](settings.md#fanarttv).
-- **The item has an NFO file**: its poster and thumb are only filled when
-  empty, a frame grab or a broken link.
-- **The poster is settled.** Like other fields, a poster is checked while the
-  title is new and then left alone. **Update now** checks it once more.
+- **The item has an NFO file**: its art is only filled when empty, a frame
+  grab or a broken link.
+- **The art is settled.** Like other fields, art is checked while the title
+  is new and then left alone. **Update now** checks it once more.
 
 ### MetaMender changed something I wanted to keep
 
