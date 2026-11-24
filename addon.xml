@@ -40,7 +40,14 @@
         <website>https://rouzax.github.io/script.metamender/</website>
         <source>https://github.com/Rouzax/script.metamender</source>
         <forum>https://forum.kodi.tv/showthread.php?tid=389809</forum>
-        <news>v1.2.1 (2026-11-22)
+        <news>v1.3.0 (2026-11-24)
+- New art ticks per library: Posters, Fanart, Other art (clear logos, key art, banners and more) and Episode thumbs, from TMDB or fanart.tv
+- Washed-out HDR episode thumbs and empty, broken or deleted art get a proper image; your own local files and art you chose are never touched
+- New Movie sets tick: set names in your library's language, with plot and art, and duplicate sets merged
+- Movie sets and seasons get a Details window, and Update now works on a movie set
+- Stop scan stops sooner, and MetaMender's windows no longer flash grey while the library is written
+
+v1.2.1 (2026-11-22)
 - Browsing your movies or shows while a scan runs no longer keeps reloading the list: the scan waits until you have not pressed anything for a minute
 - New Stop scan in the MetaMender context menu while a scan runs; the next scan carries on where it stopped
 
@@ -50,12 +57,7 @@ v1.2.0 (2026-11-22)
 - New Keep the original title option per library
 - Settings from 1.1 are converted automatically on first start; nothing in your library changes. If they could not be read, nothing is switched on and a notice says so
 - Fixed: on OSMC and other Kodi builds with Python 3.9 the add-on did not start
-- With the IMDb ratings module 1.1.0, IMDb ratings no longer start a download in the middle of a scan
-
-v1.1.0 (2026-11-13)
-- Setup now asks which rating Kodi shows: your scraper's, TMDB's or IMDb's
-- Setup now asks where TV show plots and titles come from first
-- Setup asks whether to replace other countries' age ratings</news>
+- With the IMDb ratings module 1.1.0, IMDb ratings no longer start a download in the middle of a scan</news>
         <assets>
             <icon>icon.png</icon>
             <fanart>fanart.jpg</fanart>

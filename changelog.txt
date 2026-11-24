@@ -1,7 +1,7 @@
 MetaMender Changelog
 ====================
 
-v1.3.0 (unreleased)
+v1.3.0 (2026-11-24)
 -------------------
 New Features:
   - Posters, per library: with Posters ticked, MetaMender fills empty
@@ -26,11 +26,12 @@ New Features:
     original puts it back. MetaMender writes no image files.
   - Art source per library: TMDB (the default) or fanart.tv, the site
     asked first for posters, fanart, clear logos and key art.
-  - English as a last resort for empty posters: when neither site has a
-    poster in the library's language, the fallback language or without
-    text, an empty poster is filled with an English one. An English
-    poster never replaces one the item already has; one MetaMender
-    filled this way is replaced once a better poster appears.
+  - English as a last resort for empty art: when neither site has an
+    image in the library's language, the fallback language or without
+    text, empty art (an empty slot, a frame grab, a broken link or a
+    deleted local file) is filled with an English one. English art never
+    replaces art the item already has; art MetaMender filled this way is
+    replaced once a better image appears.
   - Fanart, per library: with Fanart ticked, the main background image
     of movies and shows is filled and refreshed from TMDB or fanart.tv
     while a title is new, preferring one without text, then the
@@ -47,7 +48,9 @@ New Features:
     like empty art, for every ticked art type. Deleting the files is
     enough; background scans check local files weekly, and opening
     MetaMender from Program add-ons or Update now checks at once. A share
-    that is offline is never taken for a deleted file.
+    that is offline is never taken for a deleted file. A movie or episode
+    whose video file is gone is left alone until Kodi's library is
+    cleaned; a movie set's art is judged by its art folder alone.
   - Movie sets, per library: with Movie sets ticked, a set gets TMDB's
     name for its collection in the library's language (then the fallback
     language, then English) and its plot like a movie's, and its poster,
