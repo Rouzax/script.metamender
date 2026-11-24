@@ -87,8 +87,9 @@ from fanart.tv**, **Image from another website**, **Local image file**,
   since fanart without text comes first whatever the language; key art,
   which never has text, and an episode thumb name only the site too. A
   poster, clear logo, landscape, banner, disc art, clear art or character
-  art in the fallback language or without text, and fanart with text, is
-  checked again monthly for a while, so better art can replace it.
+  art in the fallback language, without text or in English as a last resort,
+  and fanart with text, is checked again monthly for a while, so better art
+  can replace it.
 - **Replaced** says what was there before: *empty*, *was a frame grab*, *was
   a broken link*, *was a local file that no longer exists*, or *your
   scraper's value* for earlier art.
@@ -198,7 +199,8 @@ checked again, and the lock.
 - **Keep this value** locks the name, plot or art as it is now.
 - A name changed outside MetaMender is locked with the reason **Changed
   outside MetaMender, left as it is**; **Let MetaMender update this again**
-  unlocks it, and the next scan may give the set TMDB's name again.
+  unlocks it, and the next scan may give the set TMDB's name again. After
+  that, **Restore original** gives back your name, not TMDB's.
 
 The set's **Ids** entry shows its **TMDB collection** and, one line per
 movie, each movie MetaMender moved into the set from a duplicate: "*movie*:
