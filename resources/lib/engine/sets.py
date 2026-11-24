@@ -447,21 +447,41 @@ def _target_setid(plans: list[SetPlan], only_setid: Optional[int]) -> Optional[i
     return None
 
 
+@dataclass
+class _MoveResult:
+    # The members that moved, by managed setid.
+    moved: dict[int, list[dict[str, Any]]]
+    # The plot each managed set holds after its moves (see _restore_plot).
+    plots: dict[int, str]
+    # The caller's before_write said to stop (shutdown or Stop scan).
+    stopped: bool
+
+
 def _move_movies(
     ctx: _ScanCtx, moves: list[Move], kodi_sets: dict[int, dict[str, Any]],
     members: dict[int, dict[str, Any]], today: str, stats: dict[str, Any],
-) -> dict[int, list[dict[str, Any]]]:
+    before_write: Callable[[], bool],
+) -> _MoveResult:
     """Move each movie into its managed set by that set's current name, and
     keep the move once Kodi's own answer shows the movie in that set.
-    Returns the members that moved, by managed setid."""
-    moved: dict[int, list[dict[str, Any]]] = {}
+
+    ``before_write`` runs before each move: it holds while the user browses
+    the video library and returns False to stop. A move and the plot
+    restore it calls for are one unit, with no hold between them, so a stop
+    never leaves a managed set with the old set's plot."""
+    result = _MoveResult(moved={}, plots={}, stopped=False)
     for move in moves:
+        if not before_write():
+            result.stopped = True
+            break
         target = kodi_sets[move.to_setid]
         name = str(target.get("title") or "")
         member = members.get(move.movieid) or {}
         title = str(member.get("title") or "")
         ok = kodi.update_item(move.movieid, MOVIE, title, set=name)
         landed = kodi.get_movie_setid(move.movieid) if ok else None
+        # A refused or misfiled move may still have run AddSet on the set.
+        result.plots[move.to_setid] = _restore_plot(target)
         if landed != move.to_setid:
             log.warning(
                 "Movie not moved into the managed set", event="sets.move_failed",
@@ -472,14 +492,14 @@ def _move_movies(
         ctx.tracker.record_set_move(move.identity, move.movieid, move.from_name,
                                     move.to_setid, today)
         stats["moved"] = stats.get("moved", 0) + 1
-        moved.setdefault(move.to_setid, []).append(member)
+        result.moved.setdefault(move.to_setid, []).append(member)
         log.info("Movie moved into the managed set", event="sets.moved", movie=title,
                  from_set=move.from_name, to_set=name)
-    return moved
+    return result
 
 
 def _restore_plot(kodi_set: dict[str, Any]) -> str:
-    """Put the managed set's plot back after moves into it, and return the
+    """Put the managed set's plot back after a move into it, and return the
     plot it now has. Kodi's SetMovieDetails with ``set`` calls AddSet with
     the moved movie's old set overview, which overwrites the plot of the
     set it lands in."""
@@ -503,6 +523,7 @@ def prepare_sets(
     new_only: bool,
     only_setid: Optional[int],
     stats: dict[str, Any],
+    before_write: Optional[Callable[[], bool]] = None,
 ) -> list[dict[str, Any]]:
     """The managed sets for the set pass, after merging duplicate sets.
 
@@ -511,7 +532,15 @@ def prepare_sets(
     two or more Kodi sets has its names on record before the merge decision
     (_learn_names); plans; locks moves the user undid; moves the movies of
     duplicate sets, verifies each by re-reading the movie's setid, and puts
-    the managed set's plot back where a move changed it.
+    the managed set's plot back where a move changed it. ``before_write``
+    runs before each move (run_scan's browse hold, shutdown and Stop scan
+    checks); when it returns False no further movie moves and no set is
+    returned.
+
+    A set left alone that the tracker holds a row for (its Movie sets tick
+    went off, its library was left out, a tie) is marked present, so orphan
+    pruning keeps its history (originals, names) for when it is managed
+    again, as the movie pass does for excluded movies.
 
     ``new_only`` (a library-event cycle) still merges every collection but
     returns only the sets the tracker does not know yet. ``only_setid``
@@ -559,10 +588,17 @@ def prepare_sets(
     target = _target_setid(plans, only_setid) if only_setid is not None else None
     if only_setid is not None:
         moves = [m for m in moves if target is not None and m.to_setid == target]
-    moved = _move_movies(ctx, moves, by_setid, by_movieid, today, stats)
-    plots = {setid: _restore_plot(by_setid[setid])
-             for setid in sorted({m.to_setid for m in moves})}
+    result = _move_movies(ctx, moves, by_setid, by_movieid, today, stats,
+                          before_write or (lambda: True))
+    moved, plots = result.moved, result.plots
+
+    tracked = tracker.identities_by_kodi_id(SET.name)
+    for plan in plans:
+        if plan.reason is not None and plan.setid in tracked:
+            tracker.update_last_seen(SET.name, tracked[plan.setid], today)
     tracker.commit()
+    if result.stopped:
+        return []
 
     known = tracker.known_kodi_ids(SET.name) if new_only else set()
     items: list[dict[str, Any]] = []

@@ -991,6 +991,34 @@ def _hold_while_browsing(media_type: MediaType, monitor: Any) -> None:
     )
 
 
+def _before_set_move(
+    monitor: Any, reset: bool, stats: dict[str, Any],
+) -> Callable[[], bool]:
+    """The check sets.prepare_sets runs before moving a movie between sets:
+    False on shutdown or Stop scan (recorded in ``stats`` as the scan loop
+    does), otherwise it holds while the user browses the video library. A
+    move rewrites the library like any scan write. Update now (``reset``)
+    ignores Stop scan and writes straight away."""
+    def check() -> bool:
+        # The hold ends on shutdown and on Stop scan too, so both are
+        # checked after it.
+        if not reset:
+            _hold_while_browsing(SET, monitor)
+        if monitor is not None and monitor.abortRequested():
+            log.info("Scan interrupted by shutdown", event="scan.abort",
+                     media_type=SET.name, processed=0)
+            stats["aborted"] = True
+            return False
+        if not reset and _stop_requested():
+            log.info("Scan stopped by the user", event="scan.stopped",
+                     media_type=SET.name, processed=0)
+            stats["stopped"] = True
+            stats["aborted"] = True
+            return False
+        return True
+    return check
+
+
 def _cert_config(
     media_type: MediaType,
     enabled_fields: frozenset[str],
@@ -1470,7 +1498,8 @@ def run_scan(
     if items is None and media_type is SEASON:
         items = _season_items(tracker, shared.show_id_map, new_only)
     elif items is None and media_type is SET:
-        items = prepare_sets(shared, libraries, new_only, only_set, stats)
+        items = prepare_sets(shared, libraries, new_only, only_set, stats,
+                             _before_set_move(monitor, reset, stats))
     elif items is None:
         art = manages_art(media_type, libraries)
         items = (

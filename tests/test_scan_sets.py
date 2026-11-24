@@ -551,3 +551,83 @@ def test_only_set_merges_its_collection_and_scans_its_managed_set(
     assert _movie_moves(fake) == [(3, NL_NAME)]
     assert stats["processed"] == 1
     tracker.close()
+
+
+# ---------------------------------------------------------------------------
+# Browsing, stopping and presence
+# ---------------------------------------------------------------------------
+
+
+class _Monitor:
+    def abortRequested(self) -> bool:
+        return False
+
+    def waitForAbort(self, timeout: float = 0) -> bool:
+        return False
+
+
+def _record_order(fake: FakeKodi):
+    """A browse hold stand-in and the list that records it beside each Kodi
+    write, in order."""
+    order: list[str] = []
+    original = fake.update.side_effect
+
+    def update(item_id, media_type, log_title="", **fields):
+        order.append("{}:{}".format(media_type.name, ",".join(sorted(fields))))
+        return original(item_id, media_type, log_title, **fields)
+
+    fake.update.side_effect = update
+    return MagicMock(side_effect=lambda *a: order.append("hold")), order
+
+
+def test_set_moves_held_while_browsing(tmp_path, kodi_stubs, fake, tmdb_api):
+    tracker = _make_tracker(tmp_path)
+    _managed_then_duplicate(fake, tracker, tmdb_api, premiered="2010-07-09")
+    hold, order = _record_order(fake)
+    with patch("resources.lib.engine.scan._hold_while_browsing", hold):
+        _scan(tracker, _library(), monitor=_Monitor())
+    # Held before the move; the plot restore follows the move at once.
+    assert order[:3] == ["hold", "movie:set", "set:plot"]
+    tracker.close()
+
+
+def test_update_now_moves_without_hold(tmp_path, kodi_stubs, fake, tmdb_api):
+    tracker = _make_tracker(tmp_path)
+    _managed_then_duplicate(fake, tracker, tmdb_api)
+    hold, _order = _record_order(fake)
+    with patch("resources.lib.engine.scan._hold_while_browsing", hold), \
+            patch("resources.lib.engine.scan._stop_requested", return_value=True):
+        _scan(tracker, _library(), monitor=_Monitor(), reset=True, only_set=2)
+    hold.assert_not_called()
+    assert _movie_moves(fake) == [(3, NL_NAME)]
+    tracker.close()
+
+
+def test_stop_scan_before_a_move_ends_the_set_pass(tmp_path, kodi_stubs, fake, tmdb_api):
+    tracker = _make_tracker(tmp_path)
+    _managed_then_duplicate(fake, tracker, tmdb_api)
+    # Not stopped when the pass starts; stopped by the time a move is due.
+    stops = iter([False])
+    with patch("resources.lib.engine.scan._stop_requested",
+               side_effect=lambda: next(stops, True)):
+        stats = _scan(tracker, _library(), monitor=_Monitor())
+    assert _movie_moves(fake) == []
+    assert stats["stopped"] and stats["aborted"]
+    assert stats["processed"] == 0
+    tracker.close()
+
+
+def test_left_alone_managed_set_stays_present(tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    tracker._conn.execute("UPDATE items SET last_seen = '2000-01-01' WHERE media_type = 'set'")
+    tracker.commit()
+    tracker.start_new_cycle()
+    # Movie sets unticked in the set's library: the set is left alone.
+    _scan(tracker, _library(toggles=("plots",)))
+    tracker.prune_orphans("set", cutoff=date.today().isoformat())
+    assert tracker.get_item("set", IDENTITY) is not None
+    assert tracker.get_keep("set", IDENTITY)["title"]["original"] == EN_NAME
+    assert EN_NAME.lower() in tracker.get_set_names(IDENTITY)
+    tracker.close()
