@@ -10,6 +10,7 @@ import pytest
 
 from resources.lib.constants import FALLBACK_RECHECK_DAYS, FALLBACK_RECHECKS
 from resources.lib.data.identity import compute_identity
+from resources.lib.data.localart import EXISTS
 from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
 from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
 from resources.lib.engine.protect import fingerprint
@@ -41,10 +42,11 @@ def _scan_log():
 def _mock_secondary_providers():
     """Keep TVDB, the IMDb ratings store and the TMDB id lookups off the
     network: each answers "nothing" unless a test patches it. NFO detection
-    reports a reachable item without an NFO.
+    reports a reachable item without an NFO, and local art files exist.
     """
     with patch("resources.lib.providers.imdb_ratings.lookup", return_value=None), \
          patch("resources.lib.engine.scan.nfo_state", return_value=NO_NFO), \
+         patch("resources.lib.engine.scan.local_art_state", return_value=EXISTS), \
          patch("resources.lib.providers.tvdb.fetch_series", return_value=None), \
          patch("resources.lib.providers.tvdb.fetch_series_episodes", return_value=None), \
          patch("resources.lib.providers.tvdb.fetch_series_episode_numbers", return_value=None), \

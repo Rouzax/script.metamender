@@ -101,6 +101,21 @@ def test_restore_after_reset_uses_written_value(db):
     assert details.can_restore("plot", "new plot", {}, keep) is False
 
 
+def test_no_restore_for_missing_local_original():
+    """The kept original is a local file that no longer exists: putting the
+    dead path back would only break the art again."""
+    nl_poster = "https://image.tmdb.org/t/p/original/nl.jpg"
+    fs = {"written_value": fingerprint(nl_poster)}
+    local = {"poster": {"has_original": True, "original": "smb://h/p.jpg",
+                        "written_fp": fingerprint(nl_poster)}}
+    wrapped = {"poster": dict(local["poster"],
+                              original="image://smb%3a%2f%2fh%2fp.jpg/")}
+    web = {"poster": dict(local["poster"], original="https://example.org/p.jpg")}
+    assert not details.can_restore("poster", nl_poster, fs, local)
+    assert not details.can_restore("poster", nl_poster, fs, wrapped)
+    assert details.can_restore("poster", nl_poster, fs, web)
+
+
 def test_no_original_is_not_restorable(db):
     db.set_written_fp("movie", IDENT, "plot", fingerprint("new plot"))
     db.commit()

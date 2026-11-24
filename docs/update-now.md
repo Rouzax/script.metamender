@@ -23,6 +23,9 @@ that are settled or not due yet. It follows the same rules as a scan: values
 from an NFO file and fields you [locked](details.md#restore-original-and-the-lock)
 are left alone, and it fills in the same languages. It does not move the
 item's normal refresh schedule: the next scheduled check stays where it was.
+It also checks at once whether the item's local art files still exist, so
+art whose file you deleted is filled straight away when a site has an image
+for it.
 
 - **A movie or an episode** is refreshed at once. A notification says
   **Updated**, **No changes**, or **Could not check now** when a site did not

@@ -1650,3 +1650,7 @@ msgstr ""
 msgctxt "#32761"
 msgid "Character art"
 msgstr ""
+
+msgctxt "#32762"
+msgid "was a local file that no longer exists"
+msgstr ""

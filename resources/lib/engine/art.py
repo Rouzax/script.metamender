@@ -423,20 +423,22 @@ def art_gate(
 
     Placeholders (empty, frame grab, broken link) are always fair game, and so
     is a local file that no longer exists (``missing``) and a value whose
-    fingerprint is the one MetaMender last wrote. A thumb that is anything
-    else came from a scraper or the user. Any other art type is left alone
-    when it is local or from a host other than TMDB and fanart.tv, or when it
-    was changed since MetaMender first saw it (``first_fp``).
+    fingerprint is the one MetaMender last wrote. A local file that exists is
+    always left alone: MetaMender never writes a local path, so a written
+    fingerprint equal to one is only the record of a refill that found
+    nothing for a missing file, which must not outlive the file coming back.
+    A thumb that is anything else came from a scraper or the user. Any other
+    art type is left alone when it is from a host other than TMDB and
+    fanart.tv, or when it was changed since MetaMender first saw it
+    (``first_fp``).
     """
     kind = classify(unwrap(current))
     if kind in (EMPTY, FRAME_GRAB, BROKEN):
         return None
-    if kind == LOCAL and missing:
-        return None
+    if kind == LOCAL:
+        return None if missing else GATE_LOCAL
     if written_fp is not None and current_fp == written_fp:
         return None
-    if kind == LOCAL:
-        return GATE_LOCAL
     if field == "thumb" or kind not in (WEB_TMDB, WEB_FANART):
         return GATE_OTHER
     if first_fp is None or first_fp == current_fp:

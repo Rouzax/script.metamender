@@ -28,8 +28,8 @@ Sometimes, on purpose, and never where you told it not to:
 NFO files, leaving a library out, or switching a field off for a library,
 protect values from the start.
 
-Art has stricter rules: local image files, art from other websites and art
-that changed outside MetaMender are never replaced. See
+Art has stricter rules: local image files that exist, art from other
+websites and art that changed outside MetaMender are never replaced. See
 [What MetaMender leaves alone](libraries.md#what-metamender-leaves-alone).
 
 ### Why did it leave this field alone?
@@ -156,7 +156,7 @@ landscape, banner, disc art, clear art, character art) and episode thumbs.
 
 - **Its tick is off for the library**: **Posters**, **Fanart**, **Other
   art** and **Episode thumbs** are all off until you tick them.
-- **The art is a local image file**, for example one Artwork Dump saved, or
+- **The art is a local image file** that exists, for example one Artwork Dump saved, or
   art from a website other than TMDB or fanart.tv. MetaMender leaves
   those alone; the Details window says *Local image file, left as it is* or
   *Image from another source, left as it is*.
@@ -187,6 +187,28 @@ landscape, banner, disc art, clear art, character art) and episode thumbs.
   grab or a broken link.
 - **The art is settled.** Like other fields, art is checked while the title
   is new and then left alone. **Update now** checks it once more.
+
+### Art not filled after deleting files
+
+You deleted local art files so MetaMender would fill the art, but Kodi still
+shows no image.
+
+- **It has not been checked yet.** Background scans check whether local art
+  files still exist once a week. Open MetaMender from **Add-ons > Program
+  add-ons > MetaMender** to run a manual scan, which checks them all at
+  once, or use **Update now** on the item.
+- **Its tick is off for the library.** Only ticked art types are checked:
+  **Posters**, **Fanart**, **Other art** and **Episode thumbs**. A locked
+  field is never checked.
+- **The share was offline at the check.** MetaMender never treats an
+  unreachable drive or share as a deleted file; it checks again at the next
+  scan.
+- **You deleted the whole art folder**, and it was not inside the video's
+  folder. MetaMender cannot tell that from an offline share, so it leaves the
+  art alone. Recreate the empty folder and run a manual scan.
+- **Neither site has that art** for the item, so the slot stays empty. See
+  [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files).
+- **It is extra fanart** (`fanart1` and so on), which is never filled.
 
 ### MetaMender changed something I wanted to keep
 

@@ -133,6 +133,18 @@ CREATE TABLE IF NOT EXISTS art_seen (
     PRIMARY KEY (media_type, identity, field)
 );
 
+-- The last time a local art file was found to exist, keyed on the slot and
+-- the fingerprint of the path it held then (data/localart.py). A file that
+-- exists is checked again LOCAL_ART_RECHECK_DAYS later, not every scan.
+CREATE TABLE IF NOT EXISTS art_checks (
+    media_type TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    field TEXT NOT NULL,
+    path_fp TEXT,
+    checked_on TEXT,
+    PRIMARY KEY (media_type, identity, field)
+);
+
 CREATE TABLE IF NOT EXISTS scan_state (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -153,6 +165,10 @@ _UPSERT_KWARGS = frozenset((
 ))
 
 _ID_KWARGS = frozenset(("tmdb_id", "imdb_id", "tvdb_id"))
+
+# Tables keyed on (media_type, identity) rather than the items row: pruned
+# and re-keyed together with it.
+_IDENTITY_TABLES = ("field_keep", "art_seen", "art_checks")
 
 
 class TrackerDB:
@@ -489,7 +505,8 @@ class TrackerDB:
         """Delete items of this type whose last_seen is older than `cutoff`.
 
         Items with a NULL last_seen are kept (never confirmed present yet).
-        Associated field_status, field_keep and art_seen rows are deleted too.
+        Associated field_status, field_keep, art_seen and art_checks rows are
+        deleted too.
         `cutoff` is an ISO date string (callers pass today minus the
         retention window). Returns the number of items removed.
         """
@@ -502,7 +519,7 @@ class TrackerDB:
             ids = [r["id"] for r in doomed]
             if not ids:
                 return 0
-            for table in ("field_keep", "art_seen"):
+            for table in _IDENTITY_TABLES:
                 self._conn.executemany(
                     "DELETE FROM {} WHERE media_type = ? AND identity = ?".format(table),
                     [(media_type, r["identity"]) for r in doomed],
@@ -532,11 +549,11 @@ class TrackerDB:
     # ------------------------------------------------------------------
 
     def _move_keep(self, media_type: str, old: str, new: str) -> None:
-        """Re-key an item's field_keep and art_seen rows with its items row
-        (no commit)."""
+        """Re-key an item's field_keep, art_seen and art_checks rows with its
+        items row (no commit)."""
         # A row already at ``new`` is a stray of an item that left; the
         # moved rows belong to the item now at that identity, so they win.
-        for table in ("field_keep", "art_seen"):
+        for table in _IDENTITY_TABLES:
             self._conn.execute(
                 "UPDATE OR REPLACE {} SET identity = ? "
                 "WHERE media_type = ? AND identity = ?".format(table),
@@ -945,6 +962,39 @@ class TrackerDB:
         except sqlite3.Error:
             log.exception(
                 "Failed to forget first-seen art", event="tracker.error",
+                media_type=media_type, identity=identity, field=field,
+            )
+
+    # ------------------------------------------------------------------
+    # Local art existence checks
+    # ------------------------------------------------------------------
+
+    def get_art_check(
+        self, media_type: str, identity: str, field: str
+    ) -> tuple[str, str] | None:
+        """(path fingerprint, ISO date) of the last check that found the
+        slot's local file, or None when there is none."""
+        row = self._conn.execute(
+            "SELECT path_fp, checked_on FROM art_checks WHERE media_type = ? "
+            "AND identity = ? AND field = ?",
+            (media_type, identity, field),
+        ).fetchone()
+        return None if row is None else (row["path_fp"], row["checked_on"])
+
+    def set_art_check(
+        self, media_type: str, identity: str, field: str, path_fp: str, checked_on: str
+    ) -> None:
+        """Record that the slot's local file existed on ``checked_on`` (no
+        commit)."""
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO art_checks "
+                "(media_type, identity, field, path_fp, checked_on) VALUES (?, ?, ?, ?, ?)",
+                (media_type, identity, field, path_fp, checked_on),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record a local art check", event="tracker.error",
                 media_type=media_type, identity=identity, field=field,
             )
 

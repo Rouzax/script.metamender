@@ -41,6 +41,7 @@ from resources.lib.engine.art import (
     WEB_OTHER,
     WEB_TMDB,
     classify,
+    unwrap,
 )
 from resources.lib.engine.maturity import (
     FINAL,
@@ -127,7 +128,7 @@ _ART_TEXT = {
 }
 _OTHER_ART_TEXT = 32726
 # The art an original was, when it was not a link worth naming.
-_ART_WAS_TEXT = {FRAME_GRAB: 32728, BROKEN: 32729}
+_ART_WAS_TEXT = {FRAME_GRAB: 32728, BROKEN: 32729, LOCAL: 32762}
 _NEVER_CHECKED = 32546
 _CHANGED_SINCE = 32576
 _UNLOCKED = 32577
@@ -408,7 +409,7 @@ def _replaced_text(field: str, entry: dict[str, Any]) -> str:
     if is_empty(original):
         return lang(32536)
     if field in ART_FIELDS:
-        was = _ART_WAS_TEXT.get(classify(str(original)))
+        was = _ART_WAS_TEXT.get(classify(unwrap(str(original))))
         if was:
             return lang(was)
     return lang(32535)

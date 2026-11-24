@@ -48,6 +48,8 @@ Logging:
           disabled for the cycle, the scan continues
         - scan.art_gated (DEBUG): An art field is left alone before any fetch
           (verdict: local, other, changed; see art.art_gate)
+        - scan.local_art (DEBUG): A local art file was checked; state is
+          exists, missing or unreachable (data/localart.py)
         - scan.imdb_lookup_failed (ERROR): The IMDb ratings store raised
           unexpectedly; the rating is transient for that item. Logged with
           the traceback once per scan, at DEBUG after that
@@ -89,6 +91,7 @@ from resources.lib.constants import (
     DEFAULT_REFETCH_SCHEDULE,
     FALLBACK_RECHECKS,
     KODI_HOME_WINDOW_ID,
+    LOCAL_ART_RECHECK_DAYS,
     STOP_SCAN_PROPERTY,
     VIDEO_NAV_WINDOW,
     parse_refetch_schedule,
@@ -103,6 +106,7 @@ from resources.lib.data.libraries import (
     LibraryConfig,
     scan_settings,
 )
+from resources.lib.data.localart import EXISTS, MISSING, local_art_state
 from resources.lib.data.media_types import SEASON, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import load_preset
@@ -127,10 +131,13 @@ from resources.lib.engine.art import (
     FANART_ONLY_FIELDS,
     GATE_CHANGED,
     GATE_LOCAL,
+    LOCAL,
     TEXT_ART_FIELDS,
     TMDB_ART_FIELDS,
     art_gate,
+    classify,
     is_placeholder_art,
+    unwrap,
 )
 from resources.lib.engine.artsources import image_language, resolve_art
 from resources.lib.engine.breaker import CircuitBreaker
@@ -421,6 +428,7 @@ def _plan_writes(
     identity: str,
     fill_only: frozenset[str] = frozenset(),
     art_fps: dict[str, str] | None = None,
+    missing: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any], set[str]]:
     """Split extracted values into (fields to write, fields Kodi already holds).
 
@@ -431,7 +439,9 @@ def _plan_writes(
     is in neither result, so it gets no write and no source. ``art_fps``
     holds field_keep's written_fp of the art fields, which outlives Reset
     tracker: _gate_art and _drop_protected_art already let such a field
-    through as MetaMender's own, so it must be writable here too.
+    through as MetaMender's own, so it must be writable here too. An art
+    field in ``missing`` holds a local file that no longer exists, which
+    may_write takes as blank.
     """
     to_write: dict[str, Any] = {}
     held: set[str] = set()
@@ -442,7 +452,7 @@ def _plan_writes(
             continue
         protected = nfo_managed or f in fill_only
         written = (art_fps or {}).get(f) or fs_map.get(f, {}).get("written_value")
-        if not may_write(protected, current, written):
+        if not may_write(protected, "" if f in missing else current, written):
             log.debug(
                 "Field protected, value left as it is",
                 event="scan.protected", identity=identity, field=f,
@@ -722,9 +732,11 @@ def _gate_art(
     item: dict[str, Any],
     fs_map: dict[str, dict[str, Any]],
     decisions: dict[str, str],
+    missing: set[str],
 ) -> None:
     """Take the art fields MetaMender may not touch out of ``decisions``
-    (art.art_gate) before anything is fetched, and record why.
+    (art.art_gate) before anything is fetched, and record why. A field in
+    ``missing`` holds a local file that no longer exists, fair game.
 
     The URL Kodi holds at MetaMender's first look is stored as first seen,
     so a poster changed since, and not by MetaMender, is recognised as the
@@ -744,7 +756,7 @@ def _gate_art(
             tracker.set_first_fp(media_type, identity, f, current_fp)
         written_fp = ((keep.get(f) or {}).get("written_fp")
                       or (fs_map.get(f) or {}).get("written_value"))
-        verdict = art_gate(f, current, current_fp, first_fp, written_fp)
+        verdict = art_gate(f, current, current_fp, first_fp, written_fp, f in missing)
         if verdict is None:
             continue
         del decisions[f]
@@ -769,18 +781,20 @@ def _drop_protected_art(
     decisions: dict[str, str],
     protected: frozenset[str],
     reason: str,
+    missing: set[str],
 ) -> None:
     """Take out the ``protected`` art fields (all of them on an NFO item,
     the fill-only ones in a folder without a language) that _plan_writes
     would refuse to write (protect.may_write: neither empty nor a
     placeholder, nor MetaMender's own), so no request is made for them.
     MetaMender's own is recognised as _gate_art does, by field_keep's
-    written_fp first, which outlives Reset tracker."""
+    written_fp first, which outlives Reset tracker. A local file that no
+    longer exists (``missing``) counts as empty."""
     fields = [f for f in sorted(ART_FIELDS & protected & decisions.keys())
               if decisions[f] != FINAL]
     keep = tracker.get_keep(media_type, identity) if fields else {}
     for f in fields:
-        current = kodi_form(item.get(f) or "")
+        current = "" if f in missing else kodi_form(item.get(f) or "")
         written_fp = ((keep.get(f) or {}).get("written_fp")
                       or (fs_map.get(f) or {}).get("written_value"))
         if may_write(True, current, written_fp):
@@ -797,6 +811,7 @@ def _keep_originals(
     written: set[str],
     fields_to_write: dict[str, Any],
     fs_map: dict[str, dict[str, Any]],
+    missing: set[str],
 ) -> None:
     """Keep the value each written field held before this scan replaced it,
     unless that value was metamender's own (its fingerprint is the one
@@ -805,17 +820,74 @@ def _keep_originals(
     from before metamender's first write, stays. A scraper's or user's
     value since then replaces it. A field filled from empty keeps "" or []
     by the written value's type, so Restore can clear it. Rating slots get
-    no original: the scraper's slots stay beside metamender's."""
+    no original: the scraper's slots stay beside metamender's. A local file
+    that no longer exists (``missing``) is always kept: MetaMender never
+    writes a local path, so a matching fingerprint is only the record of an
+    earlier refill that found nothing."""
     fields = sorted(written - RATING_FIELDS)
     keep = tracker.get_keep(media_type, identity) if fields else {}
     for f in fields:
         current = kodi_form(item.get(f))
         ours = (keep.get(f) or {}).get("written_fp") or fs_map.get(f, {}).get("written_value")
-        if fingerprint(current) == ours:
+        if f not in missing and fingerprint(current) == ours:
             continue
         if current is None:
             current = [] if isinstance(fields_to_write.get(f), list) else ""
         tracker.keep_original(media_type, identity, f, current)
+
+
+def _checked_recently(check: tuple[str, str] | None, path_fp: str, today: str) -> bool:
+    """The slot's file was found under this same path within
+    LOCAL_ART_RECHECK_DAYS."""
+    if check is None or check[0] != path_fp:
+        return False
+    try:
+        age = date.fromisoformat(today) - date.fromisoformat(check[1])
+    except (TypeError, ValueError):
+        return False
+    return age.days < LOCAL_ART_RECHECK_DAYS
+
+
+def _check_local_art(
+    tracker: TrackerDB,
+    media_type: str,
+    identity: str,
+    item: dict[str, Any],
+    fields: list[str],
+    check_now: bool,
+    today: str,
+) -> tuple[set[str], set[str]]:
+    """Check the local art files of ``fields`` (the ticked, unlocked ones)
+    and return (missing, unreachable).
+
+    A file found to exist is checked again LOCAL_ART_RECHECK_DAYS later under
+    the same path; ``check_now`` (Update now, a manual scan) ignores that.
+    Missing and unreachable answers are not remembered, so they are asked
+    again next scan. Web links are never checked. None of this touches a
+    field's clock: a file on disk is not a provider answer.
+    """
+    missing: set[str] = set()
+    unreachable: set[str] = set()
+    media_path = str(item.get("file") or "")
+    for f in sorted(ART_FIELDS.intersection(fields)):
+        current = kodi_form(item.get(f) or "")
+        path = unwrap(current)
+        if classify(path) != LOCAL:
+            continue
+        path_fp = fingerprint(current)
+        if not check_now and _checked_recently(
+                tracker.get_art_check(media_type, identity, f), path_fp, today):
+            continue
+        state = local_art_state(path, media_path)
+        log.debug("Local art checked", event="scan.local_art", state=state, field=f,
+                  identity=identity)
+        if state == EXISTS:
+            tracker.set_art_check(media_type, identity, f, path_fp, today)
+        elif state == MISSING:
+            missing.add(f)
+        else:
+            unreachable.add(f)
+    return missing, unreachable
 
 
 def _yield_to_playback(ctx: _ScanCtx, monitor: Any, processed: int) -> None:
@@ -1207,8 +1279,10 @@ def run_scan(
         settings: The general settings: stale_threshold_days, rate_limit,
             cert_sites, optionally refetch_schedule, plus imdb_ready
             (whether the IMDb ratings store is loaded this cycle; an IMDb
-            rating is transient while it is False) and ui_language (Kodi's
-            interface language; read from Kodi when absent).
+            rating is transient while it is False), ui_language (Kodi's
+            interface language; read from Kodi when absent) and optionally
+            check_local_art_now (the manual scan: check every local art
+            file now instead of weekly; Update now always does).
         monitor: xbmc.Monitor instance (has abortRequested()), or
             None for tests.
         show_id_map: Dict mapping a show's Kodi id to its show-level TMDB ID.
@@ -1581,9 +1655,35 @@ def run_scan(
                 decisions[f] = FETCH_NOW
                 refills.add(f)
 
-        _gate_art(tracker, media_type.name, identity, item, fs_map, decisions)
+        # A local art file that no longer exists is fair game like a broken
+        # link; one whose share does not answer waits, untouched and
+        # unsampled. A FINAL field gets one refill for a missing file, like
+        # a blanked one; a refill that found nothing recorded the dead path
+        # as written, so that field is not checked (or fetched) again.
+        art_check = [
+            f for f in fields if f in ART_FIELDS and not (
+                decisions[f] == FINAL
+                and (fs_map.get(f) or {}).get("written_value")
+                == fingerprint(kodi_form(item.get(f) or ""))
+            )
+        ]
+        missing, unreachable = _check_local_art(
+            tracker, media_type.name, identity, item, art_check,
+            reset or bool(settings.get("check_local_art_now")), today,
+        )
+        for f in sorted(missing):
+            if decisions[f] == FINAL:
+                decisions[f] = FETCH_NOW
+                refills.add(f)
+        for f in sorted(unreachable):
+            if decisions[f] != FINAL:
+                del decisions[f]
+                stats["transient"] += 1
+                _art_reason(tracker, media_type.name, identity, f, fs_map, REASON_UNCHECKED)
+
+        _gate_art(tracker, media_type.name, identity, item, fs_map, decisions, missing)
         _drop_protected_art(tracker, media_type.name, identity, item, fs_map, decisions,
-                            fill_only, REASON_FILL_ONLY)
+                            fill_only, REASON_FILL_ONLY, missing)
         due = any(d == FETCH_NOW for d in decisions.values())
 
         # NFO detection touches the share, so it runs once, and only for an
@@ -1607,7 +1707,7 @@ def run_scan(
             nfo_managed = state == NFO
             if nfo_managed:
                 _drop_protected_art(tracker, media_type.name, identity, item, fs_map,
-                                    decisions, ART_FIELDS, REASON_NFO)
+                                    decisions, ART_FIELDS, REASON_NFO, missing)
                 due = any(d == FETCH_NOW for d in decisions.values())
 
         ids = _resolve_ids(
@@ -1689,8 +1789,6 @@ def run_scan(
             age = content_age_days(item, media_type, today)
 
         reopened = _reopened_fallbacks(item, fs_map, rebaseline)
-        # Art fields whose local file no longer exists.
-        missing: set[str] = set()
         art_due = sorted(ART_FIELDS.intersection(nonfinal))
         due_keep = tracker.get_keep(media_type.name, identity) if art_due else {}
         english = {
@@ -1738,6 +1836,7 @@ def run_scan(
             extracted, item, nfo_managed, fs_map, identity, fill_only,
             {f: k["written_fp"] for f, k in art_keep.items()
              if f in ART_FIELDS and k.get("written_fp")},
+            frozenset(missing),
         )
         stats["protected"] += len(extracted) - len(fields_to_write) - len(held)
 
@@ -1767,6 +1866,7 @@ def run_scan(
         )
         _keep_originals(
             tracker, media_type.name, identity, item, written, fields_to_write, fs_map,
+            missing,
         )
         # Episodes are keyed on their show's title; keep their rows. A failed
         # re-key is undone in the tracker, so the episodes keep the old key

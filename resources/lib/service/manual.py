@@ -115,6 +115,9 @@ def run() -> None:
         # A monitor so the manual scan yields to playback and honors abort,
         # exactly like the service scan.
         monitor = xbmc.Monitor()
+        # Opening MetaMender is how the user asks for deleted local art to
+        # be filled now, so every local art file is checked at once.
+        settings["check_local_art_now"] = True
         settings["imdb_ready"] = _prepare_imdb_ratings(
             [lib for lib in libraries.libraries if lib.included], monitor)
 

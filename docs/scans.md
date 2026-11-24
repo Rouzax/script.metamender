@@ -65,6 +65,10 @@ Some exceptions:
   episode.
 - **A field MetaMender could not check** (a site did not answer) is tried
   again at the next scan; a failed check never counts as a check.
+- **Local art files** are checked about once a week to see whether they
+  still exist (a manual scan and Update now check at once); a deleted one is
+  filled like empty art. See
+  [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files).
 
 The exact schedule is in the settings: **Staleness threshold (days)** (the one year)
 and **Refresh schedule (days)** (the week, month and three months; shown at the

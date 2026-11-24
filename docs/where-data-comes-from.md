@@ -67,14 +67,14 @@ page.
 | Runtime | Movies, episodes | TMDB | Replaces a different value. |
 | First aired | Episodes | TMDB | Replaces a different date. |
 | Trailer | Movies | TMDB | Replaces a different link. |
-| Poster | Movies, shows, seasons | TMDB and fanart.tv (order: **Art source**): library language, then fallback, then a poster without text, then English for an empty poster only; see [Art](libraries.md#art) | Fills an empty or broken poster. Replaces a poster from TMDB or fanart.tv when a better one clearly leads; never a local file, a poster from another website, or one changed outside MetaMender. See [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs). |
+| Poster | Movies, shows, seasons | TMDB and fanart.tv (order: **Art source**): library language, then fallback, then a poster without text, then English for an empty poster only; see [Art](libraries.md#art) | Fills an empty or broken poster, and one whose local file was deleted. Replaces a poster from TMDB or fanart.tv when a better one clearly leads; never a local file that exists, a poster from another website, or one changed outside MetaMender. See [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs). |
 | Fanart | Movies, shows | TMDB backdrops and fanart.tv backgrounds (order: **Art source**): without text, then library language, then fallback, then English for an empty fanart only | As posters. Only the main fanart: the extra fanart (`fanart1` and so on) is never changed. |
 | Clear logo | Movies, shows | TMDB logos and fanart.tv logos (order: **Art source**), as posters; an SVG logo from TMDB is skipped | As posters. |
 | Key art | Movies, shows | A poster without text from TMDB or fanart.tv (order: **Art source**) | As posters. |
 | Landscape, banner, clear art | Movies, shows | fanart.tv: library language, then fallback, then without text, then English for empty art only | As posters. |
 | Disc art | Movies | As landscape | As posters. |
 | Character art | Shows | As landscape | As posters. |
-| Episode thumb | Episodes | TMDB's episode still, then TheTVDB's episode image | Replaces a frame grab, a broken link or an empty thumb. A local file, or an image from a website that MetaMender did not set, stays. |
+| Episode thumb | Episodes | TMDB's episode still, then TheTVDB's episode image | Replaces a frame grab, a broken link, an empty thumb or a local file that no longer exists. A local file that exists, or an image from a website that MetaMender did not set, stays. |
 | Age rating | Movies, shows | TMDB for your country, your country's rating site, then other countries converted ([details](age-ratings.md#where-a-rating-comes-from)) | Fills an empty rating; replaces a rating from another country's system (switch off with **Replace other countries' ratings**). |
 
 Every row has the same three exceptions:

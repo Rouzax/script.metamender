@@ -28,6 +28,7 @@ from resources.lib.data.libraries import LibraryConfig, load_libraries, resolve_
 from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW, MediaType
 from resources.lib.data.presets import load_preset
 from resources.lib.data.tracker import REASON_LOCKED, TrackerDB
+from resources.lib.engine.art import ART_FIELDS, LOCAL, classify, unwrap
 from resources.lib.engine.scan import candidate_fields, item_fields
 from resources.lib.engine.scanctx import holds_written_value
 from resources.lib.service import actions
@@ -71,12 +72,16 @@ def can_restore(
     """An original is kept and Kodi still holds MetaMender's own value.
 
     ``keep`` is the item's get_keep() map; scanctx.holds_written_value
-    decides whether the value is MetaMender's own.
+    decides whether the value is MetaMender's own. A kept local art file is
+    one that no longer exists (an existing one is never replaced), so
+    putting its path back would only break the art again.
     """
     if field in RESTORABLE_EXCLUDED:
         return False
     entry = keep.get(field) or {}
     if not entry.get("has_original"):
+        return False
+    if field in ART_FIELDS and classify(unwrap(str(entry.get("original") or ""))) == LOCAL:
         return False
     return holds_written_value(field, current, fs, entry)
 

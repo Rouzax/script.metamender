@@ -1293,3 +1293,68 @@ def test_adopted_identity_keeps_first_fp(tmp_path):
     assert db.get_first_fp("movie", "imdb:tt1", "poster") == "fp-a"
     assert db.get_first_fp("movie", "Film (2020)", "poster") is None
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# art_checks: when a local art file was last found to exist
+# ---------------------------------------------------------------------------
+
+
+def test_art_check_round_trip(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    assert db.get_art_check("movie", "tmdb:1", "poster") is None
+    db.set_art_check("movie", "tmdb:1", "poster", "fp-a", "2026-11-01")
+    db.commit()
+    assert db.get_art_check("movie", "tmdb:1", "poster") == ("fp-a", "2026-11-01")
+    db.set_art_check("movie", "tmdb:1", "poster", "fp-b", "2026-11-08")
+    db.commit()
+    assert db.get_art_check("movie", "tmdb:1", "poster") == ("fp-b", "2026-11-08")
+    assert db.get_art_check("movie", "tmdb:1", "fanart") is None
+    db.close()
+
+
+def test_art_checks_table_created_on_existing_db(tmp_path):
+    """A database from before art_checks existed keeps its progress and gains
+    the table, without a schema bump."""
+    path = str(tmp_path / "backfill.db")
+    db = TrackerDB(path)
+    db.upsert_item("movie", "tmdb:1", title="M", kodi_id=1)
+    db.record_field_fetch("movie", "tmdb:1", "plot", next_retry="2030-01-01")
+    db.commit()
+    db._conn.execute("DROP TABLE IF EXISTS art_checks")
+    db._conn.commit()
+    db.close()
+
+    db = TrackerDB(path)
+    assert db.get_scan_state("schema_version") == str(SCHEMA_VERSION)
+    assert db.get_field_status_map("movie", "tmdb:1")["plot"]["fetch_count"] == 1
+    db.set_art_check("movie", "tmdb:1", "poster", "fp-a", "2026-11-01")
+    db.commit()
+    assert db.get_art_check("movie", "tmdb:1", "poster") == ("fp-a", "2026-11-01")
+    db.close()
+
+
+def test_prune_removes_art_checks(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "tmdb:1", title="Gone", kodi_id=1)
+    db.update_last_seen("movie", "tmdb:1", "2020-01-01")
+    db.upsert_item("movie", "tmdb:2", title="Here", kodi_id=2)
+    db.update_last_seen("movie", "tmdb:2", "2030-01-01")
+    db.set_art_check("movie", "tmdb:1", "poster", "fp-gone", "2026-11-01")
+    db.set_art_check("movie", "tmdb:2", "poster", "fp-here", "2026-11-01")
+    db.commit()
+    assert db.prune_orphans("movie", "2025-01-01") == 1
+    assert db.get_art_check("movie", "tmdb:1", "poster") is None
+    assert db.get_art_check("movie", "tmdb:2", "poster") == ("fp-here", "2026-11-01")
+    db.close()
+
+
+def test_adopted_identity_keeps_art_check(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Film (2020)", title="Film", kodi_id=7, imdb_id="tt1")
+    db.set_art_check("movie", "Film (2020)", "poster", "fp-a", "2026-11-01")
+    db.commit()
+    assert db.adopt_identity("movie", "imdb:tt1", 7) == "Film (2020)"
+    assert db.get_art_check("movie", "imdb:tt1", "poster") == ("fp-a", "2026-11-01")
+    assert db.get_art_check("movie", "Film (2020)", "poster") is None
+    db.close()

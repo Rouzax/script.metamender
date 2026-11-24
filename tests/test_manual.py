@@ -305,3 +305,17 @@ def test_manual_scan_clears_a_stale_stop_when_it_starts_and_ends(
 
     assert seen == ["", ""]
     assert stop_window.getProperty(STOP_SCAN_PROPERTY) == ""
+
+
+def test_manual_scan_checks_local_art_now(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock]
+) -> None:
+    """Opening MetaMender checks every local art file at once, so deleted
+    files are filled without waiting for the weekly check."""
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+
+    manual.run()
+
+    calls = patched["run_scan"].call_args_list
+    assert calls
+    assert all(c.kwargs["settings"]["check_local_art_now"] is True for c in calls)

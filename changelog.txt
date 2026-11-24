@@ -42,6 +42,12 @@ New Features:
     landscape, banner, disc art (movies), clear art and character art
     (shows) are filled and refreshed. fanart.tv's HD logos and clear art
     come before the SD ones.
+  - Deleted local art files are filled: art that points at a local file
+    that no longer exists (for example one Artwork Dump saved) is filled
+    like empty art, for every ticked art type. Deleting the files is
+    enough; background scans check local files weekly, and opening
+    MetaMender from Program add-ons or Update now checks at once. A share
+    that is offline is never taken for a deleted file.
   - Optional Personal fanart.tv API key setting.
   - Season posters: a TMDB season poster that is the same file as one of
     its show's posters is skipped, and among equally liked fanart.tv

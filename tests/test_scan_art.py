@@ -11,6 +11,7 @@ import pytest
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.libraries import ART_SOURCE_FANART
+from resources.lib.data.localart import EXISTS, MISSING, UNREACHABLE
 from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.nfo import NFO
 from resources.lib.data.tracker import (
@@ -1610,3 +1611,318 @@ def test_season_refetches_show_images_when_cache_has_none(
     assert mock_show.call_count == 1
     assert mock_show.call_args.kwargs["image_languages"] == ("en",)
     assert "posters" in cache["55555"]
+
+
+# ---------------------------------------------------------------------------
+# Local art files that no longer exist
+# ---------------------------------------------------------------------------
+
+LOCAL_POSTER = "smb://server/movies/poster.jpg"
+_LOCAL_STATE = "resources.lib.engine.scan.local_art_state"
+
+
+def _local_scan(tracker, item, state, libs=None, **kwargs):
+    """One movie scan with every local art file in ``state``; returns the
+    existence-check stand-in."""
+    with patch(_LOCAL_STATE, return_value=state) as check:
+        _scan_movies(tracker, libs or _libs(frozenset({"poster"}), _DUTCH), [item], **kwargs)
+    return check
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_missing_local_poster_is_filled(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie(LOCAL_POSTER)
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
+    tracker = _make_tracker(tmp_path)
+
+    check = _local_scan(tracker, item, MISSING)
+    ident = compute_identity(item, MOVIE)
+    keep = tracker.get_keep("movie", ident)
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    check.assert_called_once_with(LOCAL_POSTER, item["file"])
+    assert _written(mock_update, "poster") == NL_POSTER
+    assert keep["poster"]["original"] == LOCAL_POSTER
+    assert _reason(fs_map, "poster") == "updated"
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_missing_local_art_takes_english_last_resort(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie(LOCAL_POSTER)
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en")])
+    tracker = _make_tracker(tmp_path)
+
+    _local_scan(tracker, item, MISSING, libs=_libs(frozenset({"poster"}), _DUTCH_ONLY))
+    tracker.close()
+
+    assert _written(mock_update, "poster") == EN_POSTER
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_art")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_unreachable_local_art_is_transient(
+    mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
+):
+    """A sleeping NAS: neither the art, its folder nor the video answers.
+    Nothing is fetched, written or sampled, and the next scan checks again."""
+    item = _movie(LOCAL_POSTER)
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
+    tracker = _make_tracker(tmp_path)
+
+    _local_scan(tracker, item, UNREACHABLE)
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.start_new_cycle()
+    again = _local_scan(tracker, item, UNREACHABLE)
+    check = tracker.get_art_check("movie", compute_identity(item, MOVIE), "poster")
+    tracker.close()
+
+    assert not mock_movie.called
+    mock_fanart.assert_not_called()
+    mock_update.assert_not_called()
+    assert fs_map.get("poster", {}).get("fetch_count", 0) == 0
+    assert _reason(fs_map, "poster") == REASON_UNCHECKED
+    assert again.call_count == 1
+    assert check is None
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_unreachable_final_art_is_left_alone(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie("", recent=False)
+    item["premiered"] = "2000-01-01"
+    mock_movie.side_effect = _movie_fetch([])
+    tracker = _make_tracker(tmp_path)
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH), [item])
+    before = _fs(tracker, MOVIE, item)["poster"]
+
+    item["poster"] = LOCAL_POSTER
+    tracker.start_new_cycle()
+    _local_scan(tracker, item, UNREACHABLE)
+    after = _fs(tracker, MOVIE, item)["poster"]
+    tracker.close()
+
+    assert mock_movie.call_count == 1
+    assert after["fetch_count"] == before["fetch_count"] == 1
+    assert after["written_value"] == before["written_value"]
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_existing_local_file_checked_weekly(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie(LOCAL_POSTER)
+    tracker = _make_tracker(tmp_path)
+    ident = compute_identity(item, MOVIE)
+
+    def scan_after(days_ago=None):
+        if days_ago is not None:
+            checked = (date.today() - timedelta(days=days_ago)).isoformat()
+            tracker._conn.execute("UPDATE art_checks SET checked_on = ?", (checked,))
+            tracker.commit()
+        tracker.start_new_cycle()
+        return _local_scan(tracker, item, EXISTS).call_count
+
+    first = _local_scan(tracker, item, EXISTS).call_count
+    stored = tracker.get_art_check("movie", ident, "poster")
+    same_week = scan_after()
+    day_six = scan_after(6)
+    day_eight = scan_after(8)
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    assert (first, same_week, day_six, day_eight) == (1, 0, 0, 1)
+    assert stored == (fingerprint(LOCAL_POSTER), date.today().isoformat())
+    mock_movie.assert_not_called()
+    mock_update.assert_not_called()
+    assert _reason(fs_map, "poster") == REASON_LOCAL_ART
+    assert _count(fs_map, "poster") == 0
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_new_local_path_is_checked_at_once(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie(LOCAL_POSTER)
+    tracker = _make_tracker(tmp_path)
+    _local_scan(tracker, item, EXISTS)
+    item["poster"] = "smb://server/movies/other.jpg"
+    tracker.start_new_cycle()
+    calls = _local_scan(tracker, item, EXISTS).call_count
+    tracker.close()
+
+    assert calls == 1
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_update_now_checks_local_art_at_once(mock_movie, mock_update, tmp_path, kodi_stubs):
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
+    item = _movie(LOCAL_POSTER)
+    tracker = _make_tracker(tmp_path)
+    _local_scan(tracker, item, EXISTS)
+    check = _local_scan(tracker, item, MISSING, reset=True)
+    tracker.close()
+
+    assert check.call_count == 1
+    assert _written(mock_update, "poster") == NL_POSTER
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_manual_scan_setting_checks_local_art_at_once(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie(LOCAL_POSTER)
+    tracker = _make_tracker(tmp_path)
+    _local_scan(tracker, item, EXISTS)
+    tracker.start_new_cycle()
+    settings = dict(_make_settings(), check_local_art_now=True)
+    calls = _local_scan(tracker, item, EXISTS, settings=settings).call_count
+    tracker.close()
+
+    assert calls == 1
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_web_art_is_never_checked(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie(EN_POSTER)
+    tracker = _make_tracker(tmp_path)
+    check = _local_scan(tracker, item, MISSING)
+    tracker.close()
+
+    check.assert_not_called()
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_unticked_and_locked_art_is_never_checked(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _art_movie(poster=LOCAL_POSTER, fanart="smb://server/movies/fanart.jpg")
+    tracker = _make_tracker(tmp_path)
+    ident = compute_identity(item, MOVIE)
+    tracker.upsert_item("movie", ident, kodi_id=1, tmdb_id="12345")
+    tracker.set_locked("movie", ident, "fanart", True)
+    tracker.commit()
+    check = _local_scan(tracker, item, MISSING,
+                        libs=_libs(frozenset({"plot", "fanart"}), _DUTCH))
+    tracker.close()
+
+    check.assert_not_called()
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_final_missing_art_refilled_once(mock_movie, mock_update, tmp_path, kodi_stubs):
+    """An old movie's poster settled with nothing found; a local file set
+    since then was deleted. It gets one fetch; when that finds nothing either
+    the dead path is recorded, so it is not fetched (or checked) every week."""
+    item = _movie("")
+    item["premiered"] = "2000-01-01"
+    mock_movie.side_effect = _movie_fetch([])
+    tracker = _make_tracker(tmp_path)
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH), [item])
+    assert mock_movie.call_count == 1
+
+    item["poster"] = LOCAL_POSTER
+    tracker.start_new_cycle()
+    _local_scan(tracker, item, MISSING)
+    fs = _fs(tracker, MOVIE, item)["poster"]
+    tracker.start_new_cycle()
+    later = _local_scan(tracker, item, MISSING)
+    tracker.close()
+
+    assert mock_movie.call_count == 2
+    mock_update.assert_not_called()
+    assert fs["written_value"] == fingerprint(LOCAL_POSTER)
+    later.assert_not_called()
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_final_missing_art_filled_when_found(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie("")
+    item["premiered"] = "2000-01-01"
+    mock_movie.side_effect = _movie_fetch([])
+    tracker = _make_tracker(tmp_path)
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH), [item])
+
+    item["poster"] = LOCAL_POSTER
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
+    tracker.start_new_cycle()
+    _local_scan(tracker, item, MISSING)
+    keep = tracker.get_keep("movie", compute_identity(item, MOVIE))
+    tracker.close()
+
+    assert _written(mock_update, "poster") == NL_POSTER
+    assert keep["poster"]["original"] == LOCAL_POSTER
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_restored_file_after_empty_refill_is_left_alone(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    """The dead path recorded by an empty refill is not MetaMender's own: once
+    the file is back, Update now leaves it alone."""
+    item = _movie("")
+    item["premiered"] = "2000-01-01"
+    mock_movie.side_effect = _movie_fetch([])
+    tracker = _make_tracker(tmp_path)
+    _scan_movies(tracker, _libs(frozenset({"poster"}), _DUTCH), [item])
+    item["poster"] = LOCAL_POSTER
+    tracker.start_new_cycle()
+    _local_scan(tracker, item, MISSING)
+
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
+    _local_scan(tracker, item, EXISTS, reset=True)
+    fs_map = _fs(tracker, MOVIE, item)
+    tracker.close()
+
+    mock_update.assert_not_called()
+    assert _reason(fs_map, "poster") == REASON_LOCAL_ART
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_missing_local_art_on_nfo_item_is_filled(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _movie(LOCAL_POSTER)
+    mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
+    tracker = _make_tracker(tmp_path)
+
+    with patch("resources.lib.engine.scan.nfo_state", return_value=NFO):
+        _local_scan(tracker, item, MISSING)
+    tracker.close()
+
+    assert _written(mock_update, "poster") == NL_POSTER
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_missing_local_art_fills_in_unconfigured_language_folder(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    """Fill-only art takes a missing file as empty."""
+    item = _movie(LOCAL_POSTER)
+    mock_movie.side_effect = _movie_fetch([_tmdb(EN_POSTER, "en")])
+    tracker = _make_tracker(tmp_path)
+
+    _local_scan(tracker, item, MISSING, libs=_libs(
+        frozenset({"poster"}), {"sources": [], "default_language": "", "fallback_language": ""}))
+    tracker.close()
+
+    assert _written(mock_update, "poster") == EN_POSTER
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.fanart.fetch_movie_art")
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_missing_other_art_is_filled(mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs):
+    item = _art_movie(landscape="smb://server/movies/landscape.jpg")
+    mock_movie.side_effect = _art_fetch()
+    mock_fanart.return_value = {"landscape": [_fanart(FANART_NL, "nl")]}
+    tracker = _make_tracker(tmp_path)
+
+    _local_scan(tracker, item, MISSING, libs=_libs(_OTHER, _DUTCH))
+    tracker.close()
+
+    assert _written(mock_update, "landscape") == FANART_NL

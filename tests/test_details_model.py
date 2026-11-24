@@ -10,7 +10,7 @@ import pytest
 from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.engine.protect import fingerprint
 from resources.lib.ui import details_model
-from resources.lib.ui.details_model import build_rows, header_line
+from resources.lib.ui.details_model import ACTION_KEEP, ACTION_RESTORE, build_rows, header_line
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PO = (_ROOT / "resources/language/resource.language.en_gb/strings.po").read_text()
@@ -538,6 +538,8 @@ def test_poster_label():
     ("image://video@smb%3a%2f%2fnas%2fe.mkv", "was a frame grab"),
     ("https://thetvdb.com/banners/episodes/1/", "was a broken link"),
     ("https://example.org/old.jpg", "your scraper's value"),
+    ("smb://nas/movies/poster.jpg", "was a local file that no longer exists"),
+    ("image://smb%3a%2f%2fnas%2fposter.jpg/", "was a local file that no longer exists"),
 ])
 def test_art_replaced_text_frame_grab(original, text):
     keep = {"thumb": {"original": original, "has_original": True, "locked": False,
@@ -625,3 +627,17 @@ def test_details_source_of_new_art():
     # Key art never has text.
     row = _art_rows({"keyart": url}, fs={"source": "tmdb"}, media_type=MOVIE, field="keyart")
     assert dict(row.lines)["From"] == "TMDB"
+
+
+def test_replaced_text_for_local_original():
+    """A missing local original offers no Restore; Keep this value stays."""
+    keep = {"poster": {"original": "smb://nas/movies/poster.jpg", "has_original": True,
+                       "locked": False, "written_fp": None}}
+    row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
+                    keep=keep, media_type=MOVIE, field="poster")
+    assert dict(row.lines)["Replaced"] == "was a local file that no longer exists"
+    assert row.action == ACTION_KEEP
+    keep["poster"]["original"] = "https://example.org/old.jpg"
+    row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
+                    keep=keep, media_type=MOVIE, field="poster")
+    assert row.action == ACTION_RESTORE

@@ -351,6 +351,10 @@ def test_name_gate(cur, first, written, expected):
 def test_art_gate_missing_local_is_fair_game():
     assert art_gate("fanart", "smb://h/a/fanart.jpg", "fp", "fp", None, missing=True) is None
     assert art_gate("fanart", "smb://h/a/fanart.jpg", "fp", "fp", None) == GATE_LOCAL
+    # A refill that found nothing records the dead path as written; the
+    # file coming back is the user's again.
+    assert art_gate("fanart", "smb://h/a/fanart.jpg", "fp", "fp", "fp") == GATE_LOCAL
+    assert art_gate("fanart", "smb://h/a/fanart.jpg", "fp", "fp", "fp", missing=True) is None
 
 
 @pytest.mark.parametrize("field", sorted(ART_FIELDS - {"thumb"}))

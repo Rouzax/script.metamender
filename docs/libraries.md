@@ -213,8 +213,9 @@ For a poster, MetaMender takes the first of these that exists:
    the other site.
 2. The same in the fallback language, if the library has one.
 3. A poster without text, art source first.
-4. Only when the item has no poster (empty, a frame grab or a broken link):
-   an English poster, art source first. This last resort also applies when
+4. Only when the item has no poster (empty, a frame grab, a broken link or
+   a [deleted local file](#if-you-delete-your-local-art-files)): an English
+   poster, art source first. This last resort also applies when
    the library has a fallback language, and it adds nothing for an English
    library.
 
@@ -320,9 +321,9 @@ which image Kodi points at: it does not download images or save image files.
 
 | Art | Changed when it is |
 |---|---|
-| Episode thumb | Empty, a frame grab Kodi took from the video, or a broken link. It gets TMDB's episode still, or TheTVDB's episode image when TMDB has none. |
-| Movie, show or season poster | Empty or a broken link: filled. A poster from TMDB or fanart.tv: replaced when a better one leads (see [Art](#art)), while the title is new. |
-| Fanart and other art of movies and shows | As posters: filled when empty or a broken link, and an image from TMDB or fanart.tv replaced when a better one leads, while the title is new. |
+| Episode thumb | Empty, a frame grab Kodi took from the video, a broken link, or a local file that no longer exists. It gets TMDB's episode still, or TheTVDB's episode image when TMDB has none. |
+| Movie, show or season poster | Empty, a broken link or a local file that no longer exists: filled. A poster from TMDB or fanart.tv: replaced when a better one leads (see [Art](#art)), while the title is new. |
+| Fanart and other art of movies and shows | As posters: filled when empty, a broken link or a local file that no longer exists, and an image from TMDB or fanart.tv replaced when a better one leads, while the title is new. |
 
 A frame grab is the picture Kodi takes from the video file when an episode
 has no thumb; on HDR and Dolby Vision files it looks washed out. A broken
@@ -335,9 +336,11 @@ A title that is already old gets one check. For a season, its age is that of its
 
 ### What MetaMender leaves alone
 
-- **Local image files**, such as the posters, fanart, logos and thumbs the
-  Artwork Dump add-on saved next to your videos. MetaMender cannot tell one you picked
-  from the rest, so it changes none of them.
+- **Local image files that exist**, such as the posters, fanart, logos and
+  thumbs the Artwork Dump add-on saved next to your videos. MetaMender
+  cannot tell one you picked from the rest, so it changes none of them. A
+  file you deleted is filled like empty art; see
+  [If you delete your local art files](#if-you-delete-your-local-art-files).
 - **An episode thumb that is already an image on a website**, such as a TMDB
   still your scraper chose.
 - **A poster, fanart or other art from any other website** than TMDB or
@@ -351,7 +354,8 @@ A title that is already old gets one check. For a season, its age is that of its
   **Let MetaMender update this again** unlocks it: MetaMender then treats
   the poster it finds as the one it first saw.
 - **Art from an NFO file.** On an item with an NFO file, MetaMender only fills
-  art that is empty, a frame grab or a broken link. A season
+  art that is empty, a frame grab, a broken link or a local file that no
+  longer exists. A season
   follows its show's NFO file.
 - **A field you locked** in the Details window.
 - **In a folder without a language** (only possible by editing MetaMender's
@@ -383,6 +387,53 @@ MetaMender writes no image files. The art it sets is a link to the image on
 TMDB, TheTVDB or fanart.tv, which Kodi downloads and caches. If you run
 Artwork Dump again, it saves the new art as files next to your videos; from
 then on they are local files, which MetaMender leaves alone.
+
+### If you delete your local art files
+
+If you would rather have MetaMender's art than the image files saved next to
+your videos (for example by Artwork Dump), delete the files. That is all:
+there is no need to refresh the items or update the library in Kodi. Kodi
+keeps pointing at the deleted file, and MetaMender treats that slot as empty
+and fills it like any other empty art, in the library's language first.
+
+To fill the art straight away, delete the files and then open MetaMender
+from **Add-ons > Program add-ons > MetaMender** to run a manual scan.
+Otherwise the background scans find the deleted files within about a week:
+they check whether a local art file still exists once a week, not at every
+scan. **Update now** on a movie, show, season or episode also checks its
+files straight away.
+
+Only the art types ticked for the library are checked:
+
+| Tick | Art it covers |
+|---|---|
+| Posters | Movie, show and season posters |
+| Fanart | The main fanart of movies and shows |
+| Other art | Clear logo, key art, landscape, banner, disc art (movies), clear art and character art (shows) |
+| Episode thumbs | Episode thumbs |
+
+A field you locked is never checked, and the extra fanart (`fanart1` and so
+on) is never filled.
+
+**A share that is offline is not a deleted file.** When the drive or network
+share holding the art does not answer (a sleeping NAS, the network down),
+MetaMender changes nothing and checks again at the next scan. It only
+concludes that a file is gone when the folder it was in still exists, or
+when the video still answers and the art was in the video's folder. If you
+deleted a whole art folder that lies outside the video's folder, MetaMender
+cannot tell it from an offline share and leaves the art as it is; recreate
+the empty folder and run a manual scan.
+
+**When neither site has an image** of that type for the item, the slot stays
+as it is: Kodi still points at the deleted file and shows no image. For a
+title that is still new, MetaMender looks again at its next checks; for an
+older title it looks once, and after that only when you use **Update now**
+on it. Landscape, banner, disc art, clear art and character art come from
+fanart.tv only, so these stay empty more often than posters and fanart.
+
+The [Details window](details.md#posters-and-episode-thumbs) shows such art as
+**Replaced:** *was a local file that no longer exists*. **Restore original**
+is not offered for it, since the file is gone; **Keep this value** is.
 
 ## When your changes apply
 

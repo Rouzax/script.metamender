@@ -60,7 +60,7 @@ Select a field to see on the right:
 | You locked this field, so MetaMender leaves it alone. | See [Restore original and the lock](#restore-original-and-the-lock). |
 | Changed since MetaMender's update (your edit or a re-scrape). | Someone or something changed the value after MetaMender wrote it. |
 | Kodi lost MetaMender's value (a refresh or a re-scrape), so the next scan fills it again. | The field was emptied, for example by refreshing the item in Kodi. |
-| Local image file, left as it is | Art that is an image file, for example one Artwork Dump saved. MetaMender never replaces those. |
+| Local image file, left as it is | Art that is an image file, for example one Artwork Dump saved. MetaMender never replaces one that exists; a deleted one is filled (see [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files)). |
 | Image from another source, left as it is | An episode thumb that is already an image on a website, or other art from a website other than TMDB or fanart.tv. |
 | Changed outside MetaMender, left as it is | The art changed after MetaMender first saw it, so you or something else chose it. It is locked; see [Posters and episode thumbs](#posters-and-episode-thumbs). |
 
@@ -89,10 +89,12 @@ from fanart.tv**, **Image from another website**, **Local image file**,
   resort, and fanart with text, is checked again monthly for a while, so
   better art can replace it.
 - **Replaced** says what was there before: *empty*, *was a frame grab*, *was
-  a broken link*, or *your scraper's value* for earlier art.
+  a broken link*, *was a local file that no longer exists*, or *your
+  scraper's value* for earlier art.
 
 **Restore original** puts the earlier art back and locks the
-field, as for text.
+field, as for text. It is not offered when the earlier art was a local file
+that no longer exists.
 
 Art that changed outside MetaMender, by your hand, another add-on or a
 refresh in Kodi that brings different art, is locked with a padlock and the reason **Changed outside
