@@ -107,7 +107,7 @@ from resources.lib.data.libraries import (
     scan_settings,
 )
 from resources.lib.data.localart import EXISTS, MISSING, local_art_state
-from resources.lib.data.media_types import SEASON, MediaType
+from resources.lib.data.media_types import SEASON, SET, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import load_preset
 from resources.lib.data.sources import kodi_ui_language
@@ -1055,7 +1055,13 @@ def _own_bare(current: str, prefix: str) -> str:
 def candidate_fields(media_type: MediaType, enabled_fields: frozenset[str]) -> list[str]:
     """Fields this pass manages: enabled, backfilled for the media type, and
     known to the providers. An episode's title is enabled as "title", a show's
-    or movie's as "main_title", since they have separate toggles."""
+    or movie's as "main_title", since they have separate toggles. A set's
+    name and plot come with the Movie sets tick alone, its art with that tick
+    and the art's own."""
+    if media_type is SET:
+        if "movie_set" not in enabled_fields:
+            return []
+        return sorted({"plot", "title"} | (enabled_fields & SET.backfill_fields & ART_FIELDS))
     fields = (
         {_TMDB_TO_KODI.get(k, k) for k in _TMDB_TO_KODI}
         & enabled_fields & media_type.backfill_fields
@@ -1070,8 +1076,9 @@ def candidate_fields(media_type: MediaType, enabled_fields: frozenset[str]) -> l
 def item_fields(candidates: list[str], media_type: MediaType, identity: str) -> list[str]:
     """The pass's fields for one item. A show or movie keyed on its title
     ("title (year)", no tmdb or imdb id) does not get its title managed: a
-    new title would make it a new tracker item."""
-    if media_type.name == "episode" or identity.startswith(("tmdb:", "imdb:")):
+    new title would make it a new tracker item. A set's identity is its
+    collection, which a new name does not change."""
+    if media_type.name in ("episode", "set") or identity.startswith(("tmdb:", "imdb:")):
         return candidates
     return [f for f in candidates if f != "title"]
 
@@ -1133,6 +1140,15 @@ def scans_seasons(libraries: LibraryConfig) -> bool:
     callers skip the season pass otherwise, and with it the season listing."""
     return any(
         lib.included and candidate_fields(SEASON, lib.fields())
+        for lib in libraries.libraries
+    )
+
+
+def scans_sets(libraries: LibraryConfig) -> bool:
+    """Whether an included library has Movie sets ticked. The callers skip
+    the set pass otherwise, and with it the set and member listings."""
+    return any(
+        lib.included and candidate_fields(SET, lib.fields())
         for lib in libraries.libraries
     )
 

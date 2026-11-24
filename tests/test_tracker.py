@@ -1358,3 +1358,104 @@ def test_adopted_identity_keeps_art_check(tmp_path):
     assert db.get_art_check("movie", "imdb:tt1", "poster") == ("fp-a", "2026-11-01")
     assert db.get_art_check("movie", "Film (2020)", "poster") is None
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# Movie sets: member collections, set names and set moves
+# ---------------------------------------------------------------------------
+
+
+def test_movie_collection_round_trip(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    assert db.get_movie_collection("603") is None
+    db.set_movie_collection("603", "2344", "2026-11-01")
+    db.set_movie_collection("550", "", "2026-11-01")
+    db.commit()
+    assert db.get_movie_collection("603") == "2344"
+    assert db.get_movie_collection("550") == ""
+    db.set_movie_collection("603", "9999", "2026-11-08")
+    db.commit()
+    assert db.get_movie_collection("603") == "9999"
+    db.close()
+
+
+def test_set_names_round_trip(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    assert db.get_set_names("collection:86066") == frozenset()
+    db.add_set_names("collection:86066",
+                     ["Despicable Me Collection", "  Verschrikkelijke Ikke Collectie ", "", "   "])
+    db.add_set_names("collection:86066", ["DESPICABLE ME COLLECTION"])
+    db.add_set_names("collection:2150", ["Shrek Collection"])
+    db.commit()
+    assert db.get_set_names("collection:86066") == frozenset({
+        "despicable me collection", "verschrikkelijke ikke collectie"})
+    db.close()
+
+
+def test_set_move_round_trip_and_lock(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    assert db.get_set_move("tmdb:1") is None
+    db.record_set_move("tmdb:1", 7, "Despicable Me Collection", 4, "2026-11-01")
+    db.record_set_move("tmdb:2", 8, "Despicable Me Collection", 4, "2026-11-02")
+    db.record_set_move("tmdb:3", 9, "Shrek Collection", 5, "2026-11-01")
+    db.commit()
+    assert db.get_set_move("tmdb:1") == {
+        "kodi_id": 7, "from_name": "Despicable Me Collection", "to_setid": 4,
+        "moved_on": "2026-11-01", "locked": 0}
+    assert [m["identity"] for m in db.moves_into(4)] == ["tmdb:1", "tmdb:2"]
+    # A movie Kodi re-added is moved again: the record follows it.
+    db.record_set_move("tmdb:1", 70, "Despicable Me", 4, "2026-11-09")
+    db.commit()
+    assert db.get_set_move("tmdb:1")["kodi_id"] == 70
+    db.lock_set_move("tmdb:1")
+    db.record_set_move("tmdb:1", 71, "Other", 6, "2026-11-10")
+    db.commit()
+    move = db.get_set_move("tmdb:1")
+    assert move["locked"] == 1 and move["kodi_id"] == 70 and move["to_setid"] == 4
+    db.close()
+
+
+def test_prune_removes_set_names_and_moves(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    for media_type, identity, seen in (
+            ("set", "collection:1", "2020-01-01"), ("set", "collection:2", "2030-01-01"),
+            ("movie", "tmdb:1", "2020-01-01"), ("movie", "tmdb:2", "2030-01-01")):
+        db.upsert_item(media_type, identity, title=identity, kodi_id=1)
+        db.update_last_seen(media_type, identity, seen)
+    db.add_set_names("collection:1", ["Gone"])
+    db.add_set_names("collection:2", ["Here"])
+    db.record_set_move("tmdb:1", 1, "Gone", 3, "2026-11-01")
+    db.record_set_move("tmdb:2", 2, "Here", 3, "2026-11-01")
+    db.set_movie_collection("1", "86066", "2020-01-01")
+    db.commit()
+    assert db.prune_orphans("set", "2025-01-01") == 1
+    assert db.get_set_names("collection:1") == frozenset()
+    assert db.get_set_names("collection:2") == frozenset({"here"})
+    assert db.get_set_move("tmdb:1") is not None
+    assert db.prune_orphans("movie", "2025-01-01") == 1
+    assert db.get_set_move("tmdb:1") is None
+    assert db.get_set_move("tmdb:2") is not None
+    # Member collections are never pruned.
+    assert db.get_movie_collection("1") == "86066"
+    db.close()
+
+
+def test_set_tables_created_on_existing_db(tmp_path):
+    """A database from before the set tables existed gains them, keeping its
+    progress, without a schema bump."""
+    path = str(tmp_path / "backfill.db")
+    db = TrackerDB(path)
+    db.upsert_item("movie", "tmdb:1", title="Kept", kodi_id=1)
+    db.commit()
+    for table in ("movie_collections", "set_names", "set_moves"):
+        db._conn.execute("DROP TABLE {}".format(table))
+    db.commit()
+    db.close()
+    db = TrackerDB(path)
+    assert db.get_item("movie", "tmdb:1") is not None
+    db.set_movie_collection("603", "2344", "2026-11-01")
+    db.add_set_names("collection:2344", ["The Matrix Collection"])
+    db.record_set_move("tmdb:1", 1, "Matrix", 4, "2026-11-01")
+    db.commit()
+    assert db.get_movie_collection("603") == "2344"
+    db.close()

@@ -6,6 +6,7 @@ Logs under the 'scan' logger; the events are listed in engine/scan.py.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from resources.lib.constants import (
@@ -96,6 +97,14 @@ def _fetch_movie_or_show(
     if ctx.media_type.name == "tvshow" and tmdb_id and tmdb_data is not TRANSIENT:
         # The season pass reads its air dates from this record.
         ctx.show_cache[str(tmdb_id)] = tmdb_data
+
+    if (ctx.media_type.name == "movie" and tmdb_id and isinstance(tmdb_data, dict)
+            and "collection_id" in tmdb_data):
+        # Every /movie answer says which collection the movie is in, so the
+        # set pass need not ask TMDB for it again.
+        ctx.tracker.set_movie_collection(
+            str(tmdb_id), str(tmdb_data.get("collection_id") or ""), date.today().isoformat(),
+        )
 
     if (not imdb_id and tmdb_data is not TRANSIENT and tmdb_data
             and tmdb_data.get("imdb_id")):

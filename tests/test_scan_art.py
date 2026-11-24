@@ -300,6 +300,66 @@ def test_restore_original_puts_frame_grab_back(tmp_path, kodi_stubs):
 
 
 # ---------------------------------------------------------------------------
+# Movie collections
+# ---------------------------------------------------------------------------
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_movie_pass_records_collection_id(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _make_movie_item(tmdb_id="603")
+    mock_movie.return_value = _tmdb_movie_response(collection_id="2344")
+    tracker = _make_tracker(tmp_path)
+    _scan_movies(tracker, _libs(frozenset({"plot"})), [item])
+    tracker.close()
+    tracker = _make_tracker(tmp_path)
+    assert tracker.get_movie_collection("603") == "2344"
+    tracker.close()
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_movie_pass_records_no_collection(mock_movie, mock_update, tmp_path, kodi_stubs):
+    item = _make_movie_item(tmdb_id="550")
+    mock_movie.return_value = _tmdb_movie_response(collection_id="")
+    tracker = _make_tracker(tmp_path)
+    _scan_movies(tracker, _libs(frozenset({"plot"})), [item])
+    assert tracker.get_movie_collection("550") == ""
+    tracker.close()
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_movie")
+def test_transient_movie_answer_records_no_collection(
+    mock_movie, mock_update, tmp_path, kodi_stubs
+):
+    item = _make_movie_item(tmdb_id="603")
+    mock_movie.side_effect = TransientProviderError("down")
+    tracker = _make_tracker(tmp_path)
+    _scan_movies(tracker, _libs(frozenset({"plot"})), [item])
+    assert tracker.get_movie_collection("603") is None
+    tracker.close()
+
+
+def test_set_candidate_fields():
+    from resources.lib.data.media_types import SET
+    from resources.lib.engine.scan import candidate_fields, item_fields
+    assert candidate_fields(SET, frozenset({"plot", "poster", "main_title"})) == []
+    assert candidate_fields(SET, frozenset({"movie_set"})) == ["plot", "title"]
+    fields = frozenset({"movie_set", "poster", "fanart", "clearlogo", "characterart",
+                        "rating"})
+    assert candidate_fields(SET, fields) == ["clearlogo", "fanart", "plot", "poster", "title"]
+    assert item_fields(["plot", "title"], SET, "collection:86066") == ["plot", "title"]
+
+
+def test_scans_sets_needs_an_included_library_with_movie_sets():
+    from resources.lib.engine.scan import scans_sets
+    assert scans_sets(one_library({"movie_set"})) is True
+    assert scans_sets(one_library({"movie_set"}, included=False)) is False
+    assert scans_sets(one_library({"plot", "poster"})) is False
+
+
+# ---------------------------------------------------------------------------
 # Posters
 # ---------------------------------------------------------------------------
 

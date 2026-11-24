@@ -18,7 +18,7 @@ from typing import Any
 
 import xbmc
 
-from resources.lib.data.media_types import SEASON, TVSHOW, MediaType
+from resources.lib.data.media_types import MOVIE, SEASON, SET, TVSHOW, MediaType
 from resources.lib.engine.art import ART_FIELDS, unwrap
 from resources.lib.utils import KodiQueryError, get_logger, log_timing
 
@@ -48,6 +48,12 @@ _EXTRA_PROPERTIES = {
 # Kodi has no rating, uniqueid or date on a season.
 _SEASON_PROPERTIES = ["season", "showtitle", "tvshowid", "art", "title"]
 
+# A set has no file, ids or date of its own: those come from its members.
+_SET_PROPERTIES = ["title", "plot", "art"]
+
+# What the set planning reads of a movie in a set (engine/sets.py).
+_SET_MEMBER_PROPERTIES = ["title", "set", "setid", "file", "uniqueid", "premiered"]
+
 # Kodi's "All seasons" pseudo-entry.
 _ALL_SEASONS = -1
 
@@ -60,9 +66,12 @@ def _build_properties(media_type: MediaType, art: bool = True) -> list[str]:
     large (an episode's carries its show's and season's art too), so a
     listing for a pass that manages no art leaves it out. Seasons get their
     own short list, art included: a season is only scanned for its poster.
+    Sets get theirs, art included.
     """
     if media_type is SEASON:
         return list(_SEASON_PROPERTIES)
+    if media_type is SET:
+        return list(_SET_PROPERTIES)
     props = list(_BASE_PROPERTIES)
     props.append(media_type.date_field)
     if art:
@@ -178,6 +187,40 @@ def get_all_items(
     )
 
     return items
+
+
+def get_set_members() -> list[dict[str, Any]]:
+    """Every movie that sits in a set (``setid`` above 0), with what the set
+    planning needs. Raises KodiQueryError when the listing fails: no answer
+    is not the same as no members."""
+    query = {
+        "jsonrpc": "2.0",
+        "method": MOVIE.kodi_list_method,
+        "params": {"properties": list(_SET_MEMBER_PROPERTIES),
+                   "limits": {"start": 0, "end": 99999}},
+        "id": 1,
+    }
+    try:
+        data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
+    except Exception as exc:
+        log.exception("Failed to query set members", event="kodi.query", media_type="set")
+        raise KodiQueryError("JSON-RPC query failed for set members") from exc
+    if "error" in data or "result" not in data:
+        log.error("Set member query returned an error", event="kodi.query",
+                  media_type="set", error=str(data.get("error", "no result key")))
+        raise KodiQueryError("JSON-RPC error response for set members")
+    movies = data["result"].get(MOVIE.kodi_result_key, [])
+    return [m for m in movies if int(m.get("setid") or 0) > 0]
+
+
+def get_movie_setid(movieid: int) -> int | None:
+    """The setid a movie sits in now (0 for none), or None when the movie
+    is gone or the query failed."""
+    detail = _details(MOVIE.kodi_get_method, MOVIE.kodi_id_field, movieid,
+                      MOVIE.kodi_detail_key, ["setid"])
+    if not detail or "setid" not in detail:
+        return None
+    return int(detail["setid"] or 0)
 
 
 def get_seasons_for_scan(
