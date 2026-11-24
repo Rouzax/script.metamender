@@ -34,7 +34,10 @@ your own country.
     language; the **Art source** decides which site is asked first, and an
     empty image gets an English one when nothing better exists. Local image
     files stay, and so does art you change afterwards, but art whose local
-    file you deleted is filled like empty art. A replaced image can be put
+    file you deleted is filled like empty art, once MetaMender can tell its
+    share is online and not just offline
+    ([deleted local art files](libraries.md#if-you-delete-your-local-art-files)).
+    A replaced image can be put
     back from the Details window.
     [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs)
 

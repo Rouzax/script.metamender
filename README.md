@@ -23,8 +23,10 @@ background:
   language, from TMDB and fanart.tv (you choose which is asked first); an
   empty image gets an English one when nothing better exists. Local image
   files stay, and so does art you change afterwards, but a local file you
-  deleted is filled like empty art (a share that is offline never counts as
-  deleted). A replaced image can be put back from the Details window.
+  deleted is filled like empty art, once MetaMender can tell its share is
+  online and not just offline
+  ([details](https://rouzax.github.io/script.metamender/docs/libraries/#if-you-delete-your-local-art-files)).
+  A replaced image can be put back from the Details window.
 - **Movie sets in your language, if you want them.** A set gets TMDB's name
   and plot for its collection in the library's language, and its art, and a
   duplicate set Kodi makes under the old name is merged into the renamed one.
