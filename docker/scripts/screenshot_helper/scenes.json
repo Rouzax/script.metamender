@@ -64,7 +64,7 @@
     "focus": "country",
     "scroll": "end"
   },
-  "setup-library-page-posters": {
+  "setup-library-page-art": {
     "group": "setup",
     "window": "script-metamender-setup.xml",
     "kind": "setup",
@@ -73,7 +73,10 @@
     "toggles": [
       "plots",
       "posters",
-      "episode_thumbs"
+      "episode_thumbs",
+      "fanart",
+      "other_art",
+      "movie_sets"
     ],
     "focus": "art_source",
     "scroll": "end"
@@ -272,6 +275,13 @@
     "preset": "episode-locked",
     "focus": "title",
     "button": true
+  },
+  "details-movie-set": {
+    "group": "details",
+    "window": "script-metamender-details.xml",
+    "kind": "details",
+    "preset": "movie_set",
+    "focus": "title"
   },
   "help": {
     "group": "help",

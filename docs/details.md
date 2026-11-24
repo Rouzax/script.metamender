@@ -189,6 +189,8 @@ A movie set's window shows the fields MetaMender manages for the set while
 like any other field: where it came from, what it replaced, when it is
 checked again, and the lock.
 
+![The Details window for a movie set](screenshots/details/details-movie-set.png)
+
 - **Restore original** on the **Title** puts back the name the set had when
   you ticked **Movie sets** (usually your scraper's) and locks it, so
   MetaMender keeps it from then on. Restore works the same way for the plot

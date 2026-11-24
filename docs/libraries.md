@@ -198,7 +198,7 @@ setting uses.
 
 Shown while **Posters**, **Fanart** or **Other art** is ticked.
 
-![The Art group on the page of the TV Shows library](screenshots/setup/setup-library-page-posters.png)
+![The Art group on the page of the TV Shows library](screenshots/setup/setup-library-page-art.png)
 
 **Art source**
 :   The site MetaMender asks first, **TMDB** (the default) or
