@@ -35,8 +35,10 @@ TEXT_OPTIONS: tuple[int, ...] = (2, 0, 1)
 FALLBACK_ORDER_OPTIONS: tuple[int, ...] = (0, 1)
 # The toggles text_source_order decides (engine/text.py _text_chain).
 TEXT_TOGGLES: tuple[str, ...] = ("plots", "episode_titles", "main_titles")
-# poster_source values: TMDB, then fanart.tv.
-POSTER_OPTIONS: tuple[int, ...] = (0, 1)
+# The toggles whose art comes from the Art source setting.
+ART_TOGGLES: tuple[str, ...] = ("posters", "fanart", "other_art")
+# art_source values: TMDB, then fanart.tv.
+ART_OPTIONS: tuple[int, ...] = (0, 1)
 
 WIZARD = "wizard"
 LIBRARIES = "libraries"
@@ -83,8 +85,8 @@ def page_groups(lib: Library) -> list[str]:
         groups.append("text")
     if "main_titles" in lib.toggles:
         groups.append("titles")
-    if "posters" in lib.toggles:
-        groups.append("posters")
+    if any(t in lib.toggles for t in ART_TOGGLES):
+        groups.append("art")
     if "certifications" in lib.toggles:
         groups.append("age_ratings")
     return groups

@@ -69,7 +69,7 @@ from resources.lib.data.libraries import (
     read_libraries,
     save_libraries,
 )
-from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, SET, TVSHOW
 from resources.lib.data.sources import (
     discover_folders,
     kodi_ui_language,
@@ -87,7 +87,7 @@ from resources.lib.data.upgrade import (
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import SiteGate
 from resources.lib.engine.resolve import rating_sources
-from resources.lib.engine.scan import run_scan, scans_seasons
+from resources.lib.engine.scan import run_scan, scans_seasons, scans_sets
 from resources.lib.providers import imdb_ratings
 from resources.lib.service import attention
 from resources.lib.service.lock import (
@@ -413,7 +413,7 @@ def tvdb_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
 
 def fanart_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
     """True when any pass of a cycle reports that fanart.tv rejected the
-    key. Posters that need fanart.tv wait (they are never swapped to
+    key. Art that needs fanart.tv waits (it is never swapped to
     TMDB), so the user is told."""
     return any(s.get("fanart_auth_failed") for s in all_stats)
 
@@ -431,12 +431,15 @@ def _run_scan(
     monitor: MetaMendMonitor,
     new_only: bool = False,
 ) -> dict[str, dict[str, int]]:
-    """Run scan for MOVIE, TVSHOW, SEASON and EPISODE in order; with
+    """Run scan for MOVIE, SET, TVSHOW, SEASON and EPISODE in order; with
     ``new_only`` only the items new to the tracker (run_scan's new_only).
 
-    TV shows are scanned before seasons and episodes so their TMDB IDs are
-    available for the season lookups. The season pass runs only when an
-    included library manages season posters (scan.scans_seasons).
+    Movie sets follow the movies, whose pass stores each movie's TMDB
+    collection; the set pass runs only when an included library has Movie
+    sets ticked (scan.scans_sets). TV shows are scanned before seasons and
+    episodes so their TMDB IDs are available for the season lookups. The
+    season pass runs only when an included library manages season posters
+    (scan.scans_seasons).
 
     A Stop scan request ends the cycle after the pass it arrived in: the
     later passes, and the show id map between them, are skipped.
@@ -461,7 +464,8 @@ def _run_scan(
     fanart_cache: dict[tuple[str, str], Any] = {}
     show_cache: dict[str, Any] = {}
 
-    for media_type in (MOVIE, TVSHOW):
+    first = (MOVIE, SET, TVSHOW) if scans_sets(libraries) else (MOVIE, TVSHOW)
+    for media_type in first:
         stats = run_scan(
             media_type=media_type,
             tracker=tracker,
@@ -545,11 +549,15 @@ def _maybe_prune_orphans(
     cutoff = (date.today() - timedelta(days=retention)).isoformat()
     total_removed = 0
     # Only a type whose pass ran refreshed its last_seen stamps: seasons are
-    # not scanned while no library manages their poster, and their rows
-    # (kept originals included) must outlive that.
+    # not scanned while no library manages their poster, nor sets while no
+    # library has Movie sets ticked, and their rows (kept originals
+    # included) must outlive that. Sets are pruned only when ``scanned``
+    # names their pass.
     names = None if scanned is None else set(scanned)
-    for mt in (MOVIE, TVSHOW, SEASON, EPISODE):
+    for mt in (MOVIE, TVSHOW, SEASON, EPISODE, SET):
         if names is not None and mt.name not in names:
+            continue
+        if mt is SET and names is None:
             continue
         total_removed += tracker.prune_orphans(mt.name, cutoff=cutoff)
     if total_removed:
@@ -905,11 +913,14 @@ def run() -> None:
                         tvshow_stats = all_stats.get("tvshow", {})
                         season_stats = all_stats.get("season", {})
                         episode_stats = all_stats.get("episode", {})
+                        set_stats = all_stats.get("set", {})
 
                         log.info(
                             "Scan complete",
                             event="service.scan_complete",
                             movies_updated=movie_stats.get("updated", 0),
+                            sets_updated=set_stats.get("updated", 0),
+                            movies_moved=set_stats.get("moved", 0),
                             tvshows_updated=tvshow_stats.get("updated", 0),
                             seasons_updated=season_stats.get("updated", 0),
                             episodes_updated=episode_stats.get("updated", 0),

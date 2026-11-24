@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from resources.lib.data.identity import compute_identity
-from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, SET, TVSHOW
 
 
 # NB: items here carry `premiered`/`firstaired` (the date fields the scan
@@ -79,3 +79,9 @@ def test_season_without_show_tmdb_id_has_no_identity():
     item = {"season": 1, "showtitle": "Lost", "tvshowid": 7}
     assert compute_identity(item, SEASON) == ""
     assert compute_identity(dict(item, show_tmdb_id=None), SEASON) == ""
+
+
+def test_set_identity():
+    assert compute_identity({"setid": 4, "collection_id": "86066"}, SET) == "collection:86066"
+    assert compute_identity({"setid": 4, "collection_id": ""}, SET) == ""
+    assert compute_identity({"setid": 4, "title": "Favourites"}, SET) == ""

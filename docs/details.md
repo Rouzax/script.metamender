@@ -1,15 +1,16 @@
 # The Details window
 
 The Details window answers "why does this field look like this?" for one movie,
-TV show, season or episode: where each value came from, what it replaced, when
+TV show, season, episode or movie set: where each value came from, what it replaced, when
 MetaMender last checked it and when it checks again, and why it left a field
 alone. Opening it changes nothing.
 
 ## Opening it
 
-Open the context menu of a movie, show, season or episode in your library and
-choose **MetaMender > Details**. A season has one field, its poster, so its
-window is short; the season's **Ids** are its show's.
+Open the context menu of a movie, show, season, episode or movie set in your
+library and choose **MetaMender > Details**. A season has one field, its
+poster, so its window is short; the season's **Ids** are its show's. For a
+movie set, see [Movie sets](#movie-sets).
 
 ![The Details window for an episode](screenshots/details/details-plot-updated.png)
 
@@ -60,38 +61,49 @@ Select a field to see on the right:
 | You locked this field, so MetaMender leaves it alone. | See [Restore original and the lock](#restore-original-and-the-lock). |
 | Changed since MetaMender's update (your edit or a re-scrape). | Someone or something changed the value after MetaMender wrote it. |
 | Kodi lost MetaMender's value (a refresh or a re-scrape), so the next scan fills it again. | The field was emptied, for example by refreshing the item in Kodi. |
-| Local image file, left as it is | A poster or thumb that is an image file, for example one Artwork Dump saved. MetaMender never replaces those. |
-| Image from another source, left as it is | An episode thumb that is already an image on a website, or a poster from a website other than TMDB or fanart.tv. |
-| Changed outside MetaMender, left as it is | The poster changed after MetaMender first saw it, so you or something else chose it. It is locked; see [Posters and episode thumbs](#posters-and-episode-thumbs). |
+| Local image file, left as it is | Art that is an image file, for example one Artwork Dump saved. MetaMender never replaces one that exists; a deleted one is filled (see [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files)). |
+| Image from another source, left as it is | An episode thumb that is already an image on a website, or other art from a website other than TMDB or fanart.tv. |
+| Changed outside MetaMender, left as it is | The art changed after MetaMender first saw it, so you or something else chose it. It is locked; see [Art and episode thumbs](#art-and-episode-thumbs). |
 
 A field that is switched off for the item's library (for example Credits) says so
 instead of promising a next check.
 
 ![A field left alone because an NFO file sets it](screenshots/details/details-plot-protected.png)
 
-## Posters and episode thumbs
+## Art and episode thumbs
 
-A poster or episode thumb shows as a field like any other, but its value is
-a description instead of a link: **Image from TMDB**, **Image from
-fanart.tv**, **Image from another website**, **Local image file**, **Frame
-grab from the video**, **Broken link** or **No image**.
+Art shows as fields like any other: **Poster**, **Fanart**, **Clear logo**,
+**Key art**, **Landscape**, **Banner**, **Disc art**, **Clear art**,
+**Character art** and **Episode thumb**, each while its tick is on for the
+item's library (disc art only on a movie, character art only on a show).
+Its value is a description instead of a link: **Image from TMDB**, **Image
+from fanart.tv**, **Image from another website**, **Local image file**,
+**Frame grab from the video**, **Broken link** or **No image**.
 
-- **From** names the site and, for a poster, its language, for example
-  "fanart.tv, in Dutch", or "TMDB, without text" for a poster with no text
-  on it. A poster in the fallback language or without text is checked again
-  monthly for a while, so a poster in the library's language can replace it.
+- **From** names the site and, for art that can carry text, its language,
+  for example "fanart.tv, in Dutch", "TMDB, without text" for a poster with
+  no text on it, or "TMDB, in English as a last resort" for an English
+  poster that filled an empty one. Fanart with text names only the site,
+  since fanart without text comes first whatever the language; key art,
+  which never has text, and an episode thumb name only the site too. A
+  poster, clear logo, landscape, banner, disc art, clear art or character
+  art in the fallback language, without text or in English as a last resort,
+  and fanart with text, is checked again monthly for a while, so better art
+  can replace it.
 - **Replaced** says what was there before: *empty*, *was a frame grab*, *was
-  a broken link*, or *your scraper's value* for an earlier poster.
+  a broken link*, *was a local file that no longer exists*, or *your
+  scraper's value* for earlier art.
 
-**Restore original** puts the earlier poster or thumb back and locks the
-field, as for text.
+**Restore original** puts the earlier art back and locks the
+field, as for text. It is not offered when the earlier art was a local file
+that no longer exists.
 
-A poster that changed outside MetaMender, by your hand, another add-on or a
-refresh in Kodi that brings a different poster, is locked with a padlock and the reason **Changed outside
+Art that changed outside MetaMender, by your hand, another add-on or a
+refresh in Kodi that brings different art, is locked with a padlock and the reason **Changed outside
 MetaMender, left as it is**. **Let MetaMender update this again** unlocks it:
-at the next scan MetaMender treats the poster Kodi holds as the one it first
+at the next scan MetaMender treats the art Kodi holds as the one it first
 saw, and may then replace it with a better one. See
-[Posters and episode thumbs](libraries.md#posters-and-episode-thumbs) for
+[Art and episode thumbs](libraries.md#art-and-episode-thumbs) for
 what MetaMender changes and what it leaves alone.
 
 ## Ids
@@ -109,6 +121,12 @@ found (for a season, its show's TMDB and TheTVDB ids):
   agreed" or "the titles agreed" says which.
 
 Ids MetaMender found stay in its own records; it does not add them to Kodi.
+
+When MetaMender moved a movie out of a duplicate set (see
+[Duplicate sets](libraries.md#duplicate-sets)), the movie's **Ids** entry says
+so: "Moved by MetaMender from the set *old name* on *date*", or, once you have
+put the movie in another set yourself, "Left in the set *name*: you moved it
+there". MetaMender then never moves it again.
 
 When an episode's number points at a different episode on TMDB or TheTVDB (the
 title and the date both disagree), MetaMender uses nothing from that site and
@@ -162,6 +180,51 @@ since MetaMender does not touch it anyway.
 
 Restoring a show's title also moves MetaMender's records of its episodes along
 with it; should that fail, a notification says so.
+
+## Movie sets
+
+A movie set's window shows the fields MetaMender manages for the set while
+**Movie sets** is ticked for the library the set follows (see
+[Movie sets](libraries.md#movie-sets)): **Title** (the set's name),
+**Plot**, and the art the library's art ticks cover. Each tells its story
+like any other field: where it came from, what it replaced, when it is
+checked again, and the lock.
+
+![The Details window for a movie set](screenshots/details/details-movie-set.png)
+
+- **Restore original** on the **Title** puts back the name the set had when
+  you ticked **Movie sets** (usually your scraper's) and locks it, so
+  MetaMender keeps it from then on. Restore works the same way for the plot
+  and the art.
+- **Keep this value** locks the name, plot or art as it is now.
+- A name changed outside MetaMender is locked with the reason **Changed
+  outside MetaMender, left as it is**; **Let MetaMender update this again**
+  unlocks it, and the next scan may give the set TMDB's name again. After
+  that, **Restore original** gives back your name, not TMDB's.
+
+The set's **Ids** entry shows its **TMDB collection** and, one line per
+movie, each movie MetaMender moved into the set from a duplicate: "*movie*:
+moved here from *old set name* on *date*". A move has no Restore; to undo
+one, move the movie back in Kodi, and MetaMender leaves it there.
+
+### A set MetaMender leaves alone
+
+For a set MetaMender does not manage, the **Ids** entry says why, and no
+fields are listed (except one you locked while the set was managed, so you
+can still unlock it). Nothing in the set changes.
+
+| The Ids entry says | What it means |
+|---|---|
+| Left alone: its movies are split evenly between libraries | Two libraries (or folders with their own language) hold equally many of its movies, so MetaMender cannot tell which language to use. |
+| Left alone: none of its movies is in an included library | Every movie of the set is in a library or folder you left out, or in none. |
+| Left alone: Movie sets is not ticked for *library* | The set follows that library, and **Movie sets** is off there. |
+| Left alone: TMDB has no collection for its movies | None of its movies belongs to a TMDB collection, as far as MetaMender knows. A movie MetaMender has not asked TMDB about yet counts for none; the next scan or **Update now** asks. |
+| Left alone: no TMDB collection holds more than half of its movies | The movies come from several collections, as in a set you made by hand. |
+| Merged into *set*: Kodi removes this set at its next library clean | A duplicate of the set MetaMender manages: its movies are moved into *set*. Kodi deletes the empty set when you clean the library. |
+| Left alone: the set *set* already follows this TMDB collection | The set has a name of its own (such as "Favourites") and shares a collection with *set*. MetaMender moves nothing into or out of it. |
+
+See [A movie set was left alone](troubleshooting.md#a-movie-set-was-left-alone)
+for what to do about each.
 
 ## Update now and Close
 

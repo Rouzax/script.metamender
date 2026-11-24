@@ -1540,15 +1540,15 @@ msgid "{} · Season {}"
 msgstr ""
 
 msgctxt "#32734"
-msgid "Poster source"
+msgid "Art source"
 msgstr ""
 
 msgctxt "#32735"
-msgid "Posters from The Movie Database."
+msgid "Images from The Movie Database."
 msgstr ""
 
 msgctxt "#32736"
-msgid "Posters from fanart.tv. Posters in the library's language always come first, from either source."
+msgid "Images from fanart.tv. Images in the library's language always come first, from either source."
 msgstr ""
 
 msgctxt "#32737"
@@ -1572,9 +1572,133 @@ msgid "{}, without text"
 msgstr ""
 
 msgctxt "#32742"
-msgid "fanart.tv refused your personal API key. Posters that need fanart.tv wait until it works. Check the key in Settings, Providers, or clear it to use MetaMender's own key."
+msgid "fanart.tv refused your personal API key. Art that needs fanart.tv waits until it works. Check the key in Settings, Providers, or clear it to use MetaMender's own key."
 msgstr ""
 
 msgctxt "#32743"
-msgid "fanart.tv refused MetaMender's key. Posters that need fanart.tv wait until it works again; everything else carries on."
+msgid "fanart.tv refused MetaMender's key. Art that needs fanart.tv waits until it works again; everything else carries on."
+msgstr ""
+
+msgctxt "#32744"
+msgid "Fanart"
+msgstr ""
+
+msgctxt "#32745"
+msgid "Fills the main background image of movies and shows, and of movie sets with Movie sets ticked, preferring one without text."
+msgstr ""
+
+msgctxt "#32746"
+msgid "Other art"
+msgstr ""
+
+msgctxt "#32747"
+msgid "Fills clear logos, key art, landscape, banner, disc art, clear art and character art."
+msgstr ""
+
+msgctxt "#32748"
+msgid "Movie sets"
+msgstr ""
+
+msgctxt "#32749"
+msgid "Gives movie sets their name and plot in the library's language, and their art with the art ticks."
+msgstr ""
+
+msgctxt "#32750"
+msgid "fanart"
+msgstr ""
+
+msgctxt "#32751"
+msgid "other art"
+msgstr ""
+
+msgctxt "#32752"
+msgid "movie sets"
+msgstr ""
+
+msgctxt "#32753"
+msgid "Art"
+msgstr ""
+
+msgctxt "#32754"
+msgid "{}, in English as a last resort"
+msgstr ""
+
+msgctxt "#32755"
+msgid "Clear logo"
+msgstr ""
+
+msgctxt "#32756"
+msgid "Key art"
+msgstr ""
+
+msgctxt "#32757"
+msgid "Landscape"
+msgstr ""
+
+msgctxt "#32758"
+msgid "Banner"
+msgstr ""
+
+msgctxt "#32759"
+msgid "Disc art"
+msgstr ""
+
+msgctxt "#32760"
+msgid "Clear art"
+msgstr ""
+
+msgctxt "#32761"
+msgid "Character art"
+msgstr ""
+
+msgctxt "#32762"
+msgid "was a local file that no longer exists"
+msgstr ""
+
+msgctxt "#32763"
+msgid "TMDB collection"
+msgstr ""
+
+msgctxt "#32764"
+msgid "Left alone: its movies are split evenly between libraries"
+msgstr ""
+
+msgctxt "#32765"
+msgid "Left alone: none of its movies is in an included library"
+msgstr ""
+
+msgctxt "#32766"
+msgid "Left alone: Movie sets is not ticked for {}"
+msgstr ""
+
+msgctxt "#32767"
+msgid "Left alone: TMDB has no collection for its movies"
+msgstr ""
+
+msgctxt "#32768"
+msgid "Left alone: no TMDB collection holds more than half of its movies"
+msgstr ""
+
+msgctxt "#32769"
+msgid "Merged into {}: Kodi removes this set at its next library clean"
+msgstr ""
+
+msgctxt "#32770"
+msgid "Left alone: the set {} already follows this TMDB collection"
+msgstr ""
+
+msgctxt "#32771"
+msgid "{}: moved here from {} on {}"
+msgstr ""
+
+msgctxt "#32772"
+msgid "Moved by MetaMender from the set {} on {}"
+msgstr ""
+
+msgctxt "#32773"
+msgid "Left in the set {}: you moved it there"
+msgstr ""
+
+msgctxt "#32774"
+msgid "MetaMender leaves this set alone; Details says why"
 msgstr ""

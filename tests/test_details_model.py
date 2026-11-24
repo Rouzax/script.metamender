@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from resources.lib.data.media_types import EPISODE, MOVIE, SEASON
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, SET, TVSHOW
 from resources.lib.engine.protect import fingerprint
 from resources.lib.ui import details_model
-from resources.lib.ui.details_model import build_rows, header_line
+from resources.lib.ui.details_model import ACTION_KEEP, ACTION_RESTORE, build_rows, header_line
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PO = (_ROOT / "resources/language/resource.language.en_gb/strings.po").read_text()
@@ -538,6 +538,8 @@ def test_poster_label():
     ("image://video@smb%3a%2f%2fnas%2fe.mkv", "was a frame grab"),
     ("https://thetvdb.com/banners/episodes/1/", "was a broken link"),
     ("https://example.org/old.jpg", "your scraper's value"),
+    ("smb://nas/movies/poster.jpg", "was a local file that no longer exists"),
+    ("image://smb%3a%2f%2fnas%2fposter.jpg/", "was a local file that no longer exists"),
 ])
 def test_art_replaced_text_frame_grab(original, text):
     keep = {"thumb": {"original": original, "has_original": True, "locked": False,
@@ -569,6 +571,16 @@ def test_poster_from_text_says_without_text_for_a_textless_poster():
     assert dict(row.lines)["From"] == "TMDB, in the fallback language"
 
 
+def test_details_source_english():
+    fs = {"source": "tmdb:english", "from_fallback": 1}
+    assert details_model._from_text("poster", "tmdb:english", fs, "Dutch") == (
+        "TMDB, in English as a last resort")
+    row = _art_rows({"poster": "https://assets.fanart.tv/x.jpg"},
+                    fs={"source": "fanart:english", "from_fallback": 1},
+                    media_type=MOVIE, field="poster")
+    assert dict(row.lines)["From"] == "fanart.tv, in English as a last resort"
+
+
 @pytest.mark.parametrize("reason, text", [
     ("local_art", "Local image file, left as it is"),
     ("other_art", "Image from another source, left as it is"),
@@ -587,3 +599,98 @@ def test_season_ids_show_each_id_once_when_the_row_holds_them():
     row = {"tmdb_id": "250000", "tvdb_id": "9001", "last_seen": TODAY}
     ids = build_rows(SEASON, item, row, {}, {}, TODAY, fields=["poster"])[0]
     assert ids.lines == [("TMDB", "250000"), ("TheTVDB", "9001")]
+
+
+@pytest.mark.parametrize("field, label", [
+    ("fanart", "Fanart"), ("clearlogo", "Clear logo"), ("keyart", "Key art"),
+    ("landscape", "Landscape"), ("banner", "Banner"), ("discart", "Disc art"),
+    ("clearart", "Clear art"), ("characterart", "Character art"),
+])
+def test_details_labels_for_new_art(field, label):
+    media_type = TVSHOW if field == "characterart" else MOVIE
+    row = _art_rows({field: "https://assets.fanart.tv/x.png"}, fs={"source": "fanart"},
+                    media_type=media_type, field=field)
+    assert row.label == label
+
+
+def test_details_source_of_new_art():
+    url = "https://image.tmdb.org/t/p/original/a.jpg"
+    row = _art_rows({"clearlogo": url}, media_type=MOVIE, field="clearlogo")
+    assert dict(row.lines)["From"] == "TMDB, in Dutch"
+    row = _art_rows({"fanart": url}, fs={"source": "tmdb:textless"},
+                    media_type=MOVIE, field="fanart")
+    assert dict(row.lines)["From"] == "TMDB, without text"
+    # Fanart with text is a step after the textless one, whatever its
+    # language, so Details does not name one.
+    row = _art_rows({"fanart": url}, fs={"from_fallback": 1}, media_type=MOVIE, field="fanart")
+    assert dict(row.lines)["From"] == "TMDB"
+    # Key art never has text.
+    row = _art_rows({"keyart": url}, fs={"source": "tmdb"}, media_type=MOVIE, field="keyart")
+    assert dict(row.lines)["From"] == "TMDB"
+
+
+def test_replaced_text_for_local_original():
+    """A missing local original offers no Restore; Keep this value stays."""
+    keep = {"poster": {"original": "smb://nas/movies/poster.jpg", "has_original": True,
+                       "locked": False, "written_fp": None}}
+    row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
+                    keep=keep, media_type=MOVIE, field="poster")
+    assert dict(row.lines)["Replaced"] == "was a local file that no longer exists"
+    assert row.action == ACTION_KEEP
+    keep["poster"]["original"] = "https://example.org/old.jpg"
+    row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
+                    keep=keep, media_type=MOVIE, field="poster")
+    assert row.action == ACTION_RESTORE
+
+
+# ---------------------------------------------------------------------------
+# Movie sets and set moves on the Ids row
+# ---------------------------------------------------------------------------
+
+
+def _set_ids(**item):
+    base = {"setid": 40, "title": "Heat Collection", "plot": "", "poster": ""}
+    base.update(item)
+    rows = build_rows(SET, base, {"tmdb_id": "1001"}, {}, {}, TODAY)
+    return rows[0]
+
+
+@pytest.mark.parametrize("reason, name, text", [
+    ("tie_library", "", "Left alone: its movies are split evenly between libraries"),
+    ("no_members", "", "Left alone: none of its movies is in an included library"),
+    ("off", "Films", "Left alone: Movie sets is not ticked for Films"),
+    ("no_collection", "", "Left alone: TMDB has no collection for its movies"),
+    ("no_majority", "", "Left alone: no TMDB collection holds more than half of its movies"),
+    ("duplicate", "Heat Collection",
+     "Merged into Heat Collection: Kodi removes this set at its next library clean"),
+    ("shared", "Heat Collection",
+     "Left alone: the set Heat Collection already follows this TMDB collection"),
+])
+def test_set_ids_row_says_why_a_set_is_left_alone(reason, name, text):
+    ids = _set_ids(set_reason=reason, set_reason_name=name)
+    assert ("", text) in ids.lines
+
+
+def test_set_ids_row_names_its_collection_and_lists_moves():
+    ids = _set_ids(collection_id="1001", set_moves=[
+        {"title": "Heat", "from_name": "Heat Collectie", "moved_on": "2026-11-10"},
+    ])
+    assert ids.lines[0] == ("TMDB collection", "1001")
+    assert ("", "Heat: moved here from Heat Collectie on 10 Nov 2026") in ids.lines
+    # A set's collection is not one of the movie ids MetaMender found.
+    assert not any(label == "TMDB" for label, _ in ids.lines)
+
+
+def test_set_ids_row_falls_back_to_the_stored_collection():
+    assert _set_ids().lines[0] == ("TMDB collection", "1001")
+
+
+def test_movie_ids_row_shows_its_move():
+    item = {"title": "Heat", "uniqueid": {"tmdb": "949"}}
+    move = {"user": False, "set": "Heat Collection", "from_name": "Heat Collectie",
+            "moved_on": "2026-11-10"}
+    ids = build_rows(MOVIE, dict(item, set_move=move), None, {}, {}, TODAY)[0]
+    assert ("", "Moved by MetaMender from the set Heat Collectie on 10 Nov 2026") in ids.lines
+    ids = build_rows(MOVIE, dict(item, set_move=dict(move, user=True, set="Favourites")),
+                     None, {}, {}, TODAY)[0]
+    assert ("", "Left in the set Favourites: you moved it there") in ids.lines

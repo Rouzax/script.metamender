@@ -6,6 +6,8 @@ rebuilds and are preferred. Movies/shows without an external ID fall back to
 "title (year)". Episodes use a composite "{show} S..E.." key (their own S/E
 numbering within Kodi is internally consistent). Seasons have no id of their
 own and are keyed on their show's TMDB id, which the scan puts on the item.
+Movie sets are keyed on their TMDB collection (engine/sets.py), one managed
+set per collection whatever Kodi's setid.
 
 Logging:
     None (pure function).
@@ -24,7 +26,11 @@ def compute_identity(item: Dict[str, Any], media_type: MediaType) -> str:
     Episodes: "{showtitle} S{season:02d}E{episode:02d}".
     Seasons: "tmdb:{show_tmdb_id}/S{season:02d}", or "" when the show has
     no TMDB id: such a season has no identity and is skipped.
+    Sets: "collection:{collection_id}", or "" without a collection.
     """
+    if media_type.name == "set":
+        collection = item.get("collection_id")
+        return "collection:{}".format(collection) if collection else ""
     if media_type.name == "season":
         show = item.get("show_tmdb_id")
         if not show:

@@ -13,7 +13,7 @@ from resources.lib.data.kodi import (
     update_item,
     _build_properties,
 )
-from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, SET, TVSHOW
 
 
 def test_get_all_movies(kodi_stubs):
@@ -425,6 +425,19 @@ def test_get_seasons_for_scan_enriches_with_the_show(kodi_stubs):
     assert all("firstaired" not in i for i in items)
 
 
+def test_seasons_for_scan_list_show_seasons(kodi_stubs):
+    from resources.lib.data.kodi import get_seasons_for_scan
+    seasons = {"result": {"seasons": _SEASONS["result"]["seasons"] + [
+        {"seasonid": 32, "season": -1, "tvshowid": 3, "showtitle": "Lost", "art": {}},
+        {"seasonid": 33, "season": 2, "tvshowid": 3, "showtitle": "Lost", "art": {}},
+    ]}}
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({
+        "VideoLibrary.GetTVShows": _SHOWS, "VideoLibrary.GetSeasons": seasons})
+    items = get_seasons_for_scan({3: "4607"})
+    assert {i["seasonid"]: i["show_seasons"] for i in items} == {
+        30: [0, 1, 2], 31: [0, 1, 2], 33: [0, 1, 2], 41: [1]}
+
+
 def test_get_seasons_for_scan_of_one_show(kodi_stubs):
     from resources.lib.data.kodi import get_seasons_for_scan
     show = {"result": {"tvshowdetails": _SHOWS["result"]["tvshows"][0]}}
@@ -469,3 +482,63 @@ def test_get_seasons_for_scan_lists_shows_without_art(kodi_stubs):
             for c in kodi_stubs["xbmc"].executeJSONRPC.call_args_list}
     assert "art" not in sent["VideoLibrary.GetTVShows"]
     assert "art" in sent["VideoLibrary.GetSeasons"]
+
+
+def test_flatten_art_exposes_fanart_but_not_extra_fanart():
+    item = {"art": {"fanart": "image://https%3a%2f%2fa%2fbd.jpg/", "fanart1": "smb://x/f1.jpg",
+                    "clearlogo": "image://https%3a%2f%2fa%2flogo.png/"}}
+    flat = flatten_art(item, MOVIE)
+    assert flat["fanart"] == "https://a/bd.jpg"
+    assert flat["clearlogo"] == "https://a/logo.png"
+    assert flat["banner"] == ""
+    assert "fanart1" not in flat
+
+
+def test_update_item_sends_only_the_given_art_keys(kodi_stubs, monkeypatch):
+    # monkeypatch puts the shared stub back, so later tests do not get "OK"
+    # for a listing.
+    monkeypatch.setattr(kodi_stubs["xbmc"], "executeJSONRPC",
+                        MagicMock(return_value=json.dumps({"result": "OK"})))
+    assert update_item(1, MOVIE, "x", fanart="https://a/bd.jpg", clearlogo="") is True
+    assert _sent_params(kodi_stubs) == {
+        "movieid": 1, "art": {"fanart": "https://a/bd.jpg", "clearlogo": None},
+    }
+
+
+def test_build_properties_set():
+    assert _build_properties(SET) == ["title", "plot", "art"]
+
+
+def test_get_set_members_filters_unset(kodi_stubs):
+    from resources.lib.data.kodi import get_set_members
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({"VideoLibrary.GetMovies": {"result": {
+        "movies": [
+            {"movieid": 1, "setid": 4, "set": "Shrek Collection", "file": "a.mkv"},
+            {"movieid": 2, "setid": 0, "set": "", "file": "b.mkv"},
+            {"movieid": 3, "set": "", "file": "c.mkv"},
+        ]}}})
+    members = get_set_members()
+    sent = json.loads(kodi_stubs["xbmc"].executeJSONRPC.call_args.args[0])
+    assert sent["params"]["properties"] == [
+        "title", "set", "setid", "file", "uniqueid", "premiered"]
+    assert [m["movieid"] for m in members] == [1]
+
+
+def test_get_set_members_raises_on_error(kodi_stubs):
+    from resources.lib.data.kodi import get_set_members
+    from resources.lib.utils import KodiQueryError
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({})
+    with pytest.raises(KodiQueryError):
+        get_set_members()
+
+
+def test_get_movie_setid(kodi_stubs):
+    from resources.lib.data.kodi import get_movie_setid
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({"VideoLibrary.GetMovieDetails": {
+        "result": {"moviedetails": {"movieid": 7, "setid": 4}}}})
+    assert get_movie_setid(7) == 4
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({"VideoLibrary.GetMovieDetails": {
+        "result": {"moviedetails": {"movieid": 7, "setid": 0}}}})
+    assert get_movie_setid(7) == 0
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({})
+    assert get_movie_setid(7) is None

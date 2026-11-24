@@ -133,16 +133,23 @@ def _lib(*toggles: str):
     (("episode_titles",), ["language", "fields", "text"]),
     (("main_titles",), ["language", "fields", "text", "titles"]),
     (("certifications",), ["language", "fields", "age_ratings"]),
-    (("credits", "trailers", "taglines", "details", "episode_thumbs"),
+    (("credits", "trailers", "taglines", "details", "episode_thumbs", "movie_sets"),
      ["language", "fields"]),
-    (("posters",), ["language", "fields", "posters"]),
+    (("posters",), ["language", "fields", "art"]),
     (("posters", "main_titles", "certifications"),
-     ["language", "fields", "text", "titles", "posters", "age_ratings"]),
+     ["language", "fields", "text", "titles", "art", "age_ratings"]),
     (tuple(FIELD_TOGGLES),
-     ["language", "fields", "rating", "text", "titles", "posters", "age_ratings"]),
+     ["language", "fields", "rating", "text", "titles", "art", "age_ratings"]),
 ])
 def test_page_groups_follow_ticks(toggles, groups):
     assert page_groups(_lib(*toggles)) == groups
+
+
+@pytest.mark.parametrize("toggles,shown", [
+    ({"posters"}, True), ({"fanart"}, True), ({"other_art"}, True),
+    ({"movie_sets"}, False), ({"episode_thumbs"}, False)])
+def test_art_group_follows_art_ticks(toggles, shown):
+    assert ("art" in page_groups(_lib(*toggles))) is shown
 
 
 def test_country_missing_only_with_certifications():

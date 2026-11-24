@@ -13,7 +13,7 @@ from typing import Any
 from dataclasses import replace
 
 from resources.lib.data.libraries import TITLE_ORIGINAL, Library, LibraryConfig, new_library
-from resources.lib.data.media_types import EPISODE, MOVIE, MediaType
+from resources.lib.data.media_types import EPISODE, MOVIE, SET, MediaType
 from resources.lib.engine.protect import fingerprint
 from resources.lib.ui.setup_model import SetupState, initial_state
 
@@ -169,7 +169,43 @@ def episode_locked() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[st
     return media_type, item, item_row, fs_map, keep, language
 
 
-PRESETS = {"episode": episode, "episode-locked": episode_locked, "episode-dutch": episode_dutch, "episode-not-matched": episode_not_matched, "movie": movie}
+SET_TITLE = "De Vuurtorenwachter Collectie"
+SET_PLOT = ("Alle films over de oude vuurtorenwachter en de schepen die hij langs de "
+            "kust ziet varen.")
+SET_POSTER = "https://image.tmdb.org/t/p/original/demoSetPoster.jpg"
+
+
+def movie_set() -> tuple[MediaType, dict[str, Any], dict[str, Any], dict[str, Any],
+                         dict[str, Any], str]:
+    """A movie set in a Dutch library: MetaMender gave it TMDB's Dutch name
+    and plot, and moved a film in from the duplicate set the scraper made
+    under the old English name."""
+    item = {
+        "setid": 3, "title": SET_TITLE, "plot": SET_PLOT, "poster": SET_POSTER,
+        "premiered": "2024-03-08", "collection_id": "500001",
+        "set_moves": [{"title": "The Lighthouse Keeper Returns",
+                       "from_name": "The Lighthouse Keeper Collection",
+                       "moved_on": "2026-11-10"}],
+    }
+    item_row = {"tmdb_id": "500001", "last_seen": TODAY, "match_note": ""}
+    fs_map = {
+        "title": _fs("updated", source="tmdb", next_retry="2026-11-26",
+                     written=fingerprint(SET_TITLE)),
+        "plot": _fs("updated", source="tmdb", next_retry="2026-11-26",
+                    written=fingerprint(SET_PLOT)),
+        "poster": _fs("unchanged", source="tmdb", next_retry="2026-11-26"),
+    }
+    # The scraper named the set in English; that name can be put back.
+    keep = {
+        "title": {"original": "The Lighthouse Keeper Collection", "has_original": True,
+                  "locked": False, "written_fp": fingerprint(SET_TITLE)},
+        "plot": {"original": "", "has_original": True, "locked": False,
+                 "written_fp": fingerprint(SET_PLOT)},
+    }
+    return SET, item, item_row, fs_map, keep, "Dutch"
+
+
+PRESETS = {"episode": episode, "episode-locked": episode_locked, "episode-dutch": episode_dutch, "episode-not-matched": episode_not_matched, "movie": movie, "movie_set": movie_set}
 
 
 # Shaped like a TMDB key, but not one.

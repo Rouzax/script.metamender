@@ -7,7 +7,7 @@ New Features:
   - Posters, per library: with Posters ticked, MetaMender fills empty
     movie, show and season posters and refreshes posters from TMDB or
     fanart.tv while a title is new. It picks a poster in the library's
-    language first (from the chosen Poster source, then the other site),
+    language first (from the chosen Art source, then the other site),
     then the fallback language, then a poster without text; the best
     voted TMDB poster or most liked fanart.tv poster wins, and a current
     poster stays unless a better one clearly leads. A poster without
@@ -24,12 +24,61 @@ New Features:
     locked, and Details shows why and can unlock it. A TMDB or fanart.tv
     poster picked before Posters was ticked may be replaced once; Restore
     original puts it back. MetaMender writes no image files.
-  - Poster source per library: TMDB (the default) or fanart.tv.
+  - Art source per library: TMDB (the default) or fanart.tv, the site
+    asked first for posters, fanart, clear logos and key art.
+  - English as a last resort for empty posters: when neither site has a
+    poster in the library's language, the fallback language or without
+    text, an empty poster is filled with an English one. An English
+    poster never replaces one the item already has; one MetaMender
+    filled this way is replaced once a better poster appears.
+  - Fanart, per library: with Fanart ticked, the main background image
+    of movies and shows is filled and refreshed from TMDB or fanart.tv
+    while a title is new, preferring one without text, then the
+    library's language, then the fallback language. Only the main
+    fanart is touched, never the extra fanart (fanart1, fanart2...).
+  - Other art, per library: with Other art ticked, clear logos (picked
+    like posters; TMDB's SVG logos, which Kodi cannot show, are
+    skipped), key art (a poster without text) and, from fanart.tv only,
+    landscape, banner, disc art (movies), clear art and character art
+    (shows) are filled and refreshed. fanart.tv's HD logos and clear art
+    come before the SD ones.
+  - Deleted local art files are filled: art that points at a local file
+    that no longer exists (for example one Artwork Dump saved) is filled
+    like empty art, for every ticked art type. Deleting the files is
+    enough; background scans check local files weekly, and opening
+    MetaMender from Program add-ons or Update now checks at once. A share
+    that is offline is never taken for a deleted file.
+  - Movie sets, per library: with Movie sets ticked, a set gets TMDB's
+    name for its collection in the library's language (then the fallback
+    language, then English) and its plot like a movie's, and its poster,
+    fanart and other art with those ticks, from TMDB's collection images
+    and fanart.tv's collection art. A set follows the library most of its
+    movies are in; a tie, or movies that do not mostly share one TMDB
+    collection, leave it alone. The name is replaced once; Restore
+    original puts it back, and a name changed outside MetaMender is
+    locked. A set whose movies all have NFO files keeps its name, plot
+    and art.
+  - Duplicate sets merged: a set Kodi creates under a renamed set's old
+    name (a new or refreshed movie, or an NFO with the old name) has its
+    movies moved into the renamed set. A movie you moved yourself is never
+    moved again, a set with a name of its own is never merged, and the
+    emptied set is left for Kodi's library clean to remove. MetaMender
+    otherwise never creates or deletes a set or changes its movies.
+  - Details and Update now on a movie set, from the MetaMender context
+    menu. Details shows the set's name, plot and art with where they came
+    from, Restore original and the lock, the set's TMDB collection, the
+    movies MetaMender moved into it, and why a set is left alone. Update
+    now refreshes the set (not its movies) after merging its duplicates.
+    A movie's Details says when MetaMender moved it between sets.
   - Optional Personal fanart.tv API key setting.
+  - Season posters: a TMDB season poster that is the same file as one of
+    its show's posters is skipped, and among equally liked fanart.tv
+    season posters the one uploaded together with the show's other
+    seasons' posters is preferred.
   - Seasons have a Details window, and Update now on a season or show
     refreshes the season posters too.
-  - Both ticks are off for every library, including libraries set up
-    before this version.
+  - Posters, Episode thumbs, Fanart, Other art and Movie sets are off for
+    every library, including libraries set up before this version.
   - Manual and help at the top of the settings: a window with a QR code
     and the address of the online manual, to open on a phone or computer.
 

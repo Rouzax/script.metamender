@@ -16,12 +16,20 @@ background:
   votes come in, instead of staying at its first-week number forever.
 - **Age ratings you can trust.** Movies and shows get their age rating in
   your own country's system, for ten countries.
-- **Posters and episode thumbs, if you want them.** Washed-out frame grabs
-  and broken episode thumbs get the official still (TMDB, else TheTVDB), and
-  movie, show and season posters are filled and refreshed while a title is
-  new, in your library's language, from TMDB or fanart.tv. Local image files
-  stay, and so do posters you change afterwards; a replaced poster can be put
-  back from the Details window.
+- **Art, if you want it.** Washed-out frame grabs and broken episode thumbs
+  get the official still (TMDB, else TheTVDB). Posters, fanart, clear logos,
+  key art and fanart.tv's landscape, banner, disc art, clear art and character
+  art are filled and refreshed while a title is new, in your library's
+  language, from TMDB and fanart.tv (you choose which is asked first); an
+  empty image gets an English one when nothing better exists. Local image
+  files stay, and so does art you change afterwards, but a local file you
+  deleted is filled like empty art, once MetaMender can tell the share it
+  lives on is reachable
+  ([details](https://rouzax.github.io/script.metamender/docs/libraries/#if-you-delete-your-local-art-files)).
+  A replaced image can be put back from the Details window.
+- **Movie sets in your language, if you want them.** A set gets TMDB's name
+  and plot for its collection in the library's language, and its art, and a
+  duplicate set Kodi makes under the old name is merged into the renamed one.
 
 It respects what is yours (items with an NFO file keep their values, and a
 replaced value can be put back), and its Details window shows, for any item,
@@ -53,9 +61,10 @@ and [troubleshooting](https://rouzax.github.io/script.metamender/docs/troublesho
 ## Data sources
 
 Metadata comes from [TMDB](https://www.themoviedb.org) and
-[TheTVDB](https://thetvdb.com), ratings also from IMDb's public data. Posters
-come from TMDB and [fanart.tv](https://fanart.tv), episode thumbs from TMDB
-and TheTVDB. See
+[TheTVDB](https://thetvdb.com), ratings also from IMDb's public data. Art for
+movies, shows, seasons and movie sets comes from TMDB and
+[fanart.tv](https://fanart.tv) (landscape, banner, disc art, clear art and
+character art from fanart.tv only), episode thumbs from TMDB and TheTVDB. See
 [where your data comes from](https://rouzax.github.io/script.metamender/docs/where-data-comes-from/#image-credits).
 
 ## Support

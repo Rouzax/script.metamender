@@ -13,24 +13,36 @@ Logging:
         - actions.update_now (INFO): Update-now reset scan finished
         - actions.update_now_invalid (WARNING): Update-now bad dbtype/dbid
         - actions.update_now_notfound (WARNING): Update-now item not in library
+        - actions.update_now_left_alone (INFO): Update now on a movie set the
+          scan leaves alone (reason)
         - actions.skip_no_key (WARNING): Update-now skipped, no TMDB API key
         - actions.locked (INFO): Update-now skipped, a scan is running
         - actions.error (ERROR): Action handler raised an unexpected exception
 """
 from __future__ import annotations
 
+from typing import Any, Callable
+
 import xbmc
 
 from resources.lib.constants import DEFAULT_ADDON_ID
 from resources.lib.data.kodi import get_item_by_id
-from resources.lib.data.libraries import LibraryConfig
-from resources.lib.data.media_types import EPISODE, MOVIE, MediaType
+from resources.lib.data.libraries import LibraryConfig, load_libraries
+from resources.lib.data.media_types import EPISODE, MOVIE, SET, MediaType
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.scan import run_scan
+from resources.lib.engine.sets import (
+    LEFT_DUPLICATE,
+    LEFT_NO_MEMBERS,
+    LEFT_OFF,
+    LEFT_TIE_LIBRARY,
+    describe_set,
+)
 from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
+    _get_sources_config_path,
     _load_settings,
     _prepare_imdb_ratings,
     fanart_auth_failed,
@@ -65,7 +77,13 @@ log = get_logger('actions')
 _DBTYPE_TO_MEDIA_TYPE: dict[str, MediaType] = {
     "movie": MOVIE,
     "episode": EPISODE,
+    "set": SET,
 }
+
+# Why a set is left alone, as far as the libraries alone decide it: Update
+# now says so without asking TMDB. The collection reasons are only known
+# once the set pass has asked for the members' collections.
+_LIBRARY_REASONS = frozenset({LEFT_TIE_LIBRARY, LEFT_NO_MEMBERS, LEFT_OFF})
 
 
 def _init_logging() -> None:
@@ -125,11 +143,13 @@ def update_now(dbtype: str, dbid: str) -> None:
     (service/refresh.py). Acquires the shared scan lock so it never runs
     concurrently with another scan; while one runs, a click inside the show
     being refreshed brings its window back. An item outside the included
-    libraries is left alone, with a message.
+    libraries is left alone, with a message. A movie set runs the set pass
+    for its collection alone: its duplicates are merged and its managed set
+    refreshed, not its movies; a set the scan leaves alone gets a message.
 
     Args:
-        dbtype: Kodi ListItem.DBTYPE ("movie", "tvshow", "season" or
-            "episode").
+        dbtype: Kodi ListItem.DBTYPE ("movie", "tvshow", "season",
+            "episode" or "set").
         dbid: Kodi database ID as a string (from $INFO[ListItem.DBID]).
     """
     _init_logging()
@@ -194,6 +214,10 @@ def update_now(dbtype: str, dbid: str) -> None:
     # is in one place when someone reports a wrong value.
     StructuredLogger.start_scan_log()
     try:
+        if media_type is SET:
+            tracker = TrackerDB(_get_db_path())
+            _update_set(tracker, item_id)
+            return
         item = get_item_by_id(media_type, item_id)
         if item is None:
             log.warning(
@@ -239,33 +263,8 @@ def update_now(dbtype: str, dbid: str) -> None:
             show_id_map=show_id_map,
         )
 
-        # TMDB answered, so the key works: a rejected-key problem is over.
-        if stats.get("tmdb_answered"):
-            attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
-        title = item.get("title", "") or str(item_id)
-        updated = stats.get("updated", 0)
-        log.info(
-            "Update now complete",
-            event="actions.update_now",
-            media_type=media_type.name,
-            title=title,
-            updated=updated,
-            unreachable=stats.get("unreachable", 0),
-            transient=stats.get("transient", 0),
-            aborted=bool(stats.get("aborted")),
-        )
-        unchecked = (stats.get("unreachable") or stats.get("transient")
-                     or stats.get("aborted"))
-        if updated:
-            notify(lang(32350).format(title))  # Updated: {}
-        elif unchecked:
-            notify(lang(32353).format(title))  # Could not check now: {}
-        else:
-            notify(lang(32351).format(title))  # No changes: {}
-        if tvdb_auth_failed([stats]):
-            notify(lang(32352))  # TheTVDB rejected the credentials
-        if fanart_auth_failed([stats]):
-            notify(lang(fanart_auth_string(bool(settings.get("fanart_client_key")))))
+        _report(tracker, media_type, item.get("title", "") or str(item_id), stats,
+                settings)
     except ApiKeyError:
         log.exception("Update now stopped: invalid API key", event="actions.apikey")
         notify(lang(32341))  # Invalid TMDB API key
@@ -280,3 +279,92 @@ def update_now(dbtype: str, dbid: str) -> None:
         release_scan_lock()
         if tracker is not None:
             tracker.close()
+
+
+def _report(
+    tracker: TrackerDB, media_type: MediaType, title: str, stats: dict[str, Any],
+    settings: dict[str, Any], left_alone: Callable[[], bool] = lambda: False,
+) -> None:
+    """Log Update now's result and tell the user. ``left_alone`` is asked
+    only when nothing changed and everything was checked: a movie set the
+    pass then turned out to leave alone says so instead of "No changes"."""
+    # TMDB answered, so the key works: a rejected-key problem is over.
+    if stats.get("tmdb_answered"):
+        attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
+    # A movie moved into a set changed the set as much as a field write.
+    updated = stats.get("updated", 0) + stats.get("moved", 0)
+    log.info(
+        "Update now complete",
+        event="actions.update_now",
+        media_type=media_type.name,
+        title=title,
+        updated=updated,
+        unreachable=stats.get("unreachable", 0),
+        transient=stats.get("transient", 0),
+        aborted=bool(stats.get("aborted")),
+    )
+    unchecked = (stats.get("unreachable") or stats.get("transient")
+                 or stats.get("aborted"))
+    if updated:
+        notify(lang(32350).format(title))  # Updated: {}
+    elif unchecked:
+        notify(lang(32353).format(title))  # Could not check now: {}
+    elif left_alone():
+        notify(lang(32774))  # MetaMender leaves this set alone; Details says why
+    else:
+        notify(lang(32351).format(title))  # No changes: {}
+    if tvdb_auth_failed([stats]):
+        notify(lang(32352))  # TheTVDB rejected the credentials
+    if fanart_auth_failed([stats]):
+        notify(lang(fanart_auth_string(bool(settings.get("fanart_client_key")))))
+
+
+def _update_set(tracker: TrackerDB, setid: int) -> None:
+    """Update now on a movie set, under the caller's scan lock: the set pass
+    for that set's collection (sets.prepare_sets with only_set), which
+    merges the collection's duplicate sets and refreshes its managed set.
+    Every library takes part, since the set follows the library most of its
+    movies are in. A set its libraries leave alone is not scanned."""
+    libraries = load_libraries(_get_sources_config_path()) or LibraryConfig()
+    plan = describe_set(setid, libraries, tracker)
+    if plan is None:
+        log.warning("Update now could not find the set", event="actions.update_now_notfound",
+                    media_type=SET.name, item_id=setid)
+        notify(lang(32345))  # Item not found
+        return
+    if plan.reason in _LIBRARY_REASONS:
+        log.info("Update now on a set MetaMender leaves alone",
+                 event="actions.update_now_left_alone", set=plan.title, setid=setid,
+                 reason=plan.reason)
+        notify(lang(32774))  # MetaMender leaves this set alone; Details says why
+        return
+
+    settings = _load_settings()
+    tmdb_api_key = settings["tmdb_api_key"]
+    if not tmdb_api_key:
+        log.warning("No TMDB API key configured, cannot update", event="actions.skip_no_key")
+        notify(lang(32346))  # No TMDB API key configured
+        return
+    stats = run_scan(
+        media_type=SET,
+        tracker=tracker,
+        libraries=libraries,
+        tmdb_api_key=tmdb_api_key,
+        settings=settings,
+        monitor=xbmc.Monitor(),
+        reset=True,
+        breaker=CircuitBreaker(),
+        only_set=setid,
+    )
+
+    def left_alone() -> bool:
+        # The pass has asked TMDB for the members' collections by now.
+        after = describe_set(setid, libraries, tracker)
+        if after is None or after.reason in (None, LEFT_DUPLICATE):
+            return False
+        log.info("Update now on a set MetaMender leaves alone",
+                 event="actions.update_now_left_alone", set=plan.title, setid=setid,
+                 reason=after.reason)
+        return True
+
+    _report(tracker, SET, plan.title or str(setid), stats, settings, left_alone)

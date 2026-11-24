@@ -30,7 +30,8 @@ MOVIE = MediaType(
     backfill_fields=frozenset({
         "rating", "votes", "plot", "tagline", "director", "writer",
         "genre", "studio", "country", "trailer", "runtime", "mpaa", "title",
-        "poster",
+        "poster", "fanart", "clearlogo", "keyart", "landscape", "banner",
+        "discart", "clearart",
     }),
     date_field="premiered",
 )
@@ -46,6 +47,8 @@ TVSHOW = MediaType(
     kodi_detail_key="tvshowdetails",
     backfill_fields=frozenset({
         "rating", "votes", "plot", "genre", "mpaa", "title", "poster",
+        "fanart", "clearlogo", "keyart", "landscape", "banner", "clearart",
+        "characterart",
     }),
     date_field="premiered",
 )
@@ -78,4 +81,23 @@ SEASON = MediaType(
     kodi_detail_key="seasondetails",
     backfill_fields=frozenset({"poster"}),
     date_field="firstaired",
+)
+
+# A Kodi movie set. Its identity is the TMDB collection its members belong
+# to (engine/sets.py); date_field is the newest member's premiered date,
+# which the set pass puts on the item.
+SET = MediaType(
+    name="set",
+    label="Movie sets",
+    kodi_list_method="VideoLibrary.GetMovieSets",
+    kodi_set_method="VideoLibrary.SetMovieSetDetails",
+    kodi_get_method="VideoLibrary.GetMovieSetDetails",
+    kodi_id_field="setid",
+    kodi_result_key="sets",
+    kodi_detail_key="setdetails",
+    backfill_fields=frozenset({
+        "title", "plot", "poster", "fanart", "clearlogo", "keyart", "landscape",
+        "banner", "discart", "clearart",
+    }),
+    date_field="premiered",
 )

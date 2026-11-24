@@ -65,3 +65,17 @@ def test_movie_and_show_backfill_poster():
 
 def test_episode_backfill_thumb():
     assert "thumb" in EPISODE.backfill_fields
+
+
+def test_movie_and_show_backfill_fanart_and_other_art():
+    assert MOVIE.backfill_fields >= {
+        "fanart", "clearlogo", "keyart", "landscape", "banner", "discart", "clearart",
+    }
+    assert TVSHOW.backfill_fields >= {
+        "fanart", "clearlogo", "keyart", "landscape", "banner", "clearart", "characterart",
+    }
+    # fanart.tv has no disc art for shows and no character art for movies.
+    assert "discart" not in TVSHOW.backfill_fields
+    assert "characterart" not in MOVIE.backfill_fields
+    # Season art other than the poster is not managed.
+    assert SEASON.backfill_fields == frozenset({"poster"})

@@ -26,13 +26,25 @@ your own country.
     official rating sites, or converted from neighbouring countries. Useful
     when you decide what the kids may watch. [Age ratings](age-ratings.md)
 
-**Posters and episode thumbs, if you want them.**
+**Art, if you want it.**
 :   Washed-out frame grabs and broken episode thumbs get the official episode
-    still. Empty posters of movies, shows and seasons are filled, and posters
-    from TMDB or fanart.tv are refreshed while a title is new, in your
-    library's language. Local image files stay, and so do posters you change
-    afterwards; a replaced poster can be put back from the Details window.
-    [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs)
+    still. Posters, fanart, clear logos, key art and fanart.tv's landscape,
+    banner, disc art, clear art and character art are filled when empty, and
+    refreshed from TMDB or fanart.tv while a title is new, in your library's
+    language; the **Art source** decides which site is asked first, and an
+    empty image gets an English one when nothing better exists. Local image
+    files stay, and so does art you change afterwards, but art whose local
+    file you deleted is filled like empty art, once MetaMender can tell the
+    share it lives on is reachable
+    ([deleted local art files](libraries.md#if-you-delete-your-local-art-files)).
+    A replaced image can be put back from the Details window.
+    [Art and episode thumbs](libraries.md#art-and-episode-thumbs)
+
+**Movie sets in your language, if you want them.**
+:   A movie set gets TMDB's name and plot for its collection in the
+    library's language, and its art with the art ticks. A duplicate set Kodi
+    makes under the old name is merged into the renamed one.
+    [Movie sets](libraries.md#movie-sets)
 
 ## Highlights
 
@@ -69,7 +81,7 @@ New here? [Install](install.md) MetaMender, then walk through the
 |---|---|
 | [Install](install.md) | What you need, the official Kodi repository, the Rouzax repository, a zip file |
 | [Setup](setup.md) | The TMDB key, the libraries MetaMender looks after, the summary |
-| [Libraries](libraries.md) | Each library's choices: language, what to fill, which rating to show, where plots and titles come from, original titles, posters and episode thumbs, the age rating country |
+| [Libraries](libraries.md) | Each library's choices: language, what to fill, which rating to show, where plots and titles come from, original titles, art, the age rating country, movie sets |
 | [Scans](scans.md) | When MetaMender scans, how often a field is checked, what you see |
 | [Update now](update-now.md) | Refreshing one item, show or season right away |
 | [The Details window](details.md) | Why a field looks the way it does; Restore original and the lock |

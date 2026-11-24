@@ -70,6 +70,10 @@ SCHEMA_VERSION = 5
 # lookups answered they do not have.
 FALLBACK_RECHECK_DAYS = 30
 
+# Days before a local art file found to exist is checked again. A manual scan
+# and Update now check at once.
+LOCAL_ART_RECHECK_DAYS = 7
+
 # Answered re-checks a fallback-language value gets before it is final like
 # any other value. With FALLBACK_RECHECK_DAYS between them, about a year.
 FALLBACK_RECHECKS = 12

@@ -28,9 +28,8 @@ Sometimes, on purpose, and never where you told it not to:
 NFO files, leaving a library out, or switching a field off for a library,
 protect values from the start.
 
-Posters and episode thumbs have stricter rules: local image files, posters
-from other websites and a poster that changed outside MetaMender are never
-replaced. See
+Art has stricter rules: local image files that exist, art from other
+websites and art that changed outside MetaMender are never replaced. See
 [What MetaMender leaves alone](libraries.md#what-metamender-leaves-alone).
 
 ### Why did it leave this field alone?
@@ -150,36 +149,111 @@ library.
 - **It was converted from another country's rating**: MetaMender replaces it
   when your country's real rating appears. See [Age ratings](age-ratings.md).
 
-### A poster or episode thumb did not change
+### Art did not change
 
-- **Posters** or **Episode thumbs** is not ticked for the library; both are
-  off until you tick them.
-- **The art is a local image file**, for example one Artwork Dump saved, or
-  a poster from a website other than TMDB or fanart.tv. MetaMender leaves
+This covers posters, fanart, the other art types (clear logo, key art,
+landscape, banner, disc art, clear art, character art) and episode thumbs.
+
+- **Its tick is off for the library**: **Posters**, **Fanart**, **Other
+  art** and **Episode thumbs** are all off until you tick them.
+- **The art is a local image file** that exists, for example one Artwork Dump saved, or
+  art from a website other than TMDB or fanart.tv. MetaMender leaves
   those alone; the Details window says *Local image file, left as it is* or
   *Image from another source, left as it is*.
 - **An episode thumb from a website that MetaMender did not set**, such as
   a TMDB still your scraper chose, is kept: only frame grabs, broken links
   and empty thumbs are replaced.
-- **The poster changed outside MetaMender**, so it is locked. Choose **Let
+- **The art changed outside MetaMender**, so it is locked. Choose **Let
   MetaMender update this again** in the Details window to unlock it.
-- **The current poster is still as good**: a poster is only replaced when a
-  better one clearly leads, and one without votes or likes never replaces one
-  that has them.
+- **The current image is still as good**: art is only replaced when a
+  better image clearly leads, and one without votes or likes never replaces
+  one that has them.
+- **Neither site has that art type** for the item. Landscape, banner, disc
+  art, clear art and character art come from fanart.tv only, so a movie or
+  show fanart.tv does not know keeps what it has. Disc art is only managed
+  for movies and character art only for shows; the extra fanart
+  (`fanart1` and so on) is never changed.
 - **A season of a show without a TMDB id** is left alone, and a show without
-  a TheTVDB id gets no posters from fanart.tv.
-- **fanart.tv did not answer** or rejected the key: posters that need it wait
+  a TheTVDB id gets no art from fanart.tv.
+- **fanart.tv did not answer** or rejected the key: art that needs it waits
   until it does. If it rejected the key, a notification said so (once for
   background scans, each time for a manual scan or Update now): *fanart.tv
   refused your personal API key* means the key in Settings, Providers is
   wrong (fix it, or clear it to use MetaMender's own key); *fanart.tv refused
-  MetaMender's key* is not something you can fix, and posters resume once
+  MetaMender's key* is not something you can fix, and art resumes once
   fanart.tv accepts the key again. See
   [Personal fanart.tv API key](settings.md#fanarttv).
-- **The item has an NFO file**: its poster and thumb are only filled when
-  empty, a frame grab or a broken link.
-- **The poster is settled.** Like other fields, a poster is checked while the
-  title is new and then left alone. **Update now** checks it once more.
+- **The item has an NFO file**: its art is only filled when empty, a frame
+  grab or a broken link.
+- **The art is settled.** Like other fields, art is checked while the title
+  is new and then left alone. **Update now** checks it once more.
+
+### Art not filled after deleting files
+
+You deleted local art files so MetaMender would fill the art, but Kodi still
+shows no image.
+
+- **It has not been checked yet.** Background scans check whether local art
+  files still exist once a week. Open MetaMender from **Add-ons > Program
+  add-ons > MetaMender** to run a manual scan, which checks them all at
+  once, or use **Update now** on the item.
+- **Its tick is off for the library.** Only ticked art types are checked:
+  **Posters**, **Fanart**, **Other art** and **Episode thumbs**. A locked
+  field is never checked.
+- **The share was offline at the check.** MetaMender never treats an
+  unreachable drive or share as a deleted file; it checks again at the next
+  scan.
+- **The video file itself is gone**, for example an older release you
+  replaced that Kodi still lists. MetaMender leaves such an item alone until
+  you clean the library (**Clean library** in Kodi's video settings or
+  menu). See
+  [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files).
+- **You deleted the whole art folder, or emptied it**, and it was not inside
+  the video's folder. An empty or missing folder looks the same as a network
+  share that is not mounted, so MetaMender leaves the art alone. Recreate the
+  folder with any file in it and run a manual scan.
+- **Neither site has that art** for the item, so the slot stays empty. See
+  [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files).
+- **It is extra fanart** (`fanart1` and so on), which is never filled.
+
+### A movie set was left alone
+
+A set keeps its name, plot and art when:
+
+- **Movie sets is not ticked** for the library the set follows. A set
+  follows the library most of its movies are in; see
+  [Which library a set follows](libraries.md#which-library-a-set-follows).
+- **Two libraries hold equally many of its movies**, so MetaMender cannot
+  tell which language to use. Movies in a subfolder with its own language
+  count as a library of their own.
+- **None of its movies is in an included library** or folder.
+- **Its movies do not share one TMDB collection**: no collection holds more
+  than half of them, as with a set you made by hand. A movie TMDB knows no
+  collection for counts against every collection.
+- **TMDB did not answer** when MetaMender asked for a movie's collection.
+  That movie then counts for no collection in that scan, which can leave
+  the set alone; MetaMender asks again at the next scan.
+- **It is a duplicate** of a set MetaMender renamed: MetaMender moves its
+  movies into the renamed set and leaves the duplicate itself as it is.
+  Kodi removes it, once empty, when you clean the library. See
+  [Duplicate sets](libraries.md#duplicate-sets).
+- **It shares a collection with the set MetaMender manages** but has a name
+  of its own, such as "Favourites". MetaMender does not touch it or move
+  movies out of it. If no set of a collection carries a name of that
+  collection, none of them is managed.
+- **Every one of its movies has an NFO file**: its name, plot and art are
+  only filled when empty.
+- **Its name changed outside MetaMender**, so the name is locked. The
+  Details window can unlock it.
+- **One of its movies could not be reached and every other movie has an
+  NFO file**, so MetaMender cannot tell whether the set counts as having
+  NFO files; it checks again at the next scan. One movie without an NFO
+  file that can be reached settles this, so the set is not held back. If
+  the share is online, the unreachable movie is likely an older release you
+  replaced whose file is gone: clean the library (**Clean library** in
+  Kodi's video settings or menu) so Kodi drops it.
+- **It is settled.** Like other fields, a set is checked while its newest
+  movie is new and then left alone. **Update now** checks it once more.
 
 ### MetaMender changed something I wanted to keep
 

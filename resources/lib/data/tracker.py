@@ -133,6 +133,48 @@ CREATE TABLE IF NOT EXISTS art_seen (
     PRIMARY KEY (media_type, identity, field)
 );
 
+-- The last time a local art file was found to exist, keyed on the slot and
+-- the fingerprint of the path it held then (data/localart.py). A file that
+-- exists is checked again LOCAL_ART_RECHECK_DAYS later, not every scan.
+CREATE TABLE IF NOT EXISTS art_checks (
+    media_type TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    field TEXT NOT NULL,
+    path_fp TEXT,
+    checked_on TEXT,
+    PRIMARY KEY (media_type, identity, field)
+);
+
+-- The TMDB collection of a movie, keyed on its TMDB id: "" when TMDB
+-- answered that it belongs to none. Shared by every Kodi copy of the movie
+-- and never pruned: the set pass asks TMDB only for a movie missing here.
+CREATE TABLE IF NOT EXISTS movie_collections (
+    tmdb_id TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL,
+    checked_on TEXT
+);
+
+-- Every name a managed set's collection is known by (lowercased): TMDB's
+-- names, the Kodi name at first look and every name MetaMender wrote. A
+-- second Kodi set with one of these names is a duplicate (engine/sets.py).
+CREATE TABLE IF NOT EXISTS set_names (
+    identity TEXT NOT NULL,
+    name TEXT NOT NULL,
+    PRIMARY KEY (identity, name)
+);
+
+-- The last time MetaMender moved a movie (keyed on the movie's identity)
+-- out of a duplicate set. locked marks a move the user undid by hand, so
+-- the movie is never moved again.
+CREATE TABLE IF NOT EXISTS set_moves (
+    identity TEXT PRIMARY KEY,
+    kodi_id INTEGER,
+    from_name TEXT,
+    to_setid INTEGER,
+    moved_on TEXT,
+    locked INTEGER DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS scan_state (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -153,6 +195,14 @@ _UPSERT_KWARGS = frozenset((
 ))
 
 _ID_KWARGS = frozenset(("tmdb_id", "imdb_id", "tvdb_id"))
+
+# Tables keyed on (media_type, identity) rather than the items row: pruned
+# and re-keyed together with it.
+_IDENTITY_TABLES = ("field_keep", "art_seen", "art_checks")
+
+# Tables keyed on the identity alone, which belong to one media type: pruned
+# with that type's items.
+_TYPE_TABLES = {"set": "set_names", "movie": "set_moves"}
 
 
 class TrackerDB:
@@ -443,6 +493,16 @@ class TrackerDB:
         )
         return {int(r["kodi_id"]) for r in rows}
 
+    def identities_by_kodi_id(self, media_type: str) -> dict[int, str]:
+        """Kodi id -> identity of the tracked items of this type, as last
+        scanned."""
+        rows = self._conn.execute(
+            "SELECT kodi_id, identity FROM items WHERE media_type = ? "
+            "AND kodi_id IS NOT NULL",
+            (media_type,),
+        )
+        return {int(r["kodi_id"]): str(r["identity"]) for r in rows}
+
     def update_item_status(
         self, media_type: str, identity: str, status: str
     ) -> None:
@@ -489,7 +549,8 @@ class TrackerDB:
         """Delete items of this type whose last_seen is older than `cutoff`.
 
         Items with a NULL last_seen are kept (never confirmed present yet).
-        Associated field_status, field_keep and art_seen rows are deleted too.
+        Associated field_status, field_keep, art_seen and art_checks rows are
+        deleted too, and a set's names or a movie's set move.
         `cutoff` is an ISO date string (callers pass today minus the
         retention window). Returns the number of items removed.
         """
@@ -502,10 +563,15 @@ class TrackerDB:
             ids = [r["id"] for r in doomed]
             if not ids:
                 return 0
-            for table in ("field_keep", "art_seen"):
+            for table in _IDENTITY_TABLES:
                 self._conn.executemany(
                     "DELETE FROM {} WHERE media_type = ? AND identity = ?".format(table),
                     [(media_type, r["identity"]) for r in doomed],
+                )
+            if media_type in _TYPE_TABLES:
+                self._conn.executemany(
+                    "DELETE FROM {} WHERE identity = ?".format(_TYPE_TABLES[media_type]),
+                    [(r["identity"],) for r in doomed],
                 )
             placeholders = ", ".join(["?"] * len(ids))
             self._conn.execute(
@@ -532,15 +598,23 @@ class TrackerDB:
     # ------------------------------------------------------------------
 
     def _move_keep(self, media_type: str, old: str, new: str) -> None:
-        """Re-key an item's field_keep and art_seen rows with its items row
-        (no commit)."""
+        """Re-key an item's field_keep, art_seen and art_checks rows with its
+        items row (no commit), and its type's own table: a movie's set move
+        must follow it, or a move the user undid would be forgotten and the
+        movie moved again."""
         # A row already at ``new`` is a stray of an item that left; the
         # moved rows belong to the item now at that identity, so they win.
-        for table in ("field_keep", "art_seen"):
+        for table in _IDENTITY_TABLES:
             self._conn.execute(
                 "UPDATE OR REPLACE {} SET identity = ? "
                 "WHERE media_type = ? AND identity = ?".format(table),
                 (new, media_type, old),
+            )
+        if media_type in _TYPE_TABLES:
+            self._conn.execute(
+                "UPDATE OR REPLACE {} SET identity = ? WHERE identity = ?".format(
+                    _TYPE_TABLES[media_type]),
+                (new, old),
             )
 
     def _get_item_id(self, media_type: str, identity: str) -> int | None:
@@ -947,6 +1021,127 @@ class TrackerDB:
                 "Failed to forget first-seen art", event="tracker.error",
                 media_type=media_type, identity=identity, field=field,
             )
+
+    # ------------------------------------------------------------------
+    # Local art existence checks
+    # ------------------------------------------------------------------
+
+    def get_art_check(
+        self, media_type: str, identity: str, field: str
+    ) -> tuple[str, str] | None:
+        """(path fingerprint, ISO date) of the last check that found the
+        slot's local file, or None when there is none."""
+        row = self._conn.execute(
+            "SELECT path_fp, checked_on FROM art_checks WHERE media_type = ? "
+            "AND identity = ? AND field = ?",
+            (media_type, identity, field),
+        ).fetchone()
+        return None if row is None else (row["path_fp"], row["checked_on"])
+
+    def set_art_check(
+        self, media_type: str, identity: str, field: str, path_fp: str, checked_on: str
+    ) -> None:
+        """Record that the slot's local file existed on ``checked_on`` (no
+        commit)."""
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO art_checks "
+                "(media_type, identity, field, path_fp, checked_on) VALUES (?, ?, ?, ?, ?)",
+                (media_type, identity, field, path_fp, checked_on),
+            )
+        except sqlite3.Error:
+            log.exception(
+                "Failed to record a local art check", event="tracker.error",
+                media_type=media_type, identity=identity, field=field,
+            )
+
+    # ------------------------------------------------------------------
+    # Movie sets
+    # ------------------------------------------------------------------
+
+    def get_movie_collection(self, tmdb_id: str) -> str | None:
+        """The stored TMDB collection of a movie ("" for none), or None when
+        TMDB has not been asked yet."""
+        row = self._conn.execute(
+            "SELECT collection_id FROM movie_collections WHERE tmdb_id = ?", (tmdb_id,),
+        ).fetchone()
+        return None if row is None else row["collection_id"]
+
+    def set_movie_collection(self, tmdb_id: str, collection_id: str, checked_on: str) -> None:
+        """Record a movie's TMDB collection, "" for none (no commit)."""
+        try:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO movie_collections (tmdb_id, collection_id, checked_on) "
+                "VALUES (?, ?, ?)",
+                (tmdb_id, collection_id, checked_on),
+            )
+        except sqlite3.Error:
+            log.exception("Failed to record a movie collection", event="tracker.error",
+                          tmdb_id=tmdb_id)
+
+    def add_set_names(self, identity: str, names: Iterable[str]) -> None:
+        """Add known names of a set's collection, lowercased and stripped;
+        empty names are skipped (no commit)."""
+        rows = sorted({(identity, n.strip().lower()) for n in names if n.strip()})
+        try:
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO set_names (identity, name) VALUES (?, ?)", rows,
+            )
+        except sqlite3.Error:
+            log.exception("Failed to record set names", event="tracker.error",
+                          identity=identity)
+
+    def get_set_names(self, identity: str) -> frozenset[str]:
+        """The known lowercased names of a set's collection."""
+        rows = self._conn.execute(
+            "SELECT name FROM set_names WHERE identity = ?", (identity,),
+        ).fetchall()
+        return frozenset(r["name"] for r in rows)
+
+    def get_set_move(self, identity: str) -> dict[str, Any] | None:
+        """A movie's recorded set move, or None."""
+        row = self._conn.execute(
+            "SELECT kodi_id, from_name, to_setid, moved_on, locked FROM set_moves "
+            "WHERE identity = ?", (identity,),
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def record_set_move(
+        self, identity: str, kodi_id: int, from_name: str, to_setid: int, moved_on: str,
+    ) -> None:
+        """Record that MetaMender moved a movie into a set, replacing an
+        earlier unlocked move (no commit). A locked move stays as it is."""
+        try:
+            self._conn.execute(
+                "INSERT INTO set_moves (identity, kodi_id, from_name, to_setid, moved_on, "
+                "locked) VALUES (?, ?, ?, ?, ?, 0) ON CONFLICT(identity) DO UPDATE SET "
+                "kodi_id = excluded.kodi_id, from_name = excluded.from_name, "
+                "to_setid = excluded.to_setid, moved_on = excluded.moved_on "
+                "WHERE set_moves.locked = 0",
+                (identity, kodi_id, from_name, to_setid, moved_on),
+            )
+        except sqlite3.Error:
+            log.exception("Failed to record a set move", event="tracker.error",
+                          identity=identity)
+
+    def lock_set_move(self, identity: str) -> None:
+        """Mark a movie's move as undone by the user, for good (no commit)."""
+        try:
+            self._conn.execute(
+                "UPDATE set_moves SET locked = 1 WHERE identity = ?", (identity,),
+            )
+        except sqlite3.Error:
+            log.exception("Failed to lock a set move", event="tracker.error",
+                          identity=identity)
+
+    def moves_into(self, to_setid: int) -> list[dict[str, Any]]:
+        """Every recorded move into a set, with the movie's identity, oldest
+        first."""
+        rows = self._conn.execute(
+            "SELECT identity, kodi_id, from_name, to_setid, moved_on, locked FROM set_moves "
+            "WHERE to_setid = ? ORDER BY moved_on, identity", (to_setid,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def clear_field_status(self) -> int:
         """Delete all field_status rows (the Reset-tracker action). Returns count.

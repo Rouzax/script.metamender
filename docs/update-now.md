@@ -6,8 +6,8 @@ setting and want to see the result.
 
 ## Where to find it
 
-In your library, open the context menu of a movie, TV show, season or episode
-(long-press OK on a remote, or the C key or right mouse button) and choose
+In your library, open the context menu of a movie, TV show, season, episode
+or movie set (long-press OK on a remote, or the C key or right mouse button) and choose
 **MetaMender > Update now**.
 
 ![The MetaMender submenu in the context menu](screenshots/library/context-submenu.png)
@@ -23,6 +23,9 @@ that are settled or not due yet. It follows the same rules as a scan: values
 from an NFO file and fields you [locked](details.md#restore-original-and-the-lock)
 are left alone, and it fills in the same languages. It does not move the
 item's normal refresh schedule: the next scheduled check stays where it was.
+It also checks at once whether the item's local art files still exist, so
+art whose file you deleted is filled straight away when a site has an image
+for it.
 
 - **A movie or an episode** is refreshed at once. A notification says
   **Updated**, **No changes**, or **Could not check now** when a site did not
@@ -30,6 +33,16 @@ item's normal refresh schedule: the next scheduled check stays where it was.
 - **A TV show** refreshes the show itself, its season posters and every
   episode in it.
 - **A season** refreshes its poster and every episode of that season.
+- **A movie set** refreshes the set itself (its name, plot and art), not its
+  movies. First it merges the set's duplicates: movies of the set's TMDB
+  collection that sit in a duplicate set are moved into it (see
+  [Duplicate sets](libraries.md#duplicate-sets)). On a duplicate, Update now
+  merges it into the set MetaMender manages and refreshes that set. A
+  notification says **Updated** when the set changed or a movie moved.
+  For a set MetaMender leaves alone, nothing changes and the notification
+  says **MetaMender leaves this set alone; Details says why**: its
+  [Details window](details.md#a-set-metamender-leaves-alone) gives the
+  reason.
 
 Season posters are only refreshed in a library with **Posters** ticked, and
 only for a show whose TMDB id MetaMender knows; a season of a show without
@@ -59,7 +72,7 @@ item in a library that is left out, or in no library, it changes nothing and
 a notification says the library is not included.
 
 If fanart.tv refuses the key, a second notification says so and whether it
-was your personal key; posters that need fanart.tv wait. See
+was your personal key; art that needs fanart.tv waits. See
 [Personal fanart.tv API key](settings.md#fanarttv).
 
 Only one scan runs at a time. If a background scan is busy, Update now says

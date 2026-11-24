@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from resources.lib.data.libraries import Library, LibraryConfig
-from resources.lib.data.media_types import MOVIE, SEASON, TVSHOW
+from resources.lib.data.media_types import MOVIE, SEASON, SET, TVSHOW
 from resources.lib.data.tracker import REASON_LOCKED, TrackerDB
 from resources.lib.engine.protect import fingerprint
 from resources.lib.service import details
@@ -99,6 +99,21 @@ def test_restore_after_reset_uses_written_value(db):
     assert details.can_restore("plot", "new plot", fs, keep) is True
     assert details.can_restore("plot", "other", fs, keep) is False
     assert details.can_restore("plot", "new plot", {}, keep) is False
+
+
+def test_no_restore_for_missing_local_original():
+    """The kept original is a local file that no longer exists: putting the
+    dead path back would only break the art again."""
+    nl_poster = "https://image.tmdb.org/t/p/original/nl.jpg"
+    fs = {"written_value": fingerprint(nl_poster)}
+    local = {"poster": {"has_original": True, "original": "smb://h/p.jpg",
+                        "written_fp": fingerprint(nl_poster)}}
+    wrapped = {"poster": dict(local["poster"],
+                              original="image://smb%3a%2f%2fh%2fp.jpg/")}
+    web = {"poster": dict(local["poster"], original="https://example.org/p.jpg")}
+    assert not details.can_restore("poster", nl_poster, fs, local)
+    assert not details.can_restore("poster", nl_poster, fs, wrapped)
+    assert details.can_restore("poster", nl_poster, fs, web)
 
 
 def test_no_original_is_not_restorable(db):
@@ -251,10 +266,10 @@ def opened(tmp_path, monkeypatch):
     }
 
     def libraries(path):
-        def lib(folder, language):
-            return Library(path=folder, label="", included=True, language=language,
+        def lib(folder, language, label=""):
+            return Library(path=folder, label=label, included=True, language=language,
                            fallback_language="", toggles=opened_settings["toggles"])
-        return LibraryConfig([lib("/movies/", ""), lib("/series/", "nl-NL")])
+        return LibraryConfig([lib("/movies/", "", "Films"), lib("/series/", "nl-NL")])
 
     def get_item(media_type, kodi_id):
         item = items.get(kodi_id)
@@ -842,3 +857,158 @@ def test_duplicate_season_reads_its_own_row(opened, monkeypatch):
     details.open_details("season", "30")
     session, _ = opened["shown"][0]
     assert session.identity == own
+
+
+# ---------------------------------------------------------------------------
+# Movie sets
+# ---------------------------------------------------------------------------
+
+SET_ITEM = {"setid": 40, "title": "Heat Collection", "plot": "Set plot", "poster": ""}
+SETS = {40: SET_ITEM, 41: {"setid": 41, "title": "Favourites", "plot": "", "poster": ""}}
+HEAT_MEMBER = {"movieid": 7, "title": "Heat", "set": "Heat Collection", "setid": 40,
+               "file": "/movies/Heat.mkv", "uniqueid": {"tmdb": "949"},
+               "premiered": "1995-12-15"}
+
+
+def _with_sets(opened, monkeypatch, *, collection="1001", members=None, setid_of_heat=40):
+    """Kodi with the sets above; Heat (movie 7) sits in set 40 (or the setid
+    given) and TMDB's answer for it, when given, is stored."""
+    opened["settings"]["toggles"] = frozenset({"movie_sets", "plots", "posters"})
+    tracker = TrackerDB(opened["db_path"])
+    if collection is not None:
+        tracker.set_movie_collection("949", collection, "2026-11-01")
+    tracker.commit()
+    tracker.close()
+    real = details.kodi.get_item_by_id
+    monkeypatch.setattr(details.kodi, "get_item_by_id",
+                        lambda mt, i: dict(SETS[i]) if mt is SET and i in SETS
+                        else (None if mt is SET else real(mt, i)))
+    monkeypatch.setattr(details.kodi, "get_all_items",
+                        lambda mt, **kw: [dict(s) for s in SETS.values()])
+    members = [dict(HEAT_MEMBER, setid=setid_of_heat)] if members is None else members
+    monkeypatch.setattr(details.kodi, "get_set_members", lambda: [dict(m) for m in members])
+    monkeypatch.setattr(details.kodi, "get_movie_setid", lambda movieid: setid_of_heat)
+
+
+def _ids_texts(view):
+    return [text for _, text in view.rows[0].lines]
+
+
+def test_set_details_rows_name_plot_art(opened, monkeypatch):
+    _with_sets(opened, monkeypatch)
+    details.open_details("set", "40")
+    session, view = opened["shown"][0]
+    assert view.heading == "Heat Collection"
+    assert set(_keys(view)) == {"ids", "title", "plot", "poster"}
+    assert session.identity == "collection:1001"
+    assert ("TMDB collection", "1001") in view.rows[0].lines
+    assert opened["notes"] == []
+    session.update_now()
+    assert opened["calls"]["update_now"] == [("set", "40")]
+
+
+def test_set_details_shows_reason_when_left_alone(opened, monkeypatch):
+    _with_sets(opened, monkeypatch, collection="")
+    details.open_details("set", "40")
+    session, view = opened["shown"][0]
+    assert _keys(view) == ["ids"]
+    assert session.identity == ""
+    assert "Left alone: TMDB has no collection for its movies" in _ids_texts(view)
+
+
+def test_set_details_reason_names_the_library_without_the_tick(opened, monkeypatch):
+    _with_sets(opened, monkeypatch)
+    opened["settings"]["toggles"] = frozenset({"plots"})
+    details.open_details("set", "40")
+    _session, view = opened["shown"][0]
+    assert _keys(view) == ["ids"]
+    assert "Left alone: Movie sets is not ticked for Films" in _ids_texts(view)
+
+
+def test_set_details_of_a_previously_managed_set_keeps_its_history(opened, monkeypatch):
+    """A set left alone now still shows the fields it holds a lock on."""
+    _with_sets(opened, monkeypatch)
+    opened["settings"]["toggles"] = frozenset({"plots"})
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("set", "collection:1001", "Heat Collection", kodi_id=40,
+                        tmdb_id="1001")
+    tracker.set_locked("set", "collection:1001", "title", True)
+    tracker.commit()
+    tracker.close()
+    details.open_details("set", "40")
+    session, view = opened["shown"][0]
+    assert session.identity == "collection:1001"
+    assert _keys(view) == ["ids", "title"]
+    assert view.rows[1].action == "unlock"
+
+
+def test_set_details_lists_moves(opened, monkeypatch):
+    _with_sets(opened, monkeypatch)
+    tracker = TrackerDB(opened["db_path"])
+    tracker.record_set_move("tmdb:949", 7, "Heat Collectie", 40, "2026-11-10")
+    tracker.commit()
+    tracker.close()
+    details.open_details("set", "40")
+    _session, view = opened["shown"][0]
+    assert "Heat: moved here from Heat Collectie on 10 Nov 2026" in _ids_texts(view)
+
+
+def test_movie_details_shows_its_move(opened, monkeypatch):
+    _with_sets(opened, monkeypatch)
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=7)
+    tracker.record_set_move("tmdb:949", 7, "Heat Collectie", 40, "2026-11-10")
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    _session, view = opened["shown"][0]
+    assert "Moved by MetaMender from the set Heat Collectie on 10 Nov 2026" in _ids_texts(view)
+
+
+def test_movie_details_says_the_user_moved_it(opened, monkeypatch):
+    _with_sets(opened, monkeypatch, setid_of_heat=41)
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=7)
+    tracker.record_set_move("tmdb:949", 7, "Heat Collectie", 40, "2026-11-10")
+    tracker.commit()
+    tracker.close()
+    details.open_details("movie", "7")
+    _session, view = opened["shown"][0]
+    assert "Left in the set Favourites: you moved it there" in _ids_texts(view)
+
+
+def test_movie_details_without_a_move_asks_kodi_nothing_about_sets(opened, monkeypatch):
+    asked = []
+    monkeypatch.setattr(details.kodi, "get_movie_setid", asked.append)
+    details.open_details("movie", "7")
+    assert asked == []
+    _session, view = opened["shown"][0]
+    assert not any("set" in text.lower() for text in _ids_texts(view))
+
+
+def test_restore_set_name_writes_title(tmp_path, monkeypatch):
+    ident = "collection:1001"
+    tracker = TrackerDB(str(tmp_path / "backfill.db"))
+    tracker.upsert_item("set", ident, "Heat Collection", kodi_id=40, tmdb_id="1001")
+    tracker.keep_original("set", ident, "title", "Heat Collectie")
+    tracker.set_written_fp("set", ident, "title", fingerprint("Heat Collection"))
+    tracker.commit()
+    sent = []
+
+    def rpc(raw):
+        import json
+        query = json.loads(raw)
+        sent.append(query)
+        if query["method"] == "VideoLibrary.GetMovieSetDetails":
+            return json.dumps({"result": {"setdetails": dict(SET_ITEM)}})
+        return json.dumps({"result": "OK"})
+
+    monkeypatch.setattr(details.kodi.xbmc, "executeJSONRPC", rpc)
+    try:
+        assert details.restore_field(tracker, SET, 40, ident, "title") == "restored"
+        assert tracker.get_keep("set", ident)["title"]["locked"] is True
+    finally:
+        tracker.close()
+    write = sent[-1]
+    assert write["method"] == "VideoLibrary.SetMovieSetDetails"
+    assert write["params"] == {"setid": 40, "title": "Heat Collectie"}

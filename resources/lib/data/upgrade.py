@@ -54,6 +54,7 @@ _DEFAULT_BOOL = {
     "enable_fallback": False,
     # Toggles 1.1 never had: absent from its settings, so they convert as off.
     "enable_posters": False, "enable_episode_thumbs": False,
+    "enable_fanart": False, "enable_other_art": False, "enable_movie_sets": False,
 }
 
 

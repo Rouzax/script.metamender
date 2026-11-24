@@ -1,6 +1,8 @@
 """Tests for the TMDB provider module."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
@@ -18,8 +20,10 @@ from resources.lib.providers.tmdb import (
     _parse_tv_certifications,
     _parse_writers,
     check_api_key,
+    fetch_collection,
     fetch_episode_external_ids,
     fetch_movie,
+    fetch_movie_collection_id,
     fetch_season,
     fetch_season_posters,
     fetch_tvshow,
@@ -1047,3 +1051,100 @@ def test_fetch_season_posters() -> None:
 def test_fetch_season_posters_missing_season_is_none() -> None:
     with patch(_PATCH_GET, return_value=None):
         assert fetch_season_posters(5, 2, "k", ("nl",)) is None
+
+
+# =============================================================================
+# Tests: backdrops, logos and collections
+# =============================================================================
+
+_COLLECTION_FIXTURE = Path(__file__).parent / "fixtures" / "tmdb" / "collection_86311.json"
+
+
+def _movie_body() -> dict:
+    return {
+        "belongs_to_collection": {"id": 2344, "name": "The Matrix Collection"},
+        "images": {
+            "posters": [{"file_path": "/p.jpg", "iso_639_1": "en"}],
+            "backdrops": [{"file_path": "/bd.jpg", "iso_639_1": None, "vote_average": 5.0}],
+            "logos": [{"file_path": "/a.svg", "iso_639_1": "en"},
+                      {"file_path": "/B.PNG", "iso_639_1": "en"},
+                      {"file_path": "/c.SVG", "iso_639_1": "nl"}],
+        },
+    }
+
+
+def test_movie_collection_id_and_backdrops_logos() -> None:
+    with patch(_PATCH_GET, return_value=_movie_body()):
+        data = fetch_movie("603", "k", "nl-NL", image_languages=("nl", "en"))
+    assert data is not None
+    assert data["collection_id"] == "2344"
+    assert data["backdrops"][0].url.startswith("https://image.tmdb.org/t/p/original/")
+    assert len(data["posters"]) == 1
+
+
+def test_svg_logo_is_dropped() -> None:
+    with patch(_PATCH_GET, return_value=_movie_body()):
+        data = fetch_movie("603", "k", image_languages=("en",))
+    assert data is not None
+    assert [p.url.rsplit("/", 1)[1] for p in data["logos"]] == ["B.PNG"]
+
+
+def test_tvshow_has_backdrops_and_logos() -> None:
+    with patch(_PATCH_GET, return_value=_movie_body()):
+        data = fetch_tvshow("1", "k", image_languages=("en",))
+    assert data is not None
+    assert len(data["backdrops"]) == 1 and len(data["logos"]) == 1
+
+
+@pytest.mark.parametrize("body", [{}, {"belongs_to_collection": None}])
+def test_movie_without_collection_has_empty_id(body: dict) -> None:
+    with patch(_PATCH_GET, return_value=body):
+        data = fetch_movie("1", "k")
+    assert data is not None
+    assert data["collection_id"] == ""
+
+
+def test_fetch_collection_from_fixture() -> None:
+    body = json.loads(_COLLECTION_FIXTURE.read_text())
+    with patch(_PATCH_GET, return_value=body) as get:
+        rec = fetch_collection("86311", "k", ("nl", "en"))
+    assert rec is not None
+    assert rec["names"]["en"] == "The Avengers Collection"
+    assert rec["names"]["nl"] == rec["names"]["nl-NL"] == "The Avengers Collectie"
+    assert rec["names"]["de"] == rec["names"]["de-DE"]
+    assert "de-AT" not in rec["names"]
+    assert rec["plots"]["nl"].startswith("Een superheldenfilmserie")
+    assert rec["plots"]["en"].startswith("A superhero film series")
+    assert len(rec["posters"]) == 5 and len(rec["backdrops"]) == 5
+    params = get.call_args.kwargs["params"]
+    assert params["append_to_response"] == "images,translations"
+    assert params["include_image_language"] == "nl,en,null"
+    assert get.call_args.args[0].endswith("/collection/86311")
+
+
+def test_fetch_collection_translation_wins_over_top_level_for_en() -> None:
+    body = {"name": "Top", "overview": "Top plot", "translations": {"translations": [
+        {"iso_639_1": "en", "iso_3166_1": "US", "data": {"title": "Tr", "overview": ""}}]}}
+    with patch(_PATCH_GET, return_value=body):
+        rec = fetch_collection("1", "k", ("en",))
+    assert rec is not None
+    assert rec["names"] == {"en-US": "Tr", "en": "Tr"}
+    assert rec["plots"] == {"en": "Top plot"}
+
+
+def test_fetch_collection_404_is_none() -> None:
+    with patch(_PATCH_GET, return_value=None):
+        assert fetch_collection("1", "k", ("en",)) is None
+
+
+def test_fetch_movie_collection_id() -> None:
+    with patch(_PATCH_GET, return_value={"belongs_to_collection": {"id": 10}}) as get:
+        assert fetch_movie_collection_id("603", "k") == "10"
+    assert get.call_args.kwargs["params"] == {"api_key": "k"}
+    with patch(_PATCH_GET, return_value={"belongs_to_collection": None}):
+        assert fetch_movie_collection_id("603", "k") == ""
+
+
+def test_fetch_movie_collection_id_404_is_none() -> None:
+    with patch(_PATCH_GET, return_value=None):
+        assert fetch_movie_collection_id("603", "k") is None

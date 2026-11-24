@@ -16,8 +16,9 @@ examples below fill in the details.
   an item is in.
 - **TheTVDB**: TV show and episode titles and plots, and episode images
   when TMDB has no still for an episode.
-- **fanart.tv**: movie, show and season posters, for libraries with
-  **Posters** ticked (see [Image credits](#image-credits)).
+- **fanart.tv**: movie, show, season and movie set posters, fanart and the
+  other art types, for libraries with **Posters**, **Fanart** or **Other
+  art** ticked (see [Image credits](#image-credits)).
 - **IMDb's ratings**, from IMDb's public data, which the IMDb Ratings module
   downloads and keeps up to date on your device.
 - **The FSK, BBFC and Medieraadet websites**, for age ratings.
@@ -30,13 +31,13 @@ examples below fill in the details.
   you ticked for that library (see [What to fill](libraries.md#what-to-fill)).
 - **Its own records**, kept in the add-on's data folder: the ids it found,
   when it checked each field and when the next check is due, the value a field
-  had before MetaMender first changed it, the poster an item had when
+  had before MetaMender first changed it, the art an item had when
   MetaMender first saw it, and the fields you locked.
 
 **MetaMender never:**
 
 - changes or creates NFO files, or changes your scraper or its settings;
-- downloads images or writes image files: for posters and thumbs it only
+- downloads images or writes image files: for art it only
   changes which image Kodi points at, and Kodi fetches the image;
 - sends anything about your library to TMDB, TheTVDB, fanart.tv, IMDb or the
   rating sites, other than the lookups themselves (an id or a title to look
@@ -66,8 +67,17 @@ page.
 | Runtime | Movies, episodes | TMDB | Replaces a different value. |
 | First aired | Episodes | TMDB | Replaces a different date. |
 | Trailer | Movies | TMDB | Replaces a different link. |
-| Poster | Movies, shows, seasons | TMDB and fanart.tv (order: **Poster source**): library language, then fallback, then a poster without text; see [Posters](libraries.md#posters) | Fills an empty or broken poster. Replaces a poster from TMDB or fanart.tv when a better one clearly leads; never a local file, a poster from another website, or one changed outside MetaMender. See [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs). |
-| Episode thumb | Episodes | TMDB's episode still, then TheTVDB's episode image | Replaces a frame grab, a broken link or an empty thumb. A local file, or an image from a website that MetaMender did not set, stays. |
+| Poster | Movies, shows, seasons | TMDB and fanart.tv (order: **Art source**): library language, then fallback, then a poster without text, then English for an empty poster only; see [Art](libraries.md#art) | Fills an empty or broken poster, and one whose local file was deleted. Replaces a poster from TMDB or fanart.tv when a better one clearly leads; never a local file that exists, a poster from another website, or one changed outside MetaMender. See [Art and episode thumbs](libraries.md#art-and-episode-thumbs). |
+| Fanart | Movies, shows | TMDB backdrops and fanart.tv backgrounds (order: **Art source**): without text, then library language, then fallback, then English for an empty fanart only | As posters. Only the main fanart: the extra fanart (`fanart1` and so on) is never changed. |
+| Clear logo | Movies, shows | TMDB logos and fanart.tv logos (order: **Art source**), as posters; an SVG logo from TMDB is skipped | As posters. |
+| Key art | Movies, shows | A poster without text from TMDB or fanart.tv (order: **Art source**) | As posters. |
+| Landscape, banner, clear art | Movies, shows | fanart.tv: library language, then fallback, then without text, then English for empty art only | As posters. |
+| Disc art | Movies | As landscape | As posters. |
+| Character art | Shows | As landscape | As posters. |
+| Set name | Movie sets | TMDB's collection name: library language, then fallback, then English | Only with **Movie sets** ticked. Replaces the name once; a name changed outside MetaMender is locked. Follows TMDB renames while the newest movie is new. See [Movie sets](libraries.md#movie-sets). |
+| Set plot | Movie sets | TMDB's collection, library language, then fallback | Only with **Movie sets** ticked; as a movie's plot. |
+| Set art | Movie sets | TMDB's collection images and fanart.tv's collection art (order: **Art source**), as for movies | With **Movie sets** and the art's own tick (**Posters**, **Fanart** or **Other art**); as posters. No character art. |
+| Episode thumb | Episodes | TMDB's episode still, then TheTVDB's episode image | Replaces a frame grab, a broken link, an empty thumb or a local file that no longer exists. A local file that exists, or an image from a website that MetaMender did not set, stays. |
 | Age rating | Movies, shows | TMDB for your country, your country's rating site, then other countries converted ([details](age-ratings.md#where-a-rating-comes-from)) | Fills an empty rating; replaces a rating from another country's system (switch off with **Replace other countries' ratings**). |
 
 Every row has the same three exceptions:
@@ -76,7 +86,8 @@ Every row has the same three exceptions:
   MetaMender filled there is its own, so it keeps refreshing it.
 - **In a folder without a language** (only possible by editing
   MetaMender's `sources.json` file), the text fields (plot, titles, tagline,
-  genre) and the poster are only filled when empty, because MetaMender cannot
+  genre) and the art that can carry text (every art type but key art and
+  the episode thumb) are only filled when empty, because MetaMender cannot
   tell which language the existing text is in. Again, what MetaMender filled
   it keeps refreshing.
 - **A locked field** is never written.
@@ -87,15 +98,19 @@ settled, MetaMender does not look at it again.
 
 ## Image credits
 
-MetaMender's posters and episode thumbs come from these sites, and the
+MetaMender's art comes from these sites, and the
 Details window names the site each one came from:
 
-- **[TMDB](https://www.themoviedb.org)**: movie, show and season posters, and
-  episode stills.
-- **[fanart.tv](https://fanart.tv)**: movie, show and season posters, for
-  libraries with **Posters** ticked. MetaMender asks fanart.tv only for an
-  item whose poster is due for a check and whose choice could depend on it,
-  and asks once per show and scan for the show and all its seasons.
+- **[TMDB](https://www.themoviedb.org)**: movie, show, season and movie set
+  posters, movie, show and set fanart (backdrops), clear logos and key art,
+  and episode stills.
+- **[fanart.tv](https://fanart.tv)**: movie, show and season posters, movie
+  and show fanart and other art, and a movie set's art (looked up by its
+  TMDB collection), for libraries with **Posters**, **Fanart** or **Other
+  art** ticked. MetaMender asks fanart.tv only for an
+  item whose art is due for a check and whose choice could depend on it,
+  once per item for all its art types, and once per show and scan for the
+  show and all its seasons.
 - **[TheTVDB](https://thetvdb.com)**: episode images, for an episode TMDB has
   no still for.
 
@@ -103,7 +118,7 @@ The images stay on these sites: Kodi downloads each one when it shows it.
 
 MetaMender uses its own fanart.tv key. A personal key of your own is
 optional: see [Personal fanart.tv API key](settings.md#fanarttv). When
-fanart.tv rejects the key or cannot be reached, posters that need it wait
+fanart.tv rejects the key or cannot be reached, art that needs it waits
 until it works again, with nothing changed, and everything else carries on.
 
 ## How MetaMender knows which item it is

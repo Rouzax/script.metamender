@@ -52,6 +52,14 @@ _TMDB_TO_KODI = {
     # Art: the URLs engine/artsources.py picks, under the Kodi field names.
     "poster": "poster",
     "thumb": "thumb",
+    "fanart": "fanart",
+    "clearlogo": "clearlogo",
+    "keyart": "keyart",
+    "landscape": "landscape",
+    "banner": "banner",
+    "discart": "discart",
+    "clearart": "clearart",
+    "characterart": "characterart",
 }
 
 _KODI_TO_TMDB = {v: k for k, v in _TMDB_TO_KODI.items()}
@@ -257,8 +265,8 @@ class _ScanCtx:
     tracked_shows: frozenset[int] = frozenset()
     # The library's title mode for shows and movies (libraries.TITLE_*).
     title_mode: str = TITLE_LANGUAGE
-    # The library's poster source, "tmdb" or "fanart" (scan_settings).
-    poster_source: str = "tmdb"
+    # The library's art source, "tmdb" or "fanart" (scan_settings).
+    art_source: str = "tmdb"
     # Bare ISO 639-1 codes the primary TMDB fetch asks posters in: the
     # folder language, then its fallback when different. Empty when the
     # item's poster is not being fetched, so no images are requested.

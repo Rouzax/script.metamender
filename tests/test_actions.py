@@ -363,6 +363,96 @@ def test_update_now_working_key_clears_the_problem(update_patched):
     assert "key_rejected" not in _open_problems(store)
 
 
+# ---------------------------------------------------------------------------
+# update_now on a movie set
+# ---------------------------------------------------------------------------
+
+
+def _set_plan(reason=None, title="Heat Collection"):
+    from resources.lib.engine.sets import SetPlan
+    return SetPlan(setid=40, title=title, reason=reason, collection_id="1001",
+                   file=_AIR, premiered="2023-04-05", member_files=(_AIR,),
+                   managed_setid=None)
+
+
+@pytest.fixture
+def set_patched(update_patched, monkeypatch):
+    describe = MagicMock(return_value=_set_plan())
+    monkeypatch.setattr(actions, "describe_set", describe)
+    monkeypatch.setattr(actions, "load_libraries",
+                        MagicMock(return_value=LibraryConfig([_MOVIES])))
+    monkeypatch.setattr(actions, "_get_sources_config_path", MagicMock(return_value="s.json"))
+    monkeypatch.setattr(actions, "lang", lambda i: _LANG.get(i, "s{}".format(i)))
+    update_patched["describe"] = describe
+    return update_patched
+
+
+def test_update_now_on_set_runs_set_pass_with_reset(set_patched):
+    from resources.lib.data.media_types import SET
+    actions.update_now("set", "40")
+    set_patched["run_scan"].assert_called_once()
+    args, kwargs = set_patched["run_scan"].call_args
+    assert kwargs["media_type"] is SET
+    assert kwargs["reset"] is True
+    assert kwargs["only_set"] == 40
+    assert kwargs.get("items") is None
+    # Every library votes on which library the set follows.
+    assert kwargs["libraries"] == LibraryConfig([_MOVIES])
+    set_patched["get_item_by_id"].assert_not_called()
+    assert [c.args[0] for c in set_patched["notify"].call_args_list] == [
+        "Updated: Heat Collection"]
+    set_patched["release"].assert_called_once_with()
+
+
+def test_update_now_on_set_counts_moved_movies_as_updated(set_patched):
+    set_patched["run_scan"].return_value = {"updated": 0, "moved": 2}
+    actions.update_now("set", "40")
+    assert set_patched["notify"].call_args[0][0] == "Updated: Heat Collection"
+
+
+@pytest.mark.parametrize("reason", ["tie_library", "no_members", "off"])
+def test_update_now_on_left_alone_set_notifies(set_patched, reason):
+    set_patched["describe"].return_value = _set_plan(reason)
+    actions.update_now("set", "40")
+    set_patched["run_scan"].assert_not_called()
+    assert [c.args[0] for c in set_patched["notify"].call_args_list] == ["s32774"]
+    set_patched["release"].assert_called_once_with()
+
+
+def test_update_now_on_set_left_alone_after_asking_tmdb_says_so(set_patched):
+    """A reason only TMDB's answers can give is known after the pass."""
+    set_patched["describe"].side_effect = [_set_plan(), _set_plan("no_majority")]
+    set_patched["run_scan"].return_value = {"updated": 0}
+    actions.update_now("set", "40")
+    set_patched["run_scan"].assert_called_once()
+    assert [c.args[0] for c in set_patched["notify"].call_args_list] == ["s32774"]
+
+
+def test_update_now_on_set_with_tmdb_down_says_could_not_check(set_patched):
+    """A member's collection TMDB did not answer is not a reason to leave
+    the set alone: the pass counts it as transient."""
+    set_patched["describe"].side_effect = [_set_plan(), _set_plan("no_collection")]
+    set_patched["run_scan"].return_value = {"updated": 0, "transient": 1}
+    actions.update_now("set", "40")
+    assert [c.args[0] for c in set_patched["notify"].call_args_list] == [
+        "Could not check now: Heat Collection"]
+
+
+def test_update_now_on_a_duplicate_set_runs_the_merge(set_patched):
+    set_patched["describe"].return_value = _set_plan("duplicate", "Heat Collectie")
+    set_patched["run_scan"].return_value = {"updated": 0}
+    actions.update_now("set", "40")
+    set_patched["run_scan"].assert_called_once()
+    assert set_patched["notify"].call_args[0][0] == "No changes: Heat Collectie"
+
+
+def test_update_now_on_a_missing_set(set_patched):
+    set_patched["describe"].return_value = None
+    actions.update_now("set", "40")
+    set_patched["run_scan"].assert_not_called()
+    assert [c.args[0] for c in set_patched["notify"].call_args_list] == ["Item not found"]
+
+
 def test_reset_confirmation_says_locks_and_originals_stay():
     po = (Path(__file__).resolve().parent.parent
           / "resources/language/resource.language.en_gb/strings.po").read_text()
@@ -397,8 +487,9 @@ def test_addon_context_menu_is_one_metamender_submenu():
     assert "ListItem.DBType" in stop.findtext("visible")
     update, details = items["context.py"], items["context_details.py"]
     assert strings[update.findtext("label")] == "Update now"
-    assert _dbtypes(update.findtext("visible")) == {"movie", "episode", "tvshow", "season"}
+    every = {"movie", "episode", "tvshow", "season", "set"}
+    assert _dbtypes(update.findtext("visible")) == every
     assert strings[details.findtext("label")] == "Details"
-    assert _dbtypes(details.findtext("visible")) == {"movie", "episode", "tvshow", "season"}
+    assert _dbtypes(details.findtext("visible")) == every
     for library in items:
         assert (root_dir / library).is_file()
