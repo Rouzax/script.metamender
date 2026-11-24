@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import threading
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from resources.lib.data.libraries import Library, LibraryConfig
-from resources.lib.data.media_types import EPISODE, TVSHOW
+from resources.lib.data.media_types import EPISODE, SEASON, TVSHOW
 from resources.lib.service import refresh
 from resources.lib.service.refresh import (
     RefreshProgress,
@@ -180,6 +180,9 @@ class FakeTracker:
         # Built after the show pass, so the episodes see the ids it found.
         return {"after_passes": len(self.scan.calls)}
 
+    def get_show_tvdb_map(self):
+        return {"tvdb_after_passes": len(self.scan.calls)}
+
 
 class Monitor:
     def __init__(self, abort=False):
@@ -190,10 +193,14 @@ class Monitor:
 
 
 def _run(scope, scan, episodes, monitor=None, progress=None, strings_ok=True,
-         libraries=None):
+         libraries=None, seasons=None):
+    """``seasons`` is the season listing, or a mock standing in for it."""
     progress = progress or RefreshProgress()
+    if not isinstance(seasons, MagicMock):
+        seasons = MagicMock(return_value=seasons or [])
     with patch.object(refresh, "run_scan", scan), \
             patch.object(refresh, "get_all_items", return_value=episodes) as listing, \
+            patch.object(refresh, "get_seasons_for_scan", seasons), \
             patch.object(refresh, "get_item_by_id", return_value=_SHOW), \
             patch.object(refresh, "lang", lambda i: {32472: "Show details",
                                                      32473: "Season {}, episode {}: {}"}.get(i, "")):
@@ -209,7 +216,7 @@ def test_show_refresh_runs_the_show_then_its_episodes():
     assert [c[0] for c in scan.calls] == [TVSHOW, EPISODE]
     assert scan.calls[1][2] == {"after_passes": 1}  # map built after the show pass
     assert all(c[3] is True for c in scan.calls)
-    assert listing.call_args.kwargs == {"tvshowid": 7, "season": None}
+    assert listing.call_args.kwargs == {"tvshowid": 7, "season": None, "art": False}
     # The show's own record is a step of its own, not an episode.
     assert (progress.total, progress.done, progress.updated) == (2, 2, 2)
     assert progress.show_updated is True
@@ -220,8 +227,75 @@ def test_season_refresh_runs_only_its_episodes():
     scan = FakeScan()
     _, progress, listing = _run(Scope(7, 2, "Lost"), scan, [_episode(1, 2)])
     assert [c[0] for c in scan.calls] == [EPISODE]
-    assert listing.call_args.kwargs == {"tvshowid": 7, "season": 2}
+    assert listing.call_args.kwargs == {"tvshowid": 7, "season": 2, "art": False}
     assert progress.current == "Season 2, episode 1: Ep 1"
+
+
+_POSTERS = LibraryConfig([Library(**{**_SERIES.__dict__,
+                                     "toggles": frozenset({"plots", "posters"})})])
+
+
+def test_refresh_lists_episode_art_only_with_episode_thumbs():
+    thumbs = LibraryConfig([Library(**{**_SERIES.__dict__,
+                                       "toggles": frozenset({"plots", "episode_thumbs"})})])
+    _, _, listing = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)], libraries=thumbs)
+    assert listing.call_args.kwargs["art"] is True
+    _, _, listing = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)], libraries=_POSTERS)
+    assert listing.call_args.kwargs["art"] is False
+
+
+def _season(n):
+    return {"seasonid": 40 + n, "season": n, "tvshowid": 7, "title": "Season %d" % n,
+            "file": _LOST, "show_tmdb_id": "4607"}
+
+
+def test_update_now_on_season_scans_that_season_poster():
+    scan = FakeScan()
+    listing = MagicMock(return_value=[_season(1), _season(2)])
+    _, progress, _ = _run(Scope(7, 2, "Lost"), scan, [_episode(1, 2)], seasons=listing,
+                          libraries=_POSTERS)
+    assert [c[0] for c in scan.calls] == [SEASON, EPISODE]
+    assert scan.calls[0][1] == ["Season 2"]
+    assert scan.calls[0][3] is True
+    assert listing.call_args.args == ({"after_passes": 0},)
+    assert listing.call_args.kwargs == {
+        "tvshowid": 7, "show_tvdb_map": {"tvdb_after_passes": 0}}
+    # Progress counts episodes; the season poster is reported with the show.
+    assert (progress.total, progress.done, progress.updated) == (1, 1, 1)
+    assert progress.show_updated is True
+
+
+def test_update_now_on_show_scans_its_season_posters():
+    scan = FakeScan()
+    listing = MagicMock(return_value=[_season(0), _season(1)])
+    _, progress, _ = _run(Scope(7, None, "Lost"), scan, [_episode(1)], seasons=listing,
+                          libraries=_POSTERS)
+    assert [c[0] for c in scan.calls] == [TVSHOW, SEASON, EPISODE]
+    assert scan.calls[1][1] == ["Season 0", "Season 1"]
+    # The season pass uses the ids the show pass found.
+    assert listing.call_args.args == ({"after_passes": 1},)
+    assert (progress.total, progress.done) == (1, 1)
+
+
+def test_seasons_outside_the_included_libraries_are_left_out():
+    scan = FakeScan()
+    elsewhere = dict(_season(1), file="smb://nas/Other/Lost/")
+    _run(Scope(7, None, "Lost"), scan, [_episode(1)], seasons=[elsewhere], libraries=_POSTERS)
+    assert [c[0] for c in scan.calls] == [TVSHOW, EPISODE]
+
+
+def test_no_season_pass_without_a_poster_library():
+    scan = FakeScan()
+    listing = MagicMock(return_value=[_season(1)])
+    _run(Scope(7, 1, "Lost"), scan, [_episode(1)], seasons=listing)
+    listing.assert_not_called()
+    assert [c[0] for c in scan.calls] == [EPISODE]
+
+
+def test_season_label_is_kodis_season_title(monkeypatch):
+    monkeypatch.setattr(refresh, "lang", {32718: "Poster: {}"}.get)
+    assert refresh._label(SEASON, {"season": 0, "title": "Specials"}) == "Poster: Specials"
+    assert refresh._label(SEASON, {"season": 2}) == "Poster: 2"
 
 
 def test_stop_ends_the_refresh_between_items():
@@ -484,6 +558,18 @@ def test_toast_when_only_the_show_record_changed(strings):
     assert p.toast("Lost", stopped=False, could_not_finish=False) == "Updated: Lost"
 
 
+def test_fanart_rejection_is_part_of_the_outcome():
+    class AuthScan(FakeScan):
+        def __call__(self, *a, **kw):
+            stats = super().__call__(*a, **kw)
+            stats["fanart_auth_failed"] = True
+            return stats
+    outcome, _, _ = _run(Scope(7, None, "Lost"), AuthScan(), [_episode(1)])
+    assert outcome.fanart_auth_failed is True
+    outcome, _, _ = _run(Scope(7, None, "Lost"), FakeScan(), [_episode(1)])
+    assert outcome.fanart_auth_failed is False
+
+
 def test_tvdb_rejection_is_part_of_the_outcome():
     class AuthScan(FakeScan):
         def __call__(self, *a, **kw):
@@ -516,6 +602,16 @@ def test_preparation_shows_the_real_count_and_honours_stop():
     assert seen == {"total": 2, "current": "Preparing IMDb ratings"}
     assert settings["imdb_ready"] is True
     assert outcome.stopped is True and scan.calls == []
+
+
+@pytest.mark.parametrize("key, text", [("mine", "#32742 {}"), ("", "#32743 {}")])
+def test_flow_reports_a_fanart_rejection(flow, monkeypatch, key, text):
+    home, notes, released, state = flow
+    monkeypatch.setattr(refresh, "_load_settings",
+                        lambda: {"tmdb_api_key": "k", "fanart_client_key": key})
+    state["outcome"] = refresh.RefreshOutcome(fanart_auth_failed=True)
+    refresh.open_refresh("tvshow", 7)
+    assert notes == ["#32351 Lost", text]
 
 
 def test_flow_reports_a_tvdb_rejection(flow):

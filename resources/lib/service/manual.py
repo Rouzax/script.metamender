@@ -15,24 +15,33 @@ Logging:
 from __future__ import annotations
 
 import time
+from typing import Any
 
 import xbmc
 
 from resources.lib.constants import DEFAULT_ADDON_ID
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
-from resources.lib.engine.scan import run_scan
+from resources.lib.engine.scan import run_scan, scans_seasons
 from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
     _load_settings,
     _prepare_imdb_ratings,
     _sync_libraries,
+    fanart_auth_failed,
+    fanart_auth_string,
     tvdb_auth_failed,
     updated_text,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
+from resources.lib.service.stopscan import (
+    clear_stop,
+    mark_stopped,
+    stop_requested,
+    user_stopped,
+)
 from resources.lib.utils import (
     ApiKeyError,
     StructuredLogger,
@@ -85,6 +94,8 @@ def run() -> None:
             )
             return
         locked = True
+        # A request left over from before this scan must not end it at once.
+        clear_stop()
 
         tracker = TrackerDB(_get_db_path())
         libraries = _sync_libraries(tracker, settings["ui_language"])
@@ -107,6 +118,11 @@ def run() -> None:
         settings["imdb_ready"] = _prepare_imdb_ratings(
             [lib for lib in libraries.libraries if lib.included], monitor)
 
+        # One set of answer caches for the cycle, like the breaker: a show's
+        # fanart.tv answer and TMDB record serve its season posters.
+        fanart_cache: dict[tuple[str, str], Any] = {}
+        show_cache: dict[str, Any] = {}
+
         for media_type in (MOVIE, TVSHOW):
             stats = run_scan(
                 media_type=media_type,
@@ -116,26 +132,44 @@ def run() -> None:
                 settings=settings,
                 monitor=monitor,
                 breaker=breaker,
+                fanart_cache=fanart_cache,
+                show_cache=show_cache,
             )
             all_stats[media_type.name] = stats
+            if stop_requested():
+                mark_stopped(all_stats)
+                break
 
-        show_id_map = tracker.get_show_id_map()
-        episode_stats = run_scan(
-            media_type=EPISODE,
-            tracker=tracker,
-            libraries=libraries,
-            tmdb_api_key=tmdb_api_key,
-            settings=settings,
-            monitor=monitor,
-            show_id_map=show_id_map,
-            breaker=breaker,
-        )
-        all_stats[EPISODE.name] = episode_stats
+        # Seasons and episodes use the show ids the show pass found; a
+        # stopped scan runs neither them nor the Kodi query for the map.
+        later = (SEASON, EPISODE) if scans_seasons(libraries) else (EPISODE,)
+        show_id_map: dict[int, str] = {}
+        if not user_stopped(all_stats.values()):
+            show_id_map = tracker.get_show_id_map()
+        else:
+            later = ()
+        for media_type in later:
+            all_stats[media_type.name] = run_scan(
+                media_type=media_type,
+                tracker=tracker,
+                libraries=libraries,
+                tmdb_api_key=tmdb_api_key,
+                settings=settings,
+                monitor=monitor,
+                show_id_map=show_id_map,
+                breaker=breaker,
+                fanart_cache=fanart_cache,
+                show_cache=show_cache,
+            )
+            if stop_requested():
+                mark_stopped(all_stats)
+                break
 
         duration_ms = int((time.perf_counter() - scan_start) * 1000)
 
         movie_stats = all_stats.get("movie", {})
         tvshow_stats = all_stats.get("tvshow", {})
+        season_stats = all_stats.get("season", {})
         episode_stats = all_stats.get("episode", {})
 
         log.info(
@@ -143,6 +177,7 @@ def run() -> None:
             event="manual.complete",
             movies_updated=movie_stats.get("updated", 0),
             tvshows_updated=tvshow_stats.get("updated", 0),
+            seasons_updated=season_stats.get("updated", 0),
             episodes_updated=episode_stats.get("updated", 0),
             duration_ms=duration_ms,
         )
@@ -160,6 +195,7 @@ def run() -> None:
         total_updated = (
             movie_stats.get("updated", 0)
             + tvshow_stats.get("updated", 0)
+            + season_stats.get("updated", 0)
             + episode_stats.get("updated", 0)
         )
         parts = []
@@ -170,6 +206,8 @@ def run() -> None:
         notify(", ".join(parts))
         if tvdb_auth_failed(all_stats.values()):
             notify(lang(32352))  # TheTVDB rejected the credentials
+        if fanart_auth_failed(all_stats.values()):
+            notify(lang(fanart_auth_string(bool(settings.get("fanart_client_key")))))
 
     except ApiKeyError:
         log.exception("Manual scan stopped: invalid API key", event="manual.apikey")
@@ -182,6 +220,7 @@ def run() -> None:
 
     finally:
         if locked:
+            clear_stop()
             release_scan_lock()
         StructuredLogger.stop_scan_log()
         if tracker is not None:

@@ -20,6 +20,7 @@ import re
 from typing import Any
 
 from resources.lib.constants import TMDB_BASE_URL
+from resources.lib.engine.art import Poster, tmdb_image_url
 from resources.lib.providers.http import provider_get
 from resources.lib.utils import (
     ApiKeyError,
@@ -127,6 +128,26 @@ def _normalize_certs(certs: dict[str, str]) -> dict[str, str]:
     return certs
 
 
+def _image_params(image_languages: tuple[str, ...]) -> dict[str, str]:
+    """Query parameter asking for posters in these languages plus textless."""
+    return {"include_image_language": ",".join(image_languages + ("null",))}
+
+
+def _parse_posters(posters: list[dict]) -> list[Poster]:
+    """Poster candidates from a TMDB images payload; items without a file are
+    skipped."""
+    return [
+        Poster(
+            url=tmdb_image_url(item["file_path"]),
+            provider="tmdb",
+            lang=item.get("iso_639_1") or None,
+            score=(item.get("vote_average") or 0.0, item.get("vote_count") or 0),
+        )
+        for item in posters
+        if item.get("file_path")
+    ]
+
+
 # =============================================================================
 # Public API
 # =============================================================================
@@ -225,11 +246,14 @@ def fetch_movie(
     tmdb_id: str,
     api_key: str,
     language: str = "en-US",
+    image_languages: tuple[str, ...] = (),
 ) -> dict | None:
     """Fetch full movie metadata from TMDB.
 
     Uses append_to_response to get credits, videos, and release_dates
-    in a single API call. Returns a standardized metadata dict or None
+    in a single API call. With ``image_languages`` it also asks for the
+    movie's images and returns them as "posters" (Poster list: those
+    languages plus textless). Returns a standardized metadata dict or None
     on failure. Raises ApiKeyError on HTTP 401.
     """
     url = "{}/movie/{}".format(TMDB_BASE_URL, tmdb_id)
@@ -238,6 +262,9 @@ def fetch_movie(
         "language": language,
         "append_to_response": "credits,videos,release_dates",
     }
+    if image_languages:
+        params["append_to_response"] += ",images"
+        params.update(_image_params(image_languages))
 
     with log_timing(log, "tmdb.movie", tmdb_id=tmdb_id):
         data = provider_get(
@@ -279,6 +306,8 @@ def fetch_movie(
         "certifications": certifications,
         "imdb_id": data.get("imdb_id", ""),
     }
+    if image_languages:
+        result["posters"] = _parse_posters((data.get("images") or {}).get("posters") or [])
 
     log.info(
         "Movie metadata fetched",
@@ -300,7 +329,8 @@ def fetch_season(
     """Fetch season metadata from TMDB, returning a list of episode dicts.
 
     Each episode dict contains title, rating, votes, plot, directors,
-    writers, firstaired, and runtime. Returns None on failure.
+    writers, firstaired, runtime, and thumb (the still as a full URL, "" when
+    TMDB has none). Returns None on failure.
     Raises ApiKeyError on HTTP 401.
     """
     url = "{}/tv/{}/season/{}".format(TMDB_BASE_URL, show_tmdb_id, season_number)
@@ -336,6 +366,7 @@ def fetch_season(
             "writers": _parse_writers(crew),
             "firstaired": ep.get("air_date", ""),
             "runtime": ep.get("runtime"),
+            "thumb": tmdb_image_url(ep["still_path"]) if ep.get("still_path") else "",
         })
 
     log.info(
@@ -353,10 +384,14 @@ def fetch_tvshow(
     tmdb_id: str,
     api_key: str,
     language: str = "en-US",
+    image_languages: tuple[str, ...] = (),
 ) -> dict | None:
     """Fetch TV show metadata from TMDB.
 
-    Uses append_to_response to get content_ratings in a single call.
+    Uses append_to_response to get content_ratings in a single call. The
+    result carries "season_air_dates" ({season_number: "YYYY-MM-DD"}, seasons
+    without a date left out); with ``image_languages`` it also carries
+    "posters" as fetch_movie does.
     Returns a standardized metadata dict or None on failure.
     Raises ApiKeyError on HTTP 401.
     """
@@ -366,6 +401,9 @@ def fetch_tvshow(
         "language": language,
         "append_to_response": "content_ratings,external_ids",
     }
+    if image_languages:
+        params["append_to_response"] += ",images"
+        params.update(_image_params(image_languages))
 
     with log_timing(log, "tmdb.tvshow", tmdb_id=tmdb_id):
         data = provider_get(
@@ -391,7 +429,14 @@ def fetch_tvshow(
         "genres": [g["name"] for g in data.get("genres", []) if "name" in g],
         "certifications": certifications,
         "imdb_id": data.get("external_ids", {}).get("imdb_id", ""),
+        "season_air_dates": {
+            season["season_number"]: season["air_date"]
+            for season in data.get("seasons") or []
+            if season.get("season_number") is not None and season.get("air_date")
+        },
     }
+    if image_languages:
+        result["posters"] = _parse_posters((data.get("images") or {}).get("posters") or [])
 
     log.info(
         "TV show metadata fetched",
@@ -402,6 +447,37 @@ def fetch_tvshow(
     )
 
     return result
+
+
+def fetch_season_posters(
+    show_tmdb_id: str,
+    season_number: int,
+    api_key: str,
+    image_languages: tuple[str, ...],
+) -> list[Poster] | None:
+    """Season poster candidates (``image_languages`` plus textless), or None
+    when TMDB has no such season. Raises ApiKeyError on HTTP 401 and
+    TransientProviderError when TMDB could not be reached."""
+    url = "{}/tv/{}/season/{}/images".format(TMDB_BASE_URL, show_tmdb_id, season_number)
+    params = {"api_key": api_key, **_image_params(image_languages)}
+    with log_timing(
+        log, "tmdb.season_posters", tmdb_id=show_tmdb_id, season=season_number,
+    ):
+        data = provider_get(
+            url, logger=log, label="tmdb.season_posters", params=params,
+            provider="tmdb",
+        )
+    if data is None:
+        return None
+    posters = _parse_posters(data.get("posters") or [])
+    log.debug(
+        "Season posters fetched",
+        event="tmdb.season_posters",
+        tmdb_id=show_tmdb_id,
+        season=season_number,
+        posters=len(posters),
+    )
+    return posters
 
 
 def _clean_ids(data: dict[str, Any]) -> dict[str, str]:

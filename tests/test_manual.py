@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from resources.lib.data.libraries import Library, LibraryConfig
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.service import manual
 
 _LIBRARIES = LibraryConfig([
@@ -163,6 +164,21 @@ def test_manual_tvdb_auth_failure_notified_once(
     assert "s32341" not in notified
 
 
+@pytest.mark.parametrize("key, text", [("mine", "s32742"), ("", "s32743")])
+def test_manual_fanart_auth_failure_names_the_key_in_use(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock], key: str, text: str
+) -> None:
+    monkeypatch.setattr(
+        manual, "_load_settings", MagicMock(return_value=_settings(fanart_client_key=key)))
+    monkeypatch.setattr(manual, "lang", lambda i: "s{}".format(i))
+    patched["run_scan"].return_value = {"updated": 0, "fanart_auth_failed": True}
+
+    manual.run()
+
+    notified = [c.args[0] for c in manual.notify.call_args_list]
+    assert notified.count(text) == 1
+
+
 def test_manual_does_not_scan_before_setup(patched, monkeypatch):
     monkeypatch.setattr(manual, "is_setup_complete", MagicMock(return_value=False))
     manual.run()
@@ -210,10 +226,27 @@ def test_manual_scans_with_the_libraries(monkeypatch, patched):
     monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
     manual.run()
     patched["sync"].assert_called_once_with(patched["tracker"], "en-US")
-    assert [c.kwargs["libraries"] for c in patched["run_scan"].call_args_list] == [
-        _LIBRARIES] * 3
+    calls = patched["run_scan"].call_args_list
+    assert [c.kwargs["libraries"] for c in calls] == [_LIBRARIES] * 3
+    # No library manages posters: no season pass.
+    assert [c.kwargs["media_type"] for c in calls] == [MOVIE, TVSHOW, EPISODE]
     prepared = manual._prepare_imdb_ratings.call_args.args[0]
     assert [lib.path for lib in prepared] == ["smb://nas/Movies/"]
+
+
+def test_manual_scans_seasons_between_shows_and_episodes(monkeypatch, patched):
+    libraries = LibraryConfig([Library(
+        path="smb://nas/Series/", label="Series", included=True, language="en-US",
+        fallback_language="", toggles=frozenset({"posters"}))])
+    patched["sync"].return_value = libraries
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    manual.run()
+    calls = patched["run_scan"].call_args_list
+    # Seasons after the shows, whose ids they use, and before the episodes.
+    assert [c.kwargs["media_type"] for c in calls] == [MOVIE, TVSHOW, SEASON, EPISODE]
+    # One cache per cycle: a show's answers serve its season posters.
+    assert len({id(c.kwargs["fanart_cache"]) for c in calls}) == 1
+    assert len({id(c.kwargs["show_cache"]) for c in calls}) == 1
 
 
 def test_manual_without_libraries_scans_nothing(monkeypatch, patched):
@@ -223,3 +256,52 @@ def test_manual_without_libraries_scans_nothing(monkeypatch, patched):
     patched["run_scan"].assert_not_called()
     patched["tracker"].begin_cycle.assert_not_called()
     manual.release_scan_lock.assert_called_once_with()
+
+
+
+@pytest.fixture
+def stop_window(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from resources.lib.constants import STOP_SCAN_PROPERTY  # noqa: F401
+    from resources.lib.service import stopscan
+    from tests.test_stop_scan import _Window
+    win = _Window()
+    monkeypatch.setattr(stopscan.xbmcgui, "Window", lambda _id: win)
+    return win
+
+
+def test_manual_scan_ends_after_a_stop_and_leaves_the_cycle_open(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock], stop_window: Any
+) -> None:
+    from resources.lib.constants import STOP_SCAN_PROPERTY
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    # The request lands after the movie pass's last per-item check.
+    def scan_pass(**kw):
+        stop_window.setProperty(STOP_SCAN_PROPERTY, "1")
+        return {"updated": 0}
+    patched["run_scan"].side_effect = scan_pass
+
+    manual.run()
+
+    assert [c.kwargs["media_type"] for c in patched["run_scan"].call_args_list] == [MOVIE]
+    patched["tracker"].get_show_id_map.assert_not_called()
+    patched["tracker"].mark_cycle_complete.assert_not_called()
+
+
+def test_manual_scan_clears_a_stale_stop_when_it_starts_and_ends(
+    monkeypatch: pytest.MonkeyPatch, patched: Dict[str, MagicMock], stop_window: Any
+) -> None:
+    from resources.lib.constants import STOP_SCAN_PROPERTY
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    stop_window.setProperty(STOP_SCAN_PROPERTY, "1")
+    seen = []
+    def scan_pass(**kw):
+        seen.append(stop_window.getProperty(STOP_SCAN_PROPERTY))
+        if kw["media_type"] is TVSHOW:
+            stop_window.setProperty(STOP_SCAN_PROPERTY, "1")
+        return {"updated": 0}
+    patched["run_scan"].side_effect = scan_pass
+
+    manual.run()
+
+    assert seen == ["", ""]
+    assert stop_window.getProperty(STOP_SCAN_PROPERTY) == ""

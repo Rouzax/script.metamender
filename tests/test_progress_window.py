@@ -47,7 +47,7 @@ def test_properties_mid_run():
     assert (props["MM.Updated"], props["MM.Unchanged"], props["MM.Unchecked"]) == (
         "2 updated", "3 unchanged", "1 could not be checked")
     assert (props["MM.Stop"], props["MM.Background"]) == ("Stop", "Background")
-    assert GOLDEN_HOUR.items() <= props.items()
+    assert not set(GOLDEN_HOUR) & set(props)  # theme colours live on the Home window
 
 
 def test_minutes_left_and_no_estimate_yet():

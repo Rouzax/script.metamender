@@ -28,6 +28,11 @@ Sometimes, on purpose, and never where you told it not to:
 NFO files, leaving a library out, or switching a field off for a library,
 protect values from the start.
 
+Posters and episode thumbs have stricter rules: local image files, posters
+from other websites and a poster that changed outside MetaMender are never
+replaced. See
+[What MetaMender leaves alone](libraries.md#what-metamender-leaves-alone).
+
 ### Why did it leave this field alone?
 
 The Details window says why, in one sentence; the
@@ -55,9 +60,11 @@ context menu; see [Stopping a scan](scans.md#stopping-a-scan).
 
 ### What does it send over the internet?
 
-Only lookups: an id or a title to find an item at TMDB, TheTVDB or a rating
-site, with your TMDB key for TMDB. Nothing about your library as a whole, and
-nothing about what you watch, is sent anywhere.
+Only lookups: an id or a title to find an item at TMDB, TheTVDB, fanart.tv
+or a rating site, with your TMDB key for TMDB and, if you entered one, your
+personal key for fanart.tv. Nothing about your library as a whole, and
+nothing about what you watch, is sent anywhere. Kodi itself downloads the
+posters and thumbs MetaMender points it at.
 
 ### Can I use it with a library shared between several Kodi devices?
 
@@ -143,6 +150,37 @@ library.
 - **It was converted from another country's rating**: MetaMender replaces it
   when your country's real rating appears. See [Age ratings](age-ratings.md).
 
+### A poster or episode thumb did not change
+
+- **Posters** or **Episode thumbs** is not ticked for the library; both are
+  off until you tick them.
+- **The art is a local image file**, for example one Artwork Dump saved, or
+  a poster from a website other than TMDB or fanart.tv. MetaMender leaves
+  those alone; the Details window says *Local image file, left as it is* or
+  *Image from another source, left as it is*.
+- **An episode thumb from a website that MetaMender did not set**, such as
+  a TMDB still your scraper chose, is kept: only frame grabs, broken links
+  and empty thumbs are replaced.
+- **The poster changed outside MetaMender**, so it is locked. Choose **Let
+  MetaMender update this again** in the Details window to unlock it.
+- **The current poster is still as good**: a poster is only replaced when a
+  better one clearly leads, and one without votes or likes never replaces one
+  that has them.
+- **A season of a show without a TMDB id** is left alone, and a show without
+  a TheTVDB id gets no posters from fanart.tv.
+- **fanart.tv did not answer** or rejected the key: posters that need it wait
+  until it does. If it rejected the key, a notification said so (once for
+  background scans, each time for a manual scan or Update now): *fanart.tv
+  refused your personal API key* means the key in Settings, Providers is
+  wrong (fix it, or clear it to use MetaMender's own key); *fanart.tv refused
+  MetaMender's key* is not something you can fix, and posters resume once
+  fanart.tv accepts the key again. See
+  [Personal fanart.tv API key](settings.md#fanarttv).
+- **The item has an NFO file**: its poster and thumb are only filled when
+  empty, a frame grab or a broken link.
+- **The poster is settled.** Like other fields, a poster is checked while the
+  title is new and then left alone. **Update now** checks it once more.
+
 ### MetaMender changed something I wanted to keep
 
 Open the Details window, select the field and choose **Restore original**. The
@@ -155,6 +193,9 @@ Only one scan runs at a time. Wait until the background scan has finished,
 then try **Update now** again.
 
 ## Reporting a problem
+
+To read this manual from your phone, choose **Manual and help** at the top of
+the add-on settings and scan the QR code.
 
 If something still looks wrong, [open an issue on
 GitHub](https://github.com/Rouzax/script.metamender/issues) with:

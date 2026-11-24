@@ -33,6 +33,8 @@ from resources.lib.service.daemon import (
     _get_db_path,
     _load_settings,
     _prepare_imdb_ratings,
+    fanart_auth_failed,
+    fanart_auth_string,
     tvdb_auth_failed,
 )
 from resources.lib.service.lock import acquire_scan_lock, release_scan_lock
@@ -262,6 +264,8 @@ def update_now(dbtype: str, dbid: str) -> None:
             notify(lang(32351).format(title))  # No changes: {}
         if tvdb_auth_failed([stats]):
             notify(lang(32352))  # TheTVDB rejected the credentials
+        if fanart_auth_failed([stats]):
+            notify(lang(fanart_auth_string(bool(settings.get("fanart_client_key")))))
     except ApiKeyError:
         log.exception("Update now stopped: invalid API key", event="actions.apikey")
         notify(lang(32341))  # Invalid TMDB API key

@@ -5215,7 +5215,7 @@ class TestShowIdConfirmedByEpisodes:
         )
 
         assert row["tvdb_id"] == "80767"
-        assert mock_kodi.call_args.kwargs == {"tvshowid": 10}
+        assert mock_kodi.call_args.kwargs == {"tvshowid": 10, "art": False}
         assert mock_kodi.call_args.args[0] is EPISODE
         assert mock_eps.call_args.args == ("80767", "nld")
         assert self._reasons(mock_log, "scan.unknown_id_accepted") == ["accepted_by_episodes"]
@@ -5292,7 +5292,7 @@ class TestShowIdConfirmedByEpisodes:
         )
 
         assert row["tvdb_id"] == "80767"
-        assert mock_kodi.call_args.kwargs == {"tvshowid": 10}
+        assert mock_kodi.call_args.kwargs == {"tvshowid": 10, "art": False}
         assert self._reasons(mock_log, "scan.unknown_id_accepted") == ["accepted_by_episodes"]
 
     def test_name_mismatch_rejected_without_episode_evidence(self, tmp_path, kodi_stubs):
@@ -5375,7 +5375,7 @@ class TestNewOnlyScan:
         new = _make_movie_item(movie_id=2, tmdb_id="22")
         new["dateadded"] = "2001-01-01 00:00:00"
         mock_all.return_value = [{"movieid": 1}, {"movieid": 2}, {"movieid": 3}]
-        mock_by_id.side_effect = lambda mt, i: {2: new}.get(i)
+        mock_by_id.side_effect = lambda mt, i, art=True: {2: new}.get(i)
         mock_tmdb.return_value = _tmdb_movie_response()
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", compute_identity(known, MOVIE), kodi_id=1)
@@ -6537,6 +6537,7 @@ class TestProviderAnswers:
                          "k", _make_settings(), items=[])
         tracker.close()
         assert stats["tmdb_answered"] is False
+        assert stats["fanart_answered"] is False and stats["fanart_auth_failed"] is False
 
 
 class TestEnrichImdbIdLeavesTheItemAlone:

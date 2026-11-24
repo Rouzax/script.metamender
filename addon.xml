@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="script.metamender"
        name="MetaMender"
-       version="1.2.1"
+       version="1.3.0"
        provider-name="Rouzax">
     <requires>
         <import addon="xbmc.python" version="3.0.1" />
@@ -23,7 +23,7 @@
                 </item>
                 <item library="context_details.py">
                     <label>32594</label>
-                    <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow)</visible>
+                    <visible>String.IsEqual(ListItem.DBType,movie) | String.IsEqual(ListItem.DBType,episode) | String.IsEqual(ListItem.DBType,tvshow) | String.IsEqual(ListItem.DBType,season)</visible>
                 </item>
                 <item library="context_stop.py">
                     <label>32631</label>
@@ -34,7 +34,7 @@
     </extension>
     <extension point="xbmc.addon.metadata">
         <summary lang="en_GB">No gaps. No stale scores. Age ratings you can trust.</summary>
-        <description lang="en_GB">MetaMender quietly improves your video library in the background. It fills in what your scraper left empty (plots, episode titles, credits, taglines, genres and more) from TMDB and TheTVDB, in each folder's own language, with an optional fallback language for empty fields. It keeps scores up to date while new movies and episodes collect votes, from TMDB and IMDb, then leaves them alone once they settle. And it gives movies and TV shows an age rating in your own country's system, for ten countries. Items with an NFO file keep their values, and the Details window in the context menu shows where each value came from, can put an original back and can keep a value as it is. A short setup asks for a free TMDB API key, your library's languages and what to fill; nothing changes before it is finished.</description>
+        <description lang="en_GB">MetaMender quietly improves your video library in the background. It fills in what your scraper left empty (plots, episode titles, credits, taglines, genres and more) from TMDB and TheTVDB, in each folder's own language, with an optional fallback language for empty fields. It keeps scores up to date while new movies and episodes collect votes, from TMDB and IMDb, then leaves them alone once they settle. And it gives movies and TV shows an age rating in your own country's system, for ten countries. If you tick them for a library, it also replaces washed-out frame grabs and broken episode thumbs with the official episode still from TMDB or TheTVDB, and fills and refreshes movie, show and season posters in your library's language, with posters from TMDB and fanart.tv; local image files stay, and so do posters you change afterwards, and a replaced poster can be put back from the Details window. Items with an NFO file keep their values, and the Details window in the context menu shows where each value came from, can put an original back and can keep a value as it is. A short setup asks for a free TMDB API key, your library's languages and what to fill; nothing changes before it is finished.</description>
         <platform>all</platform>
         <license>GPL-3.0-only</license>
         <website>https://rouzax.github.io/script.metamender/</website>

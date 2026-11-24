@@ -10,13 +10,15 @@ resources/skins/Default/media/metamender/, then the docs art: the wordmark
 (icon, a light "Meta" and a heavy amber "Mender") for dark and for light
 backgrounds, the docs banner and the GitHub social preview, under
 docs/assets/, with the landing page's copies under site/images/, and the
-add-on's fanart.jpg. The textures are white on
+add-on's fanart.jpg, and the QR code of the manual's address that the settings'
+"Manual and help" window shows (manual-qr.png, next to the textures). The textures are white on
 transparent so the window XML tints each one with colordiffuse; the nine-slice
 ones (panel, frame, button, row) are 64x64 with their rounding inside a 20px
 border. Also writes docs/art/preview-small.png, the icon at Kodi toast sizes,
 for checking that it still reads when small (not committed).
 
-Needs rsvg-convert (librsvg) and Pillow. This folder is under docs/, which the
+Needs rsvg-convert (librsvg), Pillow and segno (pinned: segno==1.6.1, pure Python;
+for the QR code only). This folder is under docs/, which the
 release zip check refuses, so none of it ships with the add-on.
 """
 from __future__ import annotations
@@ -41,6 +43,10 @@ AMBER_DARK = "#D4912A"
 NAVY = "#1A1D23"
 INK = "#060607"
 LIGHT_TEXT = "#F1F3F5"
+
+# The manual's address, encoded in the QR code; ui/help_window.py shows it
+# written out, and tests/test_help_window.py checks the two agree.
+MANUAL_URL = "https://rouzax.github.io/script.metamender/docs/"
 
 TAGLINE = "No gaps. No stale scores. Age ratings you can trust."
 # Noto Sans Display carries both weights the wordmark contrasts; rsvg finds
@@ -298,11 +304,21 @@ def docs_art() -> None:
     shutil.copyfile(os.path.join(ROOT, "icon.png"), os.path.join(SITE_IMAGES, "icon.png"))
 
 
+def manual_qr(out: str) -> None:
+    """Black on white with the 4-module quiet zone phones need, whatever the
+    window's colour scheme; level M survives a glare or a dirty screen."""
+    import segno
+
+    segno.make(MANUAL_URL, error="m", micro=False).save(
+        out, kind="png", scale=9, border=4, dark="#000000", light="#ffffff")
+
+
 def main() -> None:
     icon_path = os.path.join(ROOT, "icon.png")
     _render(icon_svg(), icon_path, 512)
     for name, (svg, width) in textures().items():
         _render(svg, os.path.join(MEDIA, name + ".png"), width)
+    manual_qr(os.path.join(MEDIA, "manual-qr.png"))
     preview_small(icon_path, os.path.join(ART, "preview-small.png"))
     docs_art()
     fanart()

@@ -56,8 +56,12 @@ Some exceptions:
   country) are settled after one answer: they do not change. An age rating
   MetaMender had to work out from another country's rating is checked again
   every month for about a year, in case the real one appears.
-- **A text from the fallback language** is checked again every month for about
-  a year, so a version in your own language replaces it when one appears.
+- **A text from the fallback language**, and a poster in the fallback
+  language or without text, is checked again every month for about a year, so
+  a version in your own language replaces it when one appears. A poster in
+  your own language replaces it even before anyone has rated that poster.
+- **A season's poster** follows the season's age: the air date of its first
+  episode.
 - **A field MetaMender could not check** (a site did not answer) is tried
   again at the next scan; a failed check never counts as a check.
 
@@ -97,5 +101,16 @@ When there is more than one problem, the most important one is shown and the
 others are listed under **Also**. **Later** closes the window; it does not come
 back for the same problem, but does for a new one.
 
-If TheTVDB stops accepting MetaMender's own key, a notification says so once.
-Titles and plots from TheTVDB are paused until it works again; TMDB carries on.
+If TheTVDB stops accepting MetaMender's own key, a notification says so once
+for background scans; Scan now, Update now and a show or season refresh say so
+each time they meet it. Titles and plots from TheTVDB are paused until it works again; TMDB carries on.
+
+If fanart.tv rejects its key (MetaMender's or your
+[personal key](settings.md#fanarttv)) or cannot be reached, posters whose
+choice depends on fanart.tv wait, with nothing changed, and are tried again at
+the next scan; everything else carries on. When fanart.tv rejects the key, a
+notification says so, and says whether it was your personal key or
+MetaMender's own. A background scan shows it once, and again only after
+fanart.tv has accepted a key in between; a manual scan, Update now and a show
+or season refresh show it each time they meet the rejection. When fanart.tv simply cannot be reached there is no notification;
+Kodi's [log](troubleshooting.md#reporting-a-problem) records both.

@@ -18,7 +18,8 @@ from typing import Any
 
 import xbmc
 
-from resources.lib.data.media_types import MediaType
+from resources.lib.data.media_types import SEASON, TVSHOW, MediaType
+from resources.lib.engine.art import ART_FIELDS, unwrap
 from resources.lib.utils import KodiQueryError, get_logger, log_timing
 
 log = get_logger('kodi')
@@ -44,18 +45,42 @@ _EXTRA_PROPERTIES = {
     ],
 }
 
+# Kodi has no rating, uniqueid or date on a season.
+_SEASON_PROPERTIES = ["season", "showtitle", "tvshowid", "art", "title"]
 
-def _build_properties(media_type: MediaType) -> list[str]:
+# Kodi's "All seasons" pseudo-entry.
+_ALL_SEASONS = -1
+
+
+def _build_properties(media_type: MediaType, art: bool = True) -> list[str]:
     """Build the JSON-RPC property list for a media type.
 
-    Combines the base properties with media-type-specific extras
-    and the date field (premiered or firstaired).
+    The base properties, the date field (premiered or firstaired), the art
+    map when ``art`` is set, and the media type's extras. The art map is
+    large (an episode's carries its show's and season's art too), so a
+    listing for a pass that manages no art leaves it out. Seasons get their
+    own short list, art included: a season is only scanned for its poster.
     """
+    if media_type is SEASON:
+        return list(_SEASON_PROPERTIES)
     props = list(_BASE_PROPERTIES)
     props.append(media_type.date_field)
-    extras = _EXTRA_PROPERTIES.get(media_type.name, [])
-    props.extend(extras)
+    if art:
+        props.append("art")
+    props.extend(_EXTRA_PROPERTIES.get(media_type.name, []))
     return props
+
+
+def flatten_art(item: dict[str, Any], media_type: MediaType) -> dict[str, Any]:
+    """Expose the art slots MetaMender manages as plain top-level fields.
+
+    Kodi returns art as a map of ``image://`` wrapped values; the engine reads
+    the unwrapped URL from ``item["poster"]`` / ``item["thumb"]``.
+    """
+    art = item.get("art") or {}
+    for field in media_type.backfill_fields & ART_FIELDS:
+        item[field] = unwrap(art.get(field))
+    return item
 
 
 def get_all_items(
@@ -63,21 +88,27 @@ def get_all_items(
     tvshowid: int | None = None,
     season: int | None = None,
     ids_only: bool = False,
+    art: bool = True,
 ) -> list[dict[str, Any]]:
     """Query Kodi library for items of the given media type.
 
     Args:
-        media_type: The media type to query (MOVIE, TVSHOW, or EPISODE).
-        tvshowid: For episodes, limit to this TV show (Kodi param, not filter).
+        media_type: The media type to query (MOVIE, TVSHOW, SEASON or
+            EPISODE).
+        tvshowid: For seasons and episodes, limit to this TV show (Kodi
+            param, not filter).
         season: For episodes, limit to this season (requires tvshowid).
         ids_only: Ask for no properties: each item carries only its Kodi id
             and label, which keeps a listing of a large library cheap.
+        art: Ask for the art map and expose the managed art slots as
+            ``poster`` / ``thumb``. Without it the items carry no art field
+            at all, so nothing can read an unrequested slot as empty.
 
     Returns:
         List of item dicts from the Kodi library.
     """
     params: dict[str, Any] = {
-        "properties": [] if ids_only else _build_properties(media_type),
+        "properties": [] if ids_only else _build_properties(media_type, art),
         "limits": {"start": 0, "end": 99999},
     }
     if tvshowid is not None:
@@ -123,6 +154,11 @@ def get_all_items(
 
     result = data.get("result", {})
     items = result.get(media_type.kodi_result_key, [])
+    if media_type is SEASON:
+        items = [i for i in items if i.get("season") != _ALL_SEASONS]
+    if art and not ids_only:
+        for item in items:
+            flatten_art(item, media_type)
 
     total = result.get("limits", {}).get("total", 0)
     if total >= 99999:
@@ -144,9 +180,40 @@ def get_all_items(
     return items
 
 
+def get_seasons_for_scan(
+    show_id_map: dict[int, str],
+    tvshowid: int | None = None,
+    show_tvdb_map: dict[int, str] | None = None,
+) -> list[dict[str, Any]]:
+    """The library's seasons (one show's with ``tvshowid``), ready for the
+    season scan.
+
+    Kodi gives a season no file and no ids, so each carries its show's: the
+    show folder as ``file`` (which places it in a library and holds the
+    tvshow.nfo that governs it), and ``show_tmdb_id`` / ``show_tvdb_id`` from
+    the tracker's show maps, None when unknown. A season of a show Kodi did
+    not list keeps an empty ``file``.
+    """
+    if tvshowid is None:
+        shows = get_all_items(TVSHOW, art=False)
+    else:
+        show = get_item_by_id(TVSHOW, tvshowid, art=False)
+        shows = [show] if show else []
+    folders = {s.get("tvshowid"): str(s.get("file") or "") for s in shows}
+    tvdb_map = show_tvdb_map or {}
+    seasons = get_all_items(SEASON, tvshowid=tvshowid)
+    for season in seasons:
+        show_id = int(season.get("tvshowid", -1))
+        season["file"] = folders.get(show_id, "")
+        season["show_tmdb_id"] = show_id_map.get(show_id)
+        season["show_tvdb_id"] = tvdb_map.get(show_id)
+    return seasons
+
+
 def get_item_by_id(
     media_type: MediaType,
     item_id: int,
+    art: bool = True,
 ) -> dict[str, Any] | None:
     """Fetch a single library item by its Kodi database ID.
 
@@ -156,13 +223,15 @@ def get_item_by_id(
     surface that to the user).
 
     Args:
-        media_type: The media type to query (MOVIE, TVSHOW, or EPISODE).
+        media_type: The media type to query (MOVIE, TVSHOW, SEASON or
+            EPISODE).
         item_id: The Kodi database ID for the item.
+        art: As for get_all_items.
 
     Returns:
         The item dict, or None when not found / on error.
     """
-    properties = _build_properties(media_type)
+    properties = _build_properties(media_type, art)
     params: dict[str, Any] = {
         media_type.kodi_id_field: item_id,
         "properties": properties,
@@ -200,7 +269,7 @@ def get_item_by_id(
     detail = data.get("result", {}).get(media_type.kodi_detail_key)
     if not detail:
         return None
-    return detail
+    return flatten_art(detail, media_type) if art else detail
 
 
 def _details(method: str, id_field: str, item_id: int, key: str,
@@ -249,13 +318,19 @@ def update_item(
         item_id: The Kodi database ID for the item.
         media_type: The media type of the item.
         log_title: The item title (for logging only, not written to Kodi).
-        **fields: Field names and values to set (including "title" for episodes).
+        **fields: Field names and values to set (including "title" for
+            episodes). The art fields (``poster``, ``thumb``) are sent in
+            Kodi's ``art`` map, an empty value as null, which clears the slot.
 
     Returns:
         True on success, False on failure.
     """
-    params = {media_type.kodi_id_field: item_id}
+    params: dict[str, Any] = {media_type.kodi_id_field: item_id}
+    art = {f: (fields.pop(f) or None) for f in ART_FIELDS & fields.keys()}
     params.update(fields)
+    if art:
+        # An empty string clears the slot: Kodi removes a key set to null.
+        params["art"] = art
 
     query = {
         "jsonrpc": "2.0",

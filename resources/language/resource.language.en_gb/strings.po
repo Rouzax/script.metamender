@@ -1438,3 +1438,143 @@ msgstr ""
 msgctxt "#32708"
 msgid "Save your changes?"
 msgstr ""
+
+msgctxt "#32709"
+msgid "fanart.tv"
+msgstr ""
+
+msgctxt "#32710"
+msgid "Personal fanart.tv API key"
+msgstr ""
+
+msgctxt "#32711"
+msgid "Optional. With your own free key from fanart.tv, new images reach you sooner. MetaMender works without it."
+msgstr ""
+
+msgctxt "#32712"
+msgid "Posters"
+msgstr ""
+
+msgctxt "#32713"
+msgid "Fills empty posters and refreshes posters from TMDB or fanart.tv while a title is new. Local image files stay, and so does a poster you change after ticking this."
+msgstr ""
+
+msgctxt "#32714"
+msgid "Episode thumbs"
+msgstr ""
+
+msgctxt "#32715"
+msgid "Replaces thumbs Kodi grabbed from the video, and broken or empty thumbs, with the official episode still."
+msgstr ""
+
+msgctxt "#32716"
+msgid "posters"
+msgstr ""
+
+msgctxt "#32717"
+msgid "episode thumbs"
+msgstr ""
+
+msgctxt "#32718"
+msgid "Poster: {}"
+msgstr ""
+
+msgctxt "#32719"
+msgid "Poster"
+msgstr ""
+
+msgctxt "#32720"
+msgid "Episode thumb"
+msgstr ""
+
+msgctxt "#32721"
+msgid "No image"
+msgstr ""
+
+msgctxt "#32722"
+msgid "Frame grab from the video"
+msgstr ""
+
+msgctxt "#32723"
+msgid "Broken link"
+msgstr ""
+
+msgctxt "#32724"
+msgid "Image from TMDB"
+msgstr ""
+
+msgctxt "#32725"
+msgid "Image from fanart.tv"
+msgstr ""
+
+msgctxt "#32726"
+msgid "Image from another website"
+msgstr ""
+
+msgctxt "#32727"
+msgid "Local image file"
+msgstr ""
+
+msgctxt "#32728"
+msgid "was a frame grab"
+msgstr ""
+
+msgctxt "#32729"
+msgid "was a broken link"
+msgstr ""
+
+msgctxt "#32730"
+msgid "Local image file, left as it is"
+msgstr ""
+
+msgctxt "#32731"
+msgid "Image from another source, left as it is"
+msgstr ""
+
+msgctxt "#32732"
+msgid "Changed outside MetaMender, left as it is"
+msgstr ""
+
+msgctxt "#32733"
+msgid "{} · Season {}"
+msgstr ""
+
+msgctxt "#32734"
+msgid "Poster source"
+msgstr ""
+
+msgctxt "#32735"
+msgid "Posters from The Movie Database."
+msgstr ""
+
+msgctxt "#32736"
+msgid "Posters from fanart.tv. Posters in the library's language always come first, from either source."
+msgstr ""
+
+msgctxt "#32737"
+msgid "Manual and help"
+msgstr ""
+
+msgctxt "#32738"
+msgid "Shows a QR code and the address of MetaMender's manual, to open on your phone or computer."
+msgstr ""
+
+msgctxt "#32739"
+msgid "MetaMender manual"
+msgstr ""
+
+msgctxt "#32740"
+msgid "Scan the code with your phone, or open this address:"
+msgstr ""
+
+msgctxt "#32741"
+msgid "{}, without text"
+msgstr ""
+
+msgctxt "#32742"
+msgid "fanart.tv refused your personal API key. Posters that need fanart.tv wait until it works. Check the key in Settings, Providers, or clear it to use MetaMender's own key."
+msgstr ""
+
+msgctxt "#32743"
+msgid "fanart.tv refused MetaMender's key. Posters that need fanart.tv wait until it works again; everything else carries on."
+msgstr ""

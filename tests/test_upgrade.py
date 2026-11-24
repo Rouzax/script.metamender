@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from resources.lib.constants import COUNTRY_CODES
 from resources.lib.data import upgrade
+from resources.lib.data.libraries import FIELD_TOGGLES
 from resources.lib.data.upgrade import MOVED_IDS, convert, ensure_copy, read_user_settings
 
 DISCOVERED = [{"path": "/m/movies/", "label": "Movies"},
@@ -34,6 +35,11 @@ def test_convert_defaults_for_absent_ids():
     assert (lib.rating_source, lib.text_source_order, lib.fallback_order) == (4, 2, 0)
     assert lib.cert_replace_foreign is True
     assert lib.cert_prefix_override is None and lib.cert_not_found is None
+
+
+def test_convert_1_1_with_new_toggles_does_not_raise():
+    lib = convert(_legacy(), {}, DISCOVERED[:1], "nl-NL").libraries[0]
+    assert "posters" not in lib.toggles and "episode_thumbs" not in lib.toggles
 
 
 def test_convert_automatic_country_stores_resolved_index():
@@ -183,7 +189,11 @@ def test_ensure_copy_write_failure_is_none(tmp_path):
 
 def test_moved_ids_have_defaults():
     covered = set(upgrade._DEFAULT_TEXT) | set(upgrade._DEFAULT_INT) | set(upgrade._DEFAULT_BOOL)
-    assert covered == set(MOVED_IDS)
+    # A toggle added since 1.1 has a default but was never a 1.1 id, and
+    # converts as off.
+    new_toggles = {"enable_" + name for name in FIELD_TOGGLES} - set(MOVED_IDS)
+    assert all(upgrade._DEFAULT_BOOL[key] is False for key in new_toggles)
+    assert covered - new_toggles == set(MOVED_IDS)
 
 
 def test_convert_without_old_settings_switches_nothing_on():

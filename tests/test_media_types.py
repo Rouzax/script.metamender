@@ -1,7 +1,7 @@
 """Tests for media type definitions."""
 from __future__ import annotations
 
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 
 
 def test_movie_fields():
@@ -43,3 +43,25 @@ def test_media_types_are_frozen():
     import dataclasses
     assert dataclasses.is_dataclass(MOVIE)
     assert MOVIE.__dataclass_params__.frozen
+
+
+def test_season_media_type_fields():
+    assert SEASON.name == "season"
+    assert SEASON.label == "Seasons"
+    assert SEASON.kodi_list_method == "VideoLibrary.GetSeasons"
+    assert SEASON.kodi_set_method == "VideoLibrary.SetSeasonDetails"
+    assert SEASON.kodi_get_method == "VideoLibrary.GetSeasonDetails"
+    assert SEASON.kodi_id_field == "seasonid"
+    assert SEASON.kodi_result_key == "seasons"
+    assert SEASON.kodi_detail_key == "seasondetails"
+    assert SEASON.backfill_fields == frozenset({"poster"})
+    assert SEASON.date_field == "firstaired"
+
+
+def test_movie_and_show_backfill_poster():
+    assert "poster" in MOVIE.backfill_fields
+    assert "poster" in TVSHOW.backfill_fields
+
+
+def test_episode_backfill_thumb():
+    assert "thumb" in EPISODE.backfill_fields

@@ -40,9 +40,10 @@ def test_xml_reads_only_properties_the_window_sets():
         text = handle.read()
     used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))
     produced = {"MM.Heading", "MM.Text", "MM.Next", "MM.Back", "MM.Cancel",
-                "MM.StepIndex", "MM.StepTotal", *GOLDEN_HOUR}
+                "MM.StepIndex", "MM.StepTotal"}
     assert used <= produced, used - produced
-    assert {"MM.Accent", "MM.StepTotal"} <= used
+    assert "MM.StepTotal" in used
+    assert not set(GOLDEN_HOUR) & used
     assert "ListItem.Property(marker)" in text
 
 
@@ -57,13 +58,13 @@ def test_addon_xml_declares_the_icon():
     assert icon == "icon.png" and os.path.exists(icon)
 
 
-def test_every_colour_the_window_sets_is_used():
+def test_every_theme_colour_is_used_from_the_home_window():
     from resources.lib.ui.theme import THEMES
-    GOLDEN_HOUR = THEMES[0]
+    names = {key[len("MM."):] for key in THEMES[0]}
     with open(XML) as handle:
         text = handle.read()
-    used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))
-    assert set(GOLDEN_HOUR) <= used, set(GOLDEN_HOUR) - used
+    used = set(re.findall(r"Window\(Home\)\.Property\(MetaMender\.([A-Za-z]+)\)", text))
+    assert names <= used, names - used
 
 
 PROGRESS_XML = "resources/skins/Default/1080i/script-metamender-progress.xml"
@@ -84,7 +85,8 @@ def test_progress_xml_reads_only_properties_the_window_sets():
     used = set(re.findall(r"Window\.Property\((MM\.[A-Za-z]+)\)", text))
     produced = set(progress_properties(RefreshProgress(), "x", 0.0))
     assert used <= produced, used - produced
-    assert {"MM.Heading", "MM.Current", "MM.Stop", "MM.Background", "MM.Accent"} <= used
+    assert {"MM.Heading", "MM.Current", "MM.Stop", "MM.Background"} <= used
+    assert "Window(Home).Property(MetaMender.Accent)" in text
 
 
 def test_progress_buttons_and_bar_match_the_window_code():

@@ -69,7 +69,7 @@ from resources.lib.data.libraries import (
     read_libraries,
     save_libraries,
 )
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.sources import (
     discover_folders,
     kodi_ui_language,
@@ -87,7 +87,7 @@ from resources.lib.data.upgrade import (
 from resources.lib.engine.breaker import CircuitBreaker
 from resources.lib.engine.certchain import SiteGate
 from resources.lib.engine.resolve import rating_sources
-from resources.lib.engine.scan import run_scan
+from resources.lib.engine.scan import run_scan, scans_seasons
 from resources.lib.providers import imdb_ratings
 from resources.lib.service import attention
 from resources.lib.service.lock import (
@@ -95,7 +95,12 @@ from resources.lib.service.lock import (
     clear_file_lock,
     release_scan_lock,
 )
-from resources.lib.service.stopscan import clear_stop, user_stopped
+from resources.lib.service.stopscan import (
+    clear_stop,
+    mark_stopped,
+    stop_requested,
+    user_stopped,
+)
 from resources.lib.ui.attention_window import show_attention_window
 from resources.lib.utils import (
     ApiKeyError,
@@ -165,6 +170,7 @@ def _load_settings() -> dict[str, Any]:
     library does comes from its own settings (_load_libraries)."""
     return {
         "tmdb_api_key": get_setting("tmdb_api_key"),
+        "fanart_client_key": get_setting("fanart_client_key"),
         "stale_threshold_days": get_int_setting("stale_threshold_days", 365),
         "refetch_schedule": get_setting("refetch_schedule"),
         "rate_limit": get_float_setting("rate_limit", 0.25),
@@ -405,6 +411,19 @@ def tvdb_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
     return any(s.get("tvdb_auth_failed") for s in all_stats)
 
 
+def fanart_auth_failed(all_stats: Iterable[dict[str, Any]]) -> bool:
+    """True when any pass of a cycle reports that fanart.tv rejected the
+    key. Posters that need fanart.tv wait (they are never swapped to
+    TMDB), so the user is told."""
+    return any(s.get("fanart_auth_failed") for s in all_stats)
+
+
+def fanart_auth_string(personal_key: bool) -> int:
+    """The string id of the notice for a fanart.tv key rejection; it
+    differs because only a personal key is the user's to fix."""
+    return 32742 if personal_key else 32743
+
+
 def _run_scan(
     tracker: TrackerDB,
     libraries: LibraryConfig,
@@ -412,11 +431,15 @@ def _run_scan(
     monitor: MetaMendMonitor,
     new_only: bool = False,
 ) -> dict[str, dict[str, int]]:
-    """Run scan for MOVIE, TVSHOW, and EPISODE in order; with ``new_only``
-    only the items new to the tracker (run_scan's new_only).
+    """Run scan for MOVIE, TVSHOW, SEASON and EPISODE in order; with
+    ``new_only`` only the items new to the tracker (run_scan's new_only).
 
-    TV shows are scanned before episodes so their TMDB IDs are
-    available for the episode season lookups.
+    TV shows are scanned before seasons and episodes so their TMDB IDs are
+    available for the season lookups. The season pass runs only when an
+    included library manages season posters (scan.scans_seasons).
+
+    A Stop scan request ends the cycle after the pass it arrived in: the
+    later passes, and the show id map between them, are skipped.
 
     Returns:
         Dict keyed by media type name with stats dicts as values.
@@ -433,6 +456,10 @@ def _run_scan(
     # One certification site gate per cycle too: its request cap and memo
     # span the movie and TV show passes.
     cert_gate = SiteGate(settings.get("cert_sites", frozenset()), breaker, monitor)
+    # And one set of answer caches: a show's fanart.tv answer and TMDB record
+    # serve its season posters in the season pass.
+    fanart_cache: dict[tuple[str, str], Any] = {}
+    show_cache: dict[str, Any] = {}
 
     for media_type in (MOVIE, TVSHOW):
         stats = run_scan(
@@ -445,28 +472,39 @@ def _run_scan(
             new_only=new_only,
             breaker=breaker,
             cert_gate=cert_gate,
+            fanart_cache=fanart_cache,
+            show_cache=show_cache,
         )
         all_stats[media_type.name] = stats
+        if stop_requested():
+            mark_stopped(all_stats)
+            return all_stats
 
     show_id_map = tracker.get_show_id_map()
     log.info(
-        "Show ID map built for episode scan",
+        "Show ID map built for season and episode scans",
         event="service.show_id_map",
         shows=len(show_id_map),
     )
 
-    episode_stats = run_scan(
-        media_type=EPISODE,
-        tracker=tracker,
-        libraries=libraries,
-        tmdb_api_key=tmdb_api_key,
-        settings=settings,
-        monitor=monitor,
-        show_id_map=show_id_map,
-        new_only=new_only,
-        breaker=breaker,
-    )
-    all_stats[EPISODE.name] = episode_stats
+    later = (SEASON, EPISODE) if scans_seasons(libraries) else (EPISODE,)
+    for media_type in later:
+        all_stats[media_type.name] = run_scan(
+            media_type=media_type,
+            tracker=tracker,
+            libraries=libraries,
+            tmdb_api_key=tmdb_api_key,
+            settings=settings,
+            monitor=monitor,
+            show_id_map=show_id_map,
+            new_only=new_only,
+            breaker=breaker,
+            fanart_cache=fanart_cache,
+            show_cache=show_cache,
+        )
+        if stop_requested():
+            mark_stopped(all_stats)
+            break
 
     return all_stats
 
@@ -475,6 +513,7 @@ def _maybe_prune_orphans(
     tracker: TrackerDB,
     settings: dict[str, Any],
     targeted: bool,
+    scanned: Iterable[str] | None = None,
 ) -> None:
     """Prune orphaned tracker rows, but ONLY after a full scan.
 
@@ -505,7 +544,13 @@ def _maybe_prune_orphans(
         return
     cutoff = (date.today() - timedelta(days=retention)).isoformat()
     total_removed = 0
-    for mt in (MOVIE, TVSHOW, EPISODE):
+    # Only a type whose pass ran refreshed its last_seen stamps: seasons are
+    # not scanned while no library manages their poster, and their rows
+    # (kept originals included) must outlive that.
+    names = None if scanned is None else set(scanned)
+    for mt in (MOVIE, TVSHOW, SEASON, EPISODE):
+        if names is not None and mt.name not in names:
+            continue
         total_removed += tracker.prune_orphans(mt.name, cutoff=cutoff)
     if total_removed:
         log.info(
@@ -573,15 +618,16 @@ def _check_folders(libraries: LibraryConfig) -> dict[str, bool]:
 def _record_cycle(
     record: attention.Attention, *, shutdown: bool, aborted: bool,
     tvdb_rejected: bool, tmdb_answered: bool, tvdb_answered: bool,
+    fanart_rejected: bool, fanart_answered: bool, fanart_personal: bool,
     folders: dict[str, bool] | None, now: float, unmatched: int | None = None,
 ) -> None:
     """What a finished background cycle tells the problem record: the
     attempt for the failure streak (not when Kodi shut down), TheTVDB's
-    credentials, and, after a full pass over the library, the folders and
-    the number of items in no library. A key or
-    credential problem clears only when that provider answered: a cycle
-    that never asked it proves nothing, and clearing would show the problem
-    again the next time it is hit."""
+    credentials, fanart.tv's key, and, after a full pass over the library,
+    the folders and the number of items in no library. A key or credential
+    problem clears only when that provider answered: a cycle that never
+    asked it proves nothing, and clearing would show the problem again the
+    next time it is hit."""
     if tmdb_answered:
         record.clear(attention.KEY_REJECTED)
     if not shutdown:
@@ -590,6 +636,11 @@ def _record_cycle(
         record.raise_problem(attention.TVDB_AUTH)
     elif tvdb_answered:
         record.clear(attention.TVDB_AUTH)
+    if fanart_rejected:
+        record.raise_problem(
+            attention.FANART_AUTH, attention.PERSONAL_KEY if fanart_personal else "")
+    elif fanart_answered:
+        record.clear(attention.FANART_AUTH)
     if folders is not None:
         record.folders_checked(folders, now)
     if unmatched:
@@ -607,8 +658,9 @@ def _attention_tick(
     tracker: TrackerDB, monitor: Any, shown: set[tuple[str, str]],
 ) -> None:
     """Show what the problem record holds that was not shown yet: the
-    attention window, and the TheTVDB toast. Nothing while anything plays
-    (it waits for the next tick without playback) or while Kodi quits.
+    attention window, and the TheTVDB and fanart.tv toasts. Nothing while
+    anything plays (it waits for the next tick without playback) or while
+    Kodi quits.
 
     ``shown`` is what this service run already showed: should saving the
     record fail, the same window still never comes back within a session.
@@ -644,6 +696,13 @@ def _attention_tick(
             attention.update(
                 tracker, lambda a: a.mark_toast_shown(attention.TVDB_AUTH))
             notify(lang(32352))  # TheTVDB rejected the credentials
+        fanart = record.open_detail(attention.FANART_AUTH)
+        toast = (attention.FANART_AUTH, fanart)
+        if record.pending_toast(attention.FANART_AUTH) and toast not in shown:
+            shown.add(toast)
+            attention.update(
+                tracker, lambda a: a.mark_toast_shown(attention.FANART_AUTH))
+            notify(lang(fanart_auth_string(fanart == attention.PERSONAL_KEY)))
     except Exception:
         log.exception("Showing a problem failed", event="service.attention_failed")
 
@@ -844,6 +903,7 @@ def run() -> None:
 
                         movie_stats = all_stats.get("movie", {})
                         tvshow_stats = all_stats.get("tvshow", {})
+                        season_stats = all_stats.get("season", {})
                         episode_stats = all_stats.get("episode", {})
 
                         log.info(
@@ -851,6 +911,7 @@ def run() -> None:
                             event="service.scan_complete",
                             movies_updated=movie_stats.get("updated", 0),
                             tvshows_updated=tvshow_stats.get("updated", 0),
+                            seasons_updated=season_stats.get("updated", 0),
                             episodes_updated=episode_stats.get("updated", 0),
                             duration_ms=duration_ms,
                         )
@@ -882,7 +943,8 @@ def run() -> None:
                             # after a FULL scan (not targeted); see
                             # _maybe_prune_orphans for why a targeted scan must
                             # never prune.
-                            _maybe_prune_orphans(tracker, settings, targeted)
+                            _maybe_prune_orphans(tracker, settings, targeted,
+                                                 scanned=all_stats.keys())
 
                         # A pass stopped by Kodi shutting down or by the
                         # user's Stop scan says nothing about whether scans
@@ -896,6 +958,9 @@ def run() -> None:
                             s.get("tmdb_answered") for s in all_stats.values())
                         tvdb_answered = any(
                             s.get("tvdb_answered") for s in all_stats.values())
+                        fanart_rejected = fanart_auth_failed(all_stats.values())
+                        fanart_answered = any(
+                            s.get("fanart_answered") for s in all_stats.values())
                         full_pass = not targeted and not cycle_aborted
                         folders = _check_folders(libraries) if full_pass else None
                         unmatched = (
@@ -906,7 +971,10 @@ def run() -> None:
                         attention.update(tracker, partial(
                             _record_cycle, shutdown=shutdown, aborted=cycle_aborted,
                             tvdb_rejected=tvdb_rejected, tmdb_answered=tmdb_answered,
-                            tvdb_answered=tvdb_answered, folders=folders,
+                            tvdb_answered=tvdb_answered, fanart_rejected=fanart_rejected,
+                            fanart_answered=fanart_answered,
+                            fanart_personal=bool(settings.get("fanart_client_key")),
+                            folders=folders,
                             now=time.time(), unmatched=unmatched,
                         ))
 

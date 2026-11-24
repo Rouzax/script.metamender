@@ -137,8 +137,7 @@ def test_header_properties_carry_colours_and_labels():
     assert props["MM.Sub"] == "Dutch folder · last looked at 12 Nov 2026"
     assert props["MM.UpdateNow"] == "Update now"
     assert props["MM.Close"] == "Close"
-    for key, value in GOLDEN_HOUR.items():
-        assert props[key] == value
+    assert not set(GOLDEN_HOUR) & set(props)  # theme colours live on the Home window
 
 
 def test_window_xml_parses_and_reads_every_property():

@@ -84,11 +84,17 @@ def _fetch_movie_or_show(
         tmdb_data = TRANSIENT
     elif tmdb_id:
         fetch = tmdb.fetch_movie if ctx.media_type.name == "movie" else tmdb.fetch_tvshow
+        # Poster candidates ride along on the same request, only when asked.
+        images = {"image_languages": ctx.image_languages} if ctx.image_languages else {}
         tmdb_data = _call_provider(
             "tmdb",
-            lambda: fetch(tmdb_id, ctx.tmdb_api_key, language),
+            lambda: fetch(tmdb_id, ctx.tmdb_api_key, language, **images),
             ctx, identity,
         )
+
+    if ctx.media_type.name == "tvshow" and tmdb_id and tmdb_data is not TRANSIENT:
+        # The season pass reads its air dates from this record.
+        ctx.show_cache[str(tmdb_id)] = tmdb_data
 
     if (not imdb_id and tmdb_data is not TRANSIENT and tmdb_data
             and tmdb_data.get("imdb_id")):
@@ -252,4 +258,68 @@ def _fetch_episode(
         show_tmdb_id=ep_show_tmdb_id,
         imdb_id=ids.imdb,
         imdb_id_transient=imdb_id_transient or (not ids.imdb and tmdb_data is TRANSIENT),
+    )
+
+
+def _show_record(ctx: _ScanCtx, show_tmdb_id: str, language: str, identity: str) -> Any:
+    """The show's TMDB record (None when TMDB has no such show), fetched once
+    per show in the cycle (the show pass may already have it), or
+    TRANSIENT."""
+    if show_tmdb_id in ctx.show_cache:
+        return ctx.show_cache[show_tmdb_id]
+    record = _call_provider(
+        "tmdb",
+        lambda: tmdb.fetch_tvshow(show_tmdb_id, ctx.tmdb_api_key, language),
+        ctx, identity,
+    )
+    if record is not TRANSIENT:
+        ctx.show_cache[show_tmdb_id] = record
+    return record
+
+
+def _fetch_season(
+    ctx: _ScanCtx,
+    item: dict[str, Any],
+    kodi_id: Any,
+    title: str,
+    identity: str,
+    ids: _Ids,
+    language: str,
+) -> _Primary:
+    """Fetch a season's poster candidates and its TMDB air date.
+
+    The record is {"posters": [...]}: no posters when TMDB has no such season.
+    The season's air date, from its show's record, becomes the item's
+    ``firstaired`` and the tracker row's ``premiered``, so the content age of
+    this and later scans has it; a season TMDB gives no date keeps an unknown
+    age. Either call failing makes the record TRANSIENT.
+    """
+    show_tmdb_id = ids.tmdb or ""
+    season = int(item.get("season", 0) or 0)
+    tmdb_data: Any = None
+    if ctx.breaker.is_disabled("tmdb"):
+        tmdb_data = TRANSIENT
+    else:
+        show = _show_record(ctx, show_tmdb_id, language, identity)
+        if show is TRANSIENT:
+            tmdb_data = TRANSIENT
+        elif show is not None:
+            posters = _call_provider(
+                "tmdb",
+                lambda: tmdb.fetch_season_posters(
+                    show_tmdb_id, season, ctx.tmdb_api_key, ctx.image_languages,
+                ),
+                ctx, identity,
+            )
+            tmdb_data = TRANSIENT if posters is TRANSIENT else {"posters": posters or []}
+            air_date = (show.get("season_air_dates") or {}).get(season)
+            if air_date:
+                item[ctx.media_type.date_field] = air_date
+                ctx.tracker.upsert_item(ctx.media_type.name, identity, premiered=air_date)
+    return _Primary(
+        tmdb=tmdb_data,
+        tmdb_id=show_tmdb_id,
+        show_tmdb_id=show_tmdb_id,
+        imdb_id=None,
+        imdb_id_transient=False,
     )

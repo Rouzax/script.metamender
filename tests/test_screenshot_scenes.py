@@ -20,8 +20,8 @@ RUNNER = ROOT / "docker" / "scripts" / "screenshots.py"
 SCENES = json.loads((HELPER / "scenes.json").read_text(encoding="utf-8"))
 SHOTS = ROOT / "docs" / "screenshots"
 
-GROUPS = {"setup", "update-now", "attention", "details", "library"}
-KINDS = {"setup", "details", "attention", "progress", "corner-bar", "context"}
+GROUPS = {"setup", "update-now", "attention", "details", "library", "help"}
+KINDS = {"help", "setup", "details", "attention", "progress", "corner-bar", "context"}
 
 
 def test_every_window_has_a_scene():
@@ -226,6 +226,18 @@ def test_setup_scenes_open_on_their_library_and_row(demo, monkeypatch):
         if scene.get("focus"):
             assert scene["focus"] in [row.key for row in c.rows()], name
         assert scene.get("scroll") in (None, "end"), name
+
+
+def test_a_scene_shows_the_posters_group_of_a_library_with_both_art_toggles(demo):
+    """docs/libraries.md shows the Posters group; the scene's library ticks
+    both art toggles without changing the demo libraries other scenes show."""
+    scenes = [scene for scene in SCENES.values()
+              if scene["kind"] == "setup" and scene.get("focus") == "poster_source"]
+    assert scenes
+    for scene in scenes:
+        state = demo.setup_state(scene)
+        lib = state.libraries.by_path(state.open_library)
+        assert {"posters", "episode_thumbs"} <= lib.toggles
 
 
 def test_demo_libraries_cover_every_list_state(demo):

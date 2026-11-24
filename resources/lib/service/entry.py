@@ -10,6 +10,7 @@ from resources.lib.service.actions import reset_tracker, update_now
 from resources.lib.service.details import open_details
 from resources.lib.service.manual import run
 from resources.lib.service.wizard import open_setup
+from resources.lib.ui.help_window import show_help
 from resources.lib.ui.setup_model import LIBRARIES, WIZARD
 from resources.lib.utils import get_logger, is_setup_complete
 
@@ -27,6 +28,8 @@ def main(argv: list[str]) -> None:
         update_now(argv[1] if len(argv) > 1 else "", argv[2] if len(argv) > 2 else "")
     elif action == "details":
         open_details(argv[1] if len(argv) > 1 else "", argv[2] if len(argv) > 2 else "")
+    elif action == "help":
+        show_help()
     elif action == WIZARD:
         open_setup(WIZARD)
     elif action in (LIBRARIES, _LIBRARIES_1_1):

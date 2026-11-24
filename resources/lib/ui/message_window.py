@@ -17,7 +17,7 @@ from typing import Any
 import xbmc
 import xbmcgui
 
-from resources.lib.ui.theme import theme_colours
+from resources.lib.ui.theme import publish_theme
 from resources.lib.utils import get_addon
 
 _XML = "script-metamender-message.xml"
@@ -81,7 +81,6 @@ def message_properties(heading: str, message: str, question: bool) -> dict[str, 
         "MM.Primary": kodi_lang(_KODI_YES if question else _KODI_OK),
         "MM.Secondary": kodi_lang(_KODI_NO) if question else "",
     }
-    props.update(theme_colours())
     return props
 
 
@@ -129,6 +128,7 @@ def show_message(heading: str, message: str, question: bool = False) -> bool:
     window.question = question
     for key, value in message_properties(heading, message, question).items():
         window.setProperty(key, value)
+    publish_theme()
     window.doModal()
     answer = window.answer
     del window

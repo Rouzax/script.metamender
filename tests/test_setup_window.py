@@ -326,6 +326,7 @@ def test_page_markers_are_checkboxes_and_pickers_only(ids):
     ("ratings", "#32668", ["rating"]),
     ("plots", "#32669", ["text", "fallback_order"]),
     ("main_titles", "#32670", ["title_mode"]),
+    ("posters", "#32712", ["poster_source"]),
     ("certifications", "#32671", ["country", "replace", "prefix", "not_found"]),
 ])
 def test_ticking_a_field_adds_its_group(ids, toggle, group, keys):
@@ -366,6 +367,7 @@ def test_language_picker_offers_the_current_code():
     ("text", 1, "text_source_order", 0),
     ("fallback_order", 1, "fallback_order", 1),
     ("title_mode", 1, "title_mode", TITLE_ORIGINAL),
+    ("poster_source", 1, "poster_source", 1),
     ("country", 3, "cert_country", 3),
 ])
 def test_option_pickers_set_their_value(key, pick, field, value):
@@ -599,11 +601,12 @@ def test_summary_blocks_then_left_out(ids):
     rows = [(r.label, r.detail, r.marker) for r in c.rows()]
     assert rows[0][0] == "#32458"
     assert rows[1] == ("Films", "", HEADER)
-    assert [label for label, _, _ in rows[2:10]] == [
-        "#32422", "#32462", "#32648", "#32649", "#32672", "#32450", "#32645", "#32688"]
-    assert rows[6][1] == "#32674" and rows[8][1] == "#32647"
-    assert rows[9] == ("#32688", "", HEADER)
-    assert rows[10] == ("Kids", "#32661", "")
+    assert [label for label, _, _ in rows[2:11]] == [
+        "#32422", "#32462", "#32648", "#32649", "#32672", "#32734", "#32450", "#32645",
+        "#32688"]
+    assert rows[6][1] == "#32674" and rows[7][1] == "#32010" and rows[9][1] == "#32647"
+    assert rows[10] == ("#32688", "", HEADER)
+    assert rows[11] == ("Kids", "#32661", "")
     assert not c.explanation().startswith("#32675")
 
 
@@ -690,7 +693,7 @@ def test_window_properties_always_carry_every_key():
     c, _ = _controller(key="abc")
     props = window_properties(c)
     assert set(props) == {"MM.Heading", "MM.Text", "MM.Next", "MM.Back", "MM.Cancel",
-                          "MM.StepIndex", "MM.StepTotal", *GOLDEN_HOUR}
+                          "MM.StepIndex", "MM.StepTotal"}
     assert props["MM.StepIndex"] == "1" and props["MM.StepTotal"] == "3"
     assert props["MM.Back"] == "" and c.marker_kind() == ""
 
@@ -759,7 +762,7 @@ def test_skin_draws_header_rows_in_both_layouts():
     for layout in ("itemlayout", "focusedlayout"):
         body = xml[xml.index("<%s" % layout):xml.index("</%s>" % layout)]
         accent_label = re.search(
-            r"<control type=\"label\">(?:(?!</control>).)*MM\.Accent(?:(?!</control>).)*"
+            r"<control type=\"label\">(?:(?!</control>).)*MetaMender\.Accent(?:(?!</control>).)*"
             r"String\.IsEqual\(ListItem\.Property\(marker\),header\)", body, re.DOTALL)
         assert accent_label, layout
 
@@ -880,3 +883,34 @@ def test_country_labels_follow_country_codes():
     assert len(labels) == len(COUNTRY_CODES)
     for string_id, code in zip(labels, COUNTRY_CODES):
         assert strings[string_id].startswith(code + " "), (string_id, code)
+
+
+def test_toggle_rows_include_art_toggles(ids):
+    c, _ = _controller(key="abc")
+    _open_page(c, included=True)
+    rows = {r.key: r for r in c.rows()}
+    assert (rows["toggle:posters"].label, rows["toggle:posters"].detail) == ("#32712", "#32713")
+    assert (rows["toggle:episode_thumbs"].label,
+            rows["toggle:episode_thumbs"].detail) == ("#32714", "#32715")
+
+
+def test_poster_source_row_and_picker(ids):
+    dialogs = FakeDialogs(selects=[1])
+    c, _ = _controller(key="abc", dialogs=dialogs)
+    _open_page(c, included=True, toggles=frozenset({"posters"}))
+    assert c.rows()[_row(c, "poster_source")].label == "#32734"
+    assert c.rows()[_row(c, "poster_source")].detail == "#32010"
+    c.activate(_row(c, "poster_source"))
+    assert dialogs.options == ["#32010", "#32709"]
+    assert dialogs.details == ["#32735", "#32736"]
+    assert dialogs.preselect == 0
+    assert c.rows()[_row(c, "poster_source")].detail == "#32709"
+
+
+def test_summary_shows_poster_source(strings):
+    stored = LibraryConfig([_films(included=True, toggles=frozenset({"posters"}),
+                                   poster_source=1)])
+    c, _ = _controller(key="abc", libraries=stored)
+    _to_summary(c)
+    rows = {r.label: r.detail for r in c.rows()}
+    assert rows["Poster source"] == "fanart.tv"

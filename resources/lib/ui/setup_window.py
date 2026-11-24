@@ -59,6 +59,7 @@ from resources.lib.ui.select_window import show_select
 from resources.lib.ui.setup_model import (
     FALLBACK_ORDER_OPTIONS,
     LIBRARIES,
+    POSTER_OPTIONS,
     RATING_OPTIONS,
     TEXT_OPTIONS,
     TEXT_TOGGLES,
@@ -74,7 +75,7 @@ from resources.lib.ui.setup_model import (
     page_groups,
     settings_to_write,
 )
-from resources.lib.ui.theme import theme_colours
+from resources.lib.ui.theme import publish_theme
 from resources.lib.utils import (
     display_path,
     get_addon,
@@ -109,12 +110,15 @@ _FEATURE_TEXT = {
     "credits": (32442, 32443),
     "trailers": (32444, 32445),
     "taglines": (32446, 32447),
+    "posters": (32712, 32713),
+    "episode_thumbs": (32714, 32715),
     "details": (32448, 32449),
 }
 # The short form a toggle takes in a library's one-line summary.
 _FIELD_WORD = {
     "ratings": 32676, "plots": 32677, "episode_titles": 32678, "main_titles": 32679,
     "certifications": 32681, "credits": 32683, "trailers": 32684, "taglines": 32685,
+    "posters": 32716, "episode_thumbs": 32717,
     "details": 32686,
 }
 # The order of the words in that summary: age ratings last, since their
@@ -136,8 +140,10 @@ _TEXT_ORDER_TEXT = ((32632, 32640), (32392, 32641), (32393, 32642))
 _FALLBACK_ORDER_TEXT = (32393, 32392)
 _TITLE_MODES = (TITLE_LANGUAGE, TITLE_ORIGINAL)
 _TITLE_TEXT = (32673, 32674)
+# (label, sub-line) per option, in POSTER_OPTIONS order.
+_POSTER_TEXT = ((32010, 32735), (32709, 32736))
 _GROUP_HEADING = {"language": 32422, "fields": 32430, "rating": 32668, "text": 32669,
-                  "titles": 32670, "age_ratings": 32671}
+                  "titles": 32670, "posters": 32712, "age_ratings": 32671}
 
 
 @dataclass(frozen=True)
@@ -345,6 +351,9 @@ class SetupController:
         return [Row(lang(32672), _option_label(_TITLE_TEXT, _TITLE_MODES, lib.title_mode),
                     key="title_mode")]
 
+    def _group_posters(self, lib: Library) -> list[Row]:
+        return [Row(lang(32734), self._poster_label(lib), key="poster_source")]
+
     def _group_age_ratings(self, lib: Library) -> list[Row]:
         prefix = lib.cert_prefix_override
         not_found = lib.cert_not_found
@@ -376,6 +385,8 @@ class SetupController:
             if "main_titles" in lib.toggles:
                 rows.append(Row(lang(32672), _option_label(_TITLE_TEXT, _TITLE_MODES,
                                                            lib.title_mode)))
+            if "posters" in lib.toggles:
+                rows.append(Row(lang(32734), self._poster_label(lib)))
             if "certifications" in lib.toggles:
                 rows.append(Row(lang(32450), self._country_label(lib, lib.cert_country)))
                 rows.append(Row(lang(32645),
@@ -456,6 +467,11 @@ class SetupController:
         value = self._pick_option(32638, tuple(t[0] for t in _TEXT_ORDER_TEXT), TEXT_OPTIONS,
                                   lib.text_source_order, tuple(t[1] for t in _TEXT_ORDER_TEXT))
         return None if value is None else replace(lib, text_source_order=value)
+
+    def _pick_poster_source(self, lib: Library) -> Optional[Library]:
+        value = self._pick_option(32734, tuple(t[0] for t in _POSTER_TEXT), POSTER_OPTIONS,
+                                  lib.poster_source, tuple(t[1] for t in _POSTER_TEXT))
+        return None if value is None else replace(lib, poster_source=value)
 
     def _pick_fallback_order(self, lib: Library) -> Optional[Library]:
         value = self._pick_option(32396, _FALLBACK_ORDER_TEXT, FALLBACK_ORDER_OPTIONS,
@@ -624,6 +640,10 @@ class SetupController:
         return _option_label(tuple(t[0] for t in _RATING_TEXT), RATING_OPTIONS,
                              lib.rating_source)
 
+    def _poster_label(self, lib: Library) -> str:
+        return _option_label(tuple(t[0] for t in _POSTER_TEXT), POSTER_OPTIONS,
+                             lib.poster_source)
+
     def _text_label(self, lib: Library) -> str:
         return _option_label(tuple(t[0] for t in _TEXT_ORDER_TEXT), TEXT_OPTIONS,
                              lib.text_source_order)
@@ -680,7 +700,6 @@ def window_properties(c: SetupController) -> dict[str, str]:
         "MM.StepIndex": str(c.flow.index(c.state)) if wizard else "",
         "MM.StepTotal": str(c.flow.total(c.state)) if wizard else "",
     }
-    props.update(theme_colours())
     return props
 
 
@@ -795,6 +814,7 @@ def run_setup(mode: str, config_path: str,
     addon = get_addon()
     window = SetupWindow(_XML, addon.getAddonInfo("path"), "Default", "1080i")
     window.controller = controller
+    publish_theme()
     window.doModal()
     del window
     if not controller.finished:

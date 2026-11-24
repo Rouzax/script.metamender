@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 from resources.lib.data.libraries import FIELD_TOGGLES, Library, LibraryConfig
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.service import daemon
 
 
@@ -48,7 +48,7 @@ def test_maybe_prune_orphans_full_scan_prunes_all_types():
     called = {
         c.args[0] for c in tracker.prune_orphans.call_args_list
     }
-    assert called == {"movie", "tvshow", "episode"}
+    assert called == {"movie", "tvshow", "season", "episode"}
     for c in tracker.prune_orphans.call_args_list:
         assert c.kwargs["cutoff"] == expected_cutoff
 
@@ -160,6 +160,66 @@ def test_run_scan_passes_imdb_ready_to_every_pass(kodi_stubs):
     assert "imdb_ready" not in settings
 
 
+def test_daemon_scans_seasons_between_shows_and_episodes(kodi_stubs):
+    tracker = MagicMock()
+    order = []
+
+    def scan(**kw):
+        order.append(kw["media_type"])
+        return {}
+
+    tracker.get_show_id_map.side_effect = lambda: order.append("show_id_map") or {7: "4607"}
+    with patch.object(daemon, "_prepare_imdb_ratings", return_value=True), \
+            patch.object(daemon, "run_scan", side_effect=scan) as run:
+        stats = daemon._run_scan(tracker, LibraryConfig([_lib("/m/", toggles=("posters",))]),
+                                 {"tmdb_api_key": "k"}, _AbortMonitor(), new_only=True)
+    assert order == [MOVIE, TVSHOW, "show_id_map", SEASON, EPISODE]
+    by_type = {c.kwargs["media_type"]: c.kwargs for c in run.call_args_list}
+    assert by_type[SEASON]["show_id_map"] == {7: "4607"}
+    assert by_type[SEASON]["new_only"] is True
+    assert by_type[SEASON]["breaker"] is by_type[EPISODE]["breaker"]
+    # One cache per cycle: the show pass's answers serve the season pass.
+    for cache in ("fanart_cache", "show_cache"):
+        assert by_type[SEASON][cache] is by_type[TVSHOW][cache]
+        assert by_type[MOVIE][cache] is by_type[EPISODE][cache] is by_type[TVSHOW][cache]
+    assert list(stats) == ["movie", "tvshow", "season", "episode"]
+
+
+def test_prune_includes_seasons():
+    tracker = MagicMock()
+    tracker.prune_orphans.return_value = 0
+    daemon._maybe_prune_orphans(tracker, {"orphan_retention_days": 30}, targeted=False)
+    assert "season" in [c.args[0] for c in tracker.prune_orphans.call_args_list]
+
+
+def test_prune_keeps_the_rows_of_a_type_not_scanned():
+    tracker = MagicMock()
+    tracker.prune_orphans.return_value = 0
+    daemon._maybe_prune_orphans(tracker, {"orphan_retention_days": 30}, targeted=False,
+                                scanned=["movie", "tvshow", "episode"])
+    assert [c.args[0] for c in tracker.prune_orphans.call_args_list] == [
+        "movie", "tvshow", "episode"]
+
+
+def test_no_season_listing_without_a_poster_library(kodi_stubs, tmp_path):
+    from resources.lib.data.tracker import TrackerDB
+
+    listed = []
+    tracker = TrackerDB(str(tmp_path / "t.db"))
+    try:
+        with patch("resources.lib.data.kodi.get_all_items",
+                   side_effect=lambda mt, **kw: listed.append(mt) or []), \
+                patch("resources.lib.data.kodi.get_seasons_for_scan") as seasons:
+            stats = daemon._run_scan(tracker, LibraryConfig([_lib("/m/")]),
+                                     {"tmdb_api_key": "k", "ui_language": "en-US"},
+                                     _AbortMonitor())
+    finally:
+        tracker.close()
+    seasons.assert_not_called()
+    assert listed == [MOVIE, TVSHOW, EPISODE]
+    assert "season" not in stats
+
+
 class _FakeMonitor:
     """Monitor stub that lets the service loop run a fixed number of ticks."""
 
@@ -229,10 +289,12 @@ def test_kodi_query_failure_backs_off(monkeypatch, kodi_stubs):
     assert scan_mock.call_count == 1
 
 
-def _complete_stats(aborted=False, tmdb_answered=True, tvdb_answered=True):
+def _complete_stats(aborted=False, tmdb_answered=True, tvdb_answered=True,
+                    fanart_answered=False):
     s = {"processed": 1, "skipped": 0, "updated": 1, "errors": 0,
          "fields": {}, "aborted": aborted,
-         "tmdb_answered": tmdb_answered, "tvdb_answered": tvdb_answered}
+         "tmdb_answered": tmdb_answered, "tvdb_answered": tvdb_answered,
+         "fanart_answered": fanart_answered}
     return {"movie": s, "tvshow": dict(s), "episode": dict(s)}
 
 
@@ -362,7 +424,7 @@ def test_every_backfill_field_has_a_toggle():
     """A field no toggle enables is never in enabled_fields, so the scan
     never manages it. Votes are written with the rating."""
     toggled = frozenset().union(*FIELD_TOGGLES.values())
-    for media_type in (MOVIE, TVSHOW, EPISODE):
+    for media_type in (MOVIE, TVSHOW, SEASON, EPISODE):
         # A movie or show title has its own toggle, apart from episode titles.
         own = {"title": "main_title"} if media_type is not EPISODE else {}
         needed = {own.get(f, f) for f in media_type.backfill_fields} - {"votes"}
@@ -500,6 +562,8 @@ class _Service:
         # A list: the real sources.json in addon_data, with these sources
         # discovered in Kodi.
         self.discovered = None
+        # The personal fanart.tv key the scan settings carry.
+        self.fanart_key = ""
 
     def run(self, ticks=2, scan=None, setup=True, key="k", notifications=False,
             playing=lambda svc: False, monitor=None, aborting=lambda: False):
@@ -528,6 +592,7 @@ class _Service:
                                            "resume_interrupted": True,
                                            "show_notifications": notifications,
                                            "orphan_retention_days": 30,
+                                           "fanart_client_key": self.fanart_key,
                                            "ui_language": "en-US"}), \
                 (patch.object(daemon, "_sync_libraries", return_value=LibraryConfig())
                  if self.discovered is None else
@@ -695,6 +760,55 @@ def test_tvdb_toast_not_repeated_after_a_cycle_without_tvdb(kodi_stubs):
     svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(tvdb_answered=False)))
     svc.run(ticks=1, scan=MagicMock(return_value=auth))
     assert svc.notified.count("s32352") == 1
+
+
+def _fanart_rejected():
+    stats = _complete_stats()
+    stats["tvshow"]["fanart_auth_failed"] = True
+    return stats
+
+
+def test_fanart_auth_failed_helper():
+    assert daemon.fanart_auth_failed([{"fanart_auth_failed": False}, {"fanart_auth_failed": True}])
+    assert not daemon.fanart_auth_failed([{}, {"updated": 1}])
+
+
+def test_fanart_toast_names_the_personal_key_when_one_is_set(kodi_stubs):
+    svc = _Service()
+    svc.fanart_key = "mine"
+    svc.run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32742") == 1
+    assert "s32743" not in svc.notified
+    assert attention.FANART_AUTH in json.loads(svc.store["attention"])["open"]
+    assert attention.FANART_AUTH not in attention.WINDOW_KINDS
+
+
+def test_fanart_toast_names_the_add_on_key_when_none_is_set(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32743") == 1
+    assert "s32742" not in svc.notified
+
+
+def test_fanart_toast_once_per_problem(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    svc.run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32743") == 1
+
+
+def test_fanart_problem_survives_a_cycle_that_never_asked_fanart(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(fanart_answered=False)))
+    assert attention.FANART_AUTH in json.loads(svc.store["attention"])["open"]
+    svc.run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32743") == 1
+
+
+def test_fanart_problem_clears_when_fanart_answers(kodi_stubs):
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    svc.run(ticks=1, scan=MagicMock(return_value=_complete_stats(fanart_answered=True)))
+    assert attention.FANART_AUTH not in json.loads(svc.store["attention"])["open"]
+    svc.run(ticks=1, scan=MagicMock(return_value=_fanart_rejected()))
+    assert svc.notified.count("s32743") == 2
 
 
 def test_a_failing_window_does_not_stop_the_service(kodi_stubs):

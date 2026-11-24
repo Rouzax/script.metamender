@@ -133,9 +133,13 @@ def _lib(*toggles: str):
     (("episode_titles",), ["language", "fields", "text"]),
     (("main_titles",), ["language", "fields", "text", "titles"]),
     (("certifications",), ["language", "fields", "age_ratings"]),
-    (("credits", "trailers", "taglines", "details"), ["language", "fields"]),
+    (("credits", "trailers", "taglines", "details", "episode_thumbs"),
+     ["language", "fields"]),
+    (("posters",), ["language", "fields", "posters"]),
+    (("posters", "main_titles", "certifications"),
+     ["language", "fields", "text", "titles", "posters", "age_ratings"]),
     (tuple(FIELD_TOGGLES),
-     ["language", "fields", "rating", "text", "titles", "age_ratings"]),
+     ["language", "fields", "rating", "text", "titles", "posters", "age_ratings"]),
 ])
 def test_page_groups_follow_ticks(toggles, groups):
     assert page_groups(_lib(*toggles)) == groups

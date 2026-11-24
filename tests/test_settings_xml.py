@@ -32,6 +32,13 @@ def test_site_toggles_stay_general_and_stand_alone():
         assert settings[site].find("dependencies") is None
 
 
+def test_fanart_client_key_setting_declared():
+    node = _settings()["fanart_client_key"]
+    assert node.get("type") == "string"
+    assert (node.findtext("control/hidden") or "").strip() == "true"
+    assert (node.findtext("constraints/allowempty") or "").strip() == "true"
+
+
 def test_no_category_or_group_is_empty():
     root = ET.parse("resources/settings.xml").getroot()
     for group in root.iter("group"):

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from resources.lib.data.libraries import Library, LibraryConfig
-from resources.lib.data.media_types import MOVIE, TVSHOW
+from resources.lib.data.media_types import MOVIE, SEASON, TVSHOW
 from resources.lib.data.tracker import REASON_LOCKED, TrackerDB
 from resources.lib.engine.protect import fingerprint
 from resources.lib.service import details
@@ -343,7 +343,7 @@ def test_open_details_tvshow_update_now_opens_the_show_refresh(opened):
 
 
 def test_open_details_unsupported_type_says_so(opened):
-    details.open_details("season", "3")
+    details.open_details("collection", "3")
     assert opened["shown"] == []
     assert opened["notes"] == ["Cannot update this item type"]
 
@@ -765,3 +765,80 @@ def test_update_now_on_excluded_library_shows_message_and_changes_nothing(opened
     assert opened["notes"] == [_PO_STRINGS[32650]]
     run_scan.assert_not_called()
     tracker_cls.assert_not_called()
+
+
+SEASON_ITEM = {
+    "seasonid": 30, "tvshowid": 5, "season": 2, "showtitle": "Het gouden uur",
+    "title": "Season 2", "poster": "",
+}
+
+
+def _open_season(opened, monkeypatch, *, show_tmdb="250000", show_tvdb=None):
+    opened["settings"]["toggles"] = frozenset({"posters"})
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("tvshow", "tmdb:250000" if show_tmdb else "Het gouden uur", "Het gouden uur",
+                        kodi_id=5, tmdb_id=show_tmdb, tvdb_id=show_tvdb)
+    tracker.commit()
+    tracker.close()
+    real = details.kodi.get_item_by_id
+    monkeypatch.setattr(details.kodi, "get_item_by_id",
+                        lambda mt, i: dict(SEASON_ITEM) if mt is SEASON else real(mt, i))
+    details.open_details("season", "30")
+
+
+def test_details_opens_for_season(opened, monkeypatch):
+    _open_season(opened, monkeypatch)
+    session, view = opened["shown"][0]
+    assert view.heading == "Het gouden uur · Season 2"
+    assert _keys(view) == ["ids", "poster"]
+    assert session.identity == "tmdb:250000/S02"
+    ids = view.rows[0]
+    assert ("TMDB", "250000") in [(n, t.split(",")[0]) for n, t in ids.lines]
+
+
+def test_details_of_an_unscanned_season_shows_its_show_tvdb_id(opened, monkeypatch):
+    _open_season(opened, monkeypatch, show_tvdb="81189")
+    _session, view = opened["shown"][0]
+    assert ("TheTVDB", "81189") in view.rows[0].lines
+
+
+def test_details_of_a_season_of_a_show_without_tmdb_id_has_no_fields(opened, monkeypatch):
+    _open_season(opened, monkeypatch, show_tmdb=None)
+    _session, view = opened["shown"][0]
+    assert _keys(view) == ["ids"]
+    assert opened["notes"] == []
+
+
+def test_unlock_poster_forgets_first_seen(db):
+    db.set_first_fp("movie", IDENT, "poster", "fp1")
+    db.set_locked("movie", IDENT, "poster", True)
+    db.commit()
+    assert details.unlock_field(db, MOVIE, IDENT, "poster") is True
+    assert db.get_first_fp("movie", IDENT, "poster") is None
+
+
+def test_restore_poster_writes_art(db):
+    original = "image://video@smb%3a%2f%2fnas%2fm.mkv"
+    _setup(db, "poster", original, "https://image.tmdb.org/t/p/original/a.jpg")
+    result, upd = _run(db, "poster", "https://image.tmdb.org/t/p/original/a.jpg")
+    assert result == "restored"
+    assert upd.call_args.kwargs["poster"] == original
+
+
+def test_duplicate_season_reads_its_own_row(opened, monkeypatch):
+    """The season holding the shared row is told apart through its show's id."""
+    opened["settings"]["toggles"] = frozenset({"posters"})
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("tvshow", "tmdb:250000", "Het gouden uur", kodi_id=5,
+                        tmdb_id="250000")
+    tracker.upsert_item("season", "tmdb:250000/S02", "Season 2", kodi_id=31)
+    own = "tmdb:250000/S02|/series/Het gouden uur/"
+    tracker.commit()
+    tracker.close()
+    real = details.kodi.get_item_by_id
+    seasons = {30: SEASON_ITEM, 31: dict(SEASON_ITEM, seasonid=31)}
+    monkeypatch.setattr(details.kodi, "get_item_by_id",
+                        lambda mt, i: dict(seasons[i]) if mt is SEASON else real(mt, i))
+    details.open_details("season", "30")
+    session, _ = opened["shown"][0]
+    assert session.identity == own

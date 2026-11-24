@@ -12,12 +12,34 @@ bottom left of the settings screen) to **Advanced**; they are marked
 
 ## Providers
 
+**Manual and help**
+:   Opens a window with a QR code and the address of this manual
+    (`rouzax.github.io/script.metamender/docs/`), to open on your phone or
+    computer. It is the first entry of the settings, so when you open them
+    the cursor already rests on it: press Left once to reach the list of
+    tabs. Nothing is changed or saved; **Close** (or Back) returns you to
+    Kodi.
+
 ### TMDB
 
 **TMDB API key**
 :   Your own free key from themoviedb.org; see
     [setup](setup.md#1-tmdb-api-key). Without a working key MetaMender
     updates nothing and tells you so.
+
+### fanart.tv
+
+**Personal fanart.tv API key**
+:   Optional. MetaMender asks fanart.tv for posters with its own key; with
+    your own personal key as well, new images reach you sooner. fanart.tv
+    gives you a personal key with an account on its website. MetaMender works
+    without it, and it only matters for libraries with **Posters** ticked
+    (see [Posters](libraries.md#posters)). If fanart.tv rejects the key,
+    posters that need fanart.tv wait, with nothing changed, until it works
+    again; everything else carries on. A notification tells you when your
+    personal key is refused (once for background scans, each time for a
+    manual scan or Update now): check it here, or clear the field to use
+    MetaMender's own key.
 
 ## Backfill
 

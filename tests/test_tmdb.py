@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from resources.lib.engine.art import Poster
 from resources.lib.providers.tmdb import (
     KEY_OK,
     KEY_REFUSED,
@@ -20,6 +21,7 @@ from resources.lib.providers.tmdb import (
     fetch_episode_external_ids,
     fetch_movie,
     fetch_season,
+    fetch_season_posters,
     fetch_tvshow,
     fetch_tvshow_external_ids,
     fetch_tvshow_original_language,
@@ -968,3 +970,80 @@ class TestOriginalLanguage:
         mock_get.return_value = _mock_response(503)
         with pytest.raises(TransientProviderError):
             fetch_tvshow_original_language("1", "k")
+
+
+# =============================================================================
+# Tests: images and stills
+# =============================================================================
+
+_PATCH_GET = "resources.lib.providers.tmdb.provider_get"
+_IMAGES = {"posters": [
+    {"file_path": "/a.jpg", "iso_639_1": "nl", "vote_average": 5.5, "vote_count": 3},
+    {"file_path": "/b.jpg", "iso_639_1": None, "vote_average": 6.0, "vote_count": 9},
+    {"iso_639_1": "en"},
+]}
+
+
+def test_fetch_movie_images_param_and_posters() -> None:
+    with patch(_PATCH_GET, return_value={"images": _IMAGES}) as get:
+        result = fetch_movie("1", "k", "nl-NL", image_languages=("nl", "en"))
+    params = get.call_args.kwargs["params"]
+    assert params["append_to_response"] == "credits,videos,release_dates,images"
+    assert params["include_image_language"] == "nl,en,null"
+    assert result is not None
+    assert result["posters"] == [
+        Poster("https://image.tmdb.org/t/p/original/a.jpg", "tmdb", "nl", (5.5, 3)),
+        Poster("https://image.tmdb.org/t/p/original/b.jpg", "tmdb", None, (6.0, 9)),
+    ]
+
+
+def test_fetch_movie_without_image_languages_has_no_images_append() -> None:
+    with patch(_PATCH_GET, return_value={}) as get:
+        result = fetch_movie("1", "k")
+    params = get.call_args.kwargs["params"]
+    assert "images" not in params["append_to_response"]
+    assert "include_image_language" not in params
+    assert result is not None
+    assert "posters" not in result
+
+
+def test_fetch_tvshow_season_air_dates() -> None:
+    data = {"seasons": [
+        {"season_number": 0, "air_date": "2020-01-01"},
+        {"season_number": 1, "air_date": "2021-02-03"},
+        {"season_number": 2, "air_date": None},
+    ], "images": _IMAGES}
+    with patch(_PATCH_GET, return_value=data) as get:
+        result = fetch_tvshow("1", "k", image_languages=("en",))
+    assert get.call_args.kwargs["params"]["append_to_response"].endswith(",images")
+    assert result is not None
+    assert result["season_air_dates"] == {0: "2020-01-01", 1: "2021-02-03"}
+    assert len(result["posters"]) == 2
+
+
+def test_fetch_season_episode_thumb_from_still_path() -> None:
+    data = {"episodes": [
+        {"episode_number": 1, "still_path": "/s1.jpg"},
+        {"episode_number": 2, "still_path": None},
+        {"episode_number": 3},
+    ]}
+    with patch(_PATCH_GET, return_value=data):
+        result = fetch_season("1", 1, "k")
+    assert result is not None
+    assert [e["thumb"] for e in result] == [
+        "https://image.tmdb.org/t/p/original/s1.jpg", "", "",
+    ]
+
+
+def test_fetch_season_posters() -> None:
+    with patch(_PATCH_GET, return_value=_IMAGES) as get:
+        result = fetch_season_posters(5, 2, "k", ("nl",))
+    assert get.call_args.args[0].endswith("/tv/5/season/2/images")
+    assert get.call_args.kwargs["params"]["include_image_language"] == "nl,null"
+    assert result is not None
+    assert [p.lang for p in result] == ["nl", None]
+
+
+def test_fetch_season_posters_missing_season_is_none() -> None:
+    with patch(_PATCH_GET, return_value=None):
+        assert fetch_season_posters(5, 2, "k", ("nl",)) is None
