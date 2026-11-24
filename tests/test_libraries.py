@@ -5,6 +5,7 @@ import json
 
 from resources.lib.constants import COUNTRY_CODES
 from resources.lib.data.libraries import (
+    ART_SOURCE_TMDB,
     FIELD_TOGGLES,
     Library,
     LibraryConfig,
@@ -39,13 +40,25 @@ def test_new_library_has_nothing_on():
 def test_field_toggle_names():
     assert set(FIELD_TOGGLES) == {
         "ratings", "plots", "episode_titles", "main_titles", "certifications",
-        "credits", "trailers", "taglines", "posters", "episode_thumbs", "details"}
+        "credits", "trailers", "taglines", "posters", "episode_thumbs", "fanart", "other_art",
+        "movie_sets", "details"}
 
 
 def test_field_toggles_include_art():
     assert FIELD_TOGGLES["posters"] == frozenset({"poster"})
     assert FIELD_TOGGLES["episode_thumbs"] == frozenset({"thumb"})
+    assert FIELD_TOGGLES["fanart"] == frozenset({"fanart"})
+    assert FIELD_TOGGLES["other_art"] == frozenset({
+        "clearlogo", "keyart", "landscape", "banner", "discart", "clearart", "characterart"})
+    assert FIELD_TOGGLES["movie_sets"] == frozenset({"movie_set"})
     assert list(FIELD_TOGGLES)[-1] == "details"
+    assert list(FIELD_TOGGLES)[-5:-1] == ["episode_thumbs", "fanart", "other_art", "movie_sets"]
+
+
+def test_old_entry_reads_new_ticks_off(tmp_path):
+    lib = _write_with_source(tmp_path, toggles=["posters"])
+    assert not {"fanart", "other_art", "movie_sets"} & lib.toggles
+    assert lib.art_source == ART_SOURCE_TMDB
 
 
 def _write_with_source(tmp_path, **extra):
@@ -56,27 +69,28 @@ def _write_with_source(tmp_path, **extra):
     return load_libraries(str(p)).libraries[0]
 
 
-def test_poster_source_defaults_to_tmdb_for_old_file(tmp_path):
-    assert _write_with_source(tmp_path).poster_source == 0
+def test_art_source_defaults_to_tmdb_for_old_file(tmp_path):
+    assert _write_with_source(tmp_path).art_source == 0
 
 
-def test_poster_source_round_trips(tmp_path):
+def test_art_source_round_trips(tmp_path):
     p = str(tmp_path / "sources.json")
     lib = Library(path="/m/", label="M", included=True, language="en-US",
-                  fallback_language="", toggles=frozenset(), poster_source=1)
+                  fallback_language="", toggles=frozenset(), art_source=1)
     assert save_libraries(p, LibraryConfig([lib])) is True
-    assert load_libraries(p).libraries[0].poster_source == 1
+    assert load_libraries(p).libraries[0].art_source == 1
+    assert json.loads(open(p, encoding="utf-8").read())["libraries"][0]["art_source"] == 1
 
 
-def test_poster_source_out_of_range_reads_tmdb(tmp_path):
+def test_art_source_out_of_range_reads_tmdb(tmp_path):
     for bad in (2, -1, "1", None, True):
-        assert _write_with_source(tmp_path, poster_source=bad).poster_source == 0
+        assert _write_with_source(tmp_path, art_source=bad).art_source == 0
 
 
-def test_scan_settings_poster_source():
+def test_scan_settings_art_source():
     for value, name in ((0, "tmdb"), (1, "fanart")):
-        lib = Library(**{**_lib().__dict__, "poster_source": value})
-        assert scan_settings(lib, {}, "en-US")["poster_source"] == name
+        lib = Library(**{**_lib().__dict__, "art_source": value})
+        assert scan_settings(lib, {}, "en-US")["art_source"] == name
 
 
 def test_fields_expand_toggles():

@@ -220,7 +220,7 @@ def settings_fingerprint(
     language ("" when it has none), plus the provider and fallback orders on
     shows and episodes (movies ask TMDB only), plus the library's title mode
     for a show's or movie's title; an episode thumb depends on no setting; a
-    poster on the poster source, the folder language and the fallback
+    poster on the art source, the folder language and the fallback
     language; for every other field, one TMDB step, the folder language.
     """
     if field in RATING_FIELDS:
@@ -254,7 +254,7 @@ def settings_fingerprint(
         inputs = {}
     elif field == "poster":
         inputs = {
-            "poster_source": settings.get("poster_source", "tmdb"),
+            "art_source": settings.get("art_source", "tmdb"),
             "folder_language": folder_language,
             "fallback_language": fallback_language.strip(),
         }
@@ -1093,7 +1093,7 @@ def _library_pass(
         fallback_order=lib_settings["fallback_order"],
         cert=_cert_config(base.media_type, fields, lib_settings, base.breaker, monitor, gate),
         title_mode=lib.title_mode,
-        poster_source=lib_settings["poster_source"],
+        art_source=lib_settings["art_source"],
     )
     candidates = candidate_fields(base.media_type, fields)
     if ctx.cert is not None:

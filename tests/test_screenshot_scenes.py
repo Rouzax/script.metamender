@@ -228,11 +228,11 @@ def test_setup_scenes_open_on_their_library_and_row(demo, monkeypatch):
         assert scene.get("scroll") in (None, "end"), name
 
 
-def test_a_scene_shows_the_posters_group_of_a_library_with_both_art_toggles(demo):
-    """docs/libraries.md shows the Posters group; the scene's library ticks
+def test_a_scene_shows_the_art_group_of_a_library_with_both_art_toggles(demo):
+    """docs/libraries.md shows the Art group; the scene's library ticks
     both art toggles without changing the demo libraries other scenes show."""
     scenes = [scene for scene in SCENES.values()
-              if scene["kind"] == "setup" and scene.get("focus") == "poster_source"]
+              if scene["kind"] == "setup" and scene.get("focus") == "art_source"]
     assert scenes
     for scene in scenes:
         state = demo.setup_state(scene)

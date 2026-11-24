@@ -1540,15 +1540,15 @@ msgid "{} · Season {}"
 msgstr ""
 
 msgctxt "#32734"
-msgid "Poster source"
+msgid "Art source"
 msgstr ""
 
 msgctxt "#32735"
-msgid "Posters from The Movie Database."
+msgid "Images from The Movie Database."
 msgstr ""
 
 msgctxt "#32736"
-msgid "Posters from fanart.tv. Posters in the library's language always come first, from either source."
+msgid "Images from fanart.tv. Images in the library's language always come first, from either source."
 msgstr ""
 
 msgctxt "#32737"
@@ -1577,4 +1577,44 @@ msgstr ""
 
 msgctxt "#32743"
 msgid "fanart.tv refused MetaMender's key. Posters that need fanart.tv wait until it works again; everything else carries on."
+msgstr ""
+
+msgctxt "#32744"
+msgid "Fanart"
+msgstr ""
+
+msgctxt "#32745"
+msgid "Fills the main background image of movies and shows, and of movie sets with Movie sets ticked, preferring one without text."
+msgstr ""
+
+msgctxt "#32746"
+msgid "Other art"
+msgstr ""
+
+msgctxt "#32747"
+msgid "Fills clear logos, key art, landscape, banner, disc art, clear art and character art."
+msgstr ""
+
+msgctxt "#32748"
+msgid "Movie sets"
+msgstr ""
+
+msgctxt "#32749"
+msgid "Gives movie sets their name and plot in the library's language, and their art with the art ticks."
+msgstr ""
+
+msgctxt "#32750"
+msgid "fanart"
+msgstr ""
+
+msgctxt "#32751"
+msgid "other art"
+msgstr ""
+
+msgctxt "#32752"
+msgid "movie sets"
+msgstr ""
+
+msgctxt "#32753"
+msgid "Art"
 msgstr ""

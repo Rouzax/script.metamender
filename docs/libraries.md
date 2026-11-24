@@ -191,13 +191,13 @@ The original title is TMDB's (its "original title" for movies and "original
 name" for shows), the same one the TMDB scrapers' own **Keep original title**
 setting uses.
 
-### Posters
+### Art
 
 Shown while **Posters** is ticked.
 
-![The Posters group on the page of the TV Shows library](screenshots/setup/setup-library-page-posters.png)
+![The Art group on the page of the TV Shows library](screenshots/setup/setup-library-page-posters.png)
 
-**Poster source**
+**Art source**
 :   The site MetaMender takes movie, show and season posters from first:
     **TMDB** (the default) or **fanart.tv**. Choose fanart.tv if you prefer
     its posters; with either choice, a poster in the library's language
@@ -205,17 +205,17 @@ Shown while **Posters** is ticked.
 
 MetaMender takes the first of these that exists:
 
-1. A poster in the library's language from the poster source, then one from
+1. A poster in the library's language from the art source, then one from
    the other site.
 2. The same in the fallback language, if the library has one.
-3. A poster without text, poster source first.
+3. A poster without text, art source first.
 
 Within one site the best rated poster wins: on TMDB by its votes, weighted so
 that a poster with only a few votes counts for less than one with many, and on
 fanart.tv by its likes. If neither site has a poster, the current one stays.
 
 !!! example
-    A Dutch library with English as its fallback and TMDB as its poster source.
+    A Dutch library with English as its fallback and TMDB as its art source.
     A movie has no Dutch poster on TMDB, but fanart.tv has one: MetaMender
     picks the Dutch poster from fanart.tv over every English poster on TMDB.
 
@@ -284,7 +284,7 @@ which image Kodi points at: it does not download images or save image files.
 | Art | Changed when it is |
 |---|---|
 | Episode thumb | Empty, a frame grab Kodi took from the video, or a broken link. It gets TMDB's episode still, or TheTVDB's episode image when TMDB has none. |
-| Movie, show or season poster | Empty or a broken link: filled. A poster from TMDB or fanart.tv: replaced when a better one leads (see [Posters](#posters)), while the title is new. |
+| Movie, show or season poster | Empty or a broken link: filled. A poster from TMDB or fanart.tv: replaced when a better one leads (see [Art](#art)), while the title is new. |
 
 A frame grab is the picture Kodi takes from the video file when an episode
 has no thumb; on HDR and Dolby Vision files it looks washed out. A broken

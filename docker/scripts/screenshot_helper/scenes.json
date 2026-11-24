@@ -75,7 +75,7 @@
       "posters",
       "episode_thumbs"
     ],
-    "focus": "poster_source",
+    "focus": "art_source",
     "scroll": "end"
   },
   "setup-save-question": {

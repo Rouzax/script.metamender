@@ -7,7 +7,7 @@ New Features:
   - Posters, per library: with Posters ticked, MetaMender fills empty
     movie, show and season posters and refreshes posters from TMDB or
     fanart.tv while a title is new. It picks a poster in the library's
-    language first (from the chosen Poster source, then the other site),
+    language first (from the chosen Art source, then the other site),
     then the fallback language, then a poster without text; the best
     voted TMDB poster or most liked fanart.tv poster wins, and a current
     poster stays unless a better one clearly leads. A poster without
@@ -24,7 +24,7 @@ New Features:
     locked, and Details shows why and can unlock it. A TMDB or fanart.tv
     poster picked before Posters was ticked may be replaced once; Restore
     original puts it back. MetaMender writes no image files.
-  - Poster source per library: TMDB (the default) or fanart.tv.
+  - Art source per library: TMDB (the default) or fanart.tv.
   - Optional Personal fanart.tv API key setting.
   - Seasons have a Details window, and Update now on a season or show
     refreshes the season posters too.

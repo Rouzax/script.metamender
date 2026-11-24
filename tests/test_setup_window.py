@@ -326,7 +326,9 @@ def test_page_markers_are_checkboxes_and_pickers_only(ids):
     ("ratings", "#32668", ["rating"]),
     ("plots", "#32669", ["text", "fallback_order"]),
     ("main_titles", "#32670", ["title_mode"]),
-    ("posters", "#32712", ["poster_source"]),
+    ("posters", "#32753", ["art_source"]),
+    ("fanart", "#32753", ["art_source"]),
+    ("other_art", "#32753", ["art_source"]),
     ("certifications", "#32671", ["country", "replace", "prefix", "not_found"]),
 ])
 def test_ticking_a_field_adds_its_group(ids, toggle, group, keys):
@@ -367,7 +369,7 @@ def test_language_picker_offers_the_current_code():
     ("text", 1, "text_source_order", 0),
     ("fallback_order", 1, "fallback_order", 1),
     ("title_mode", 1, "title_mode", TITLE_ORIGINAL),
-    ("poster_source", 1, "poster_source", 1),
+    ("art_source", 1, "art_source", 1),
     ("country", 3, "cert_country", 3),
 ])
 def test_option_pickers_set_their_value(key, pick, field, value):
@@ -894,23 +896,38 @@ def test_toggle_rows_include_art_toggles(ids):
             rows["toggle:episode_thumbs"].detail) == ("#32714", "#32715")
 
 
-def test_poster_source_row_and_picker(ids):
+def test_art_source_row_and_picker(ids):
     dialogs = FakeDialogs(selects=[1])
     c, _ = _controller(key="abc", dialogs=dialogs)
     _open_page(c, included=True, toggles=frozenset({"posters"}))
-    assert c.rows()[_row(c, "poster_source")].label == "#32734"
-    assert c.rows()[_row(c, "poster_source")].detail == "#32010"
-    c.activate(_row(c, "poster_source"))
+    assert c.rows()[_row(c, "art_source")].label == "#32734"
+    assert c.rows()[_row(c, "art_source")].detail == "#32010"
+    c.activate(_row(c, "art_source"))
     assert dialogs.options == ["#32010", "#32709"]
     assert dialogs.details == ["#32735", "#32736"]
     assert dialogs.preselect == 0
-    assert c.rows()[_row(c, "poster_source")].detail == "#32709"
+    assert c.rows()[_row(c, "art_source")].detail == "#32709"
 
 
-def test_summary_shows_poster_source(strings):
-    stored = LibraryConfig([_films(included=True, toggles=frozenset({"posters"}),
-                                   poster_source=1)])
+def test_art_group_has_art_source_row(ids):
+    c, _ = _controller(key="abc")
+    _open_page(c, included=True, toggles=frozenset({"fanart"}))
+    assert c.rows()[_row(c, "art_source")].label == "#32734"
+
+
+def test_summary_names_new_ticks(strings):
+    stored = LibraryConfig([_films(included=True,
+                                   toggles=frozenset({"fanart", "other_art", "movie_sets"}))])
     c, _ = _controller(key="abc", libraries=stored)
     _to_summary(c)
     rows = {r.label: r.detail for r in c.rows()}
-    assert rows["Poster source"] == "fanart.tv"
+    assert rows["Fill"] == "fanart, other art, movie sets"
+
+
+def test_summary_shows_art_source(strings):
+    stored = LibraryConfig([_films(included=True, toggles=frozenset({"posters"}),
+                                   art_source=1)])
+    c, _ = _controller(key="abc", libraries=stored)
+    _to_summary(c)
+    rows = {r.label: r.detail for r in c.rows()}
+    assert rows["Art source"] == "fanart.tv"

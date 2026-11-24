@@ -10,7 +10,7 @@ import pytest
 
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
-from resources.lib.data.libraries import POSTER_SOURCE_FANART
+from resources.lib.data.libraries import ART_SOURCE_FANART
 from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.nfo import NFO
 from resources.lib.data.tracker import (
@@ -453,7 +453,7 @@ def test_fanart_transient_leaves_poster_clock_alone(
     mock_fanart.side_effect = TransientProviderError("down")
     tracker = _make_tracker(tmp_path)
     libs = one_library(frozenset({"poster", "plot"}), language="nl-NL",
-                       fallback_language="en-US", poster_source=POSTER_SOURCE_FANART)
+                       fallback_language="en-US", art_source=ART_SOURCE_FANART)
 
     _scan_movies(tracker, libs, [item])
     fs_map = _fs(tracker, MOVIE, item)
@@ -480,7 +480,7 @@ def test_fanart_auth_failure_does_not_stop_scan(
     mock_fanart.side_effect = FanartAuthError("rejected")
     tracker = _make_tracker(tmp_path)
     libs = one_library(frozenset({"poster", "plot"}), language="nl-NL",
-                       fallback_language="en-US", poster_source=POSTER_SOURCE_FANART)
+                       fallback_language="en-US", art_source=ART_SOURCE_FANART)
     breaker = CircuitBreaker()
 
     stats = _scan_movies(tracker, libs, [first, second], breaker=breaker)
@@ -558,7 +558,7 @@ def test_fanart_source_poster_preferred(
     mock_fanart.return_value = [_fanart(FANART_NL, "nl")]
     tracker = _make_tracker(tmp_path)
     libs = one_library(frozenset({"poster"}), language="nl-NL",
-                       fallback_language="en-US", poster_source=POSTER_SOURCE_FANART)
+                       fallback_language="en-US", art_source=ART_SOURCE_FANART)
     settings = dict(_make_settings(), fanart_client_key="personal")
 
     _scan_movies(tracker, libs, [item], settings=settings)
@@ -626,7 +626,7 @@ def test_unconfigured_language_web_poster_not_fetched(
     mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "en")])
     tracker = _make_tracker(tmp_path)
     libs = one_library(frozenset({"poster", "plot"}), language="",
-                       poster_source=POSTER_SOURCE_FANART)
+                       art_source=ART_SOURCE_FANART)
     settings = dict(_make_settings(), ui_language="en-US")
 
     _scan_movies(tracker, libs, [item], settings=settings)
@@ -665,10 +665,10 @@ def test_show_poster_uses_fanart_show_posters(
 
 
 def test_settings_fingerprint_art_fields():
-    settings = {"poster_source": "fanart"}
+    settings = {"art_source": "fanart"}
     assert json.loads(settings_fingerprint("thumb", settings, "nl-NL", "episode", "en")) == {}
     assert json.loads(settings_fingerprint("poster", settings, "nl-NL", "movie", "en")) == {
-        "poster_source": "fanart", "folder_language": "nl-NL", "fallback_language": "en",
+        "art_source": "fanart", "folder_language": "nl-NL", "fallback_language": "en",
     }
 
 
@@ -793,7 +793,7 @@ def test_season_poster_from_fanart_when_source_fanart(
                     2: [_fanart("https://assets.fanart.tv/s2.jpg", "en")]},
     }
     tracker = _make_tracker(tmp_path)
-    libs = one_library(frozenset({"poster"}), poster_source=POSTER_SOURCE_FANART)
+    libs = one_library(frozenset({"poster"}), art_source=ART_SOURCE_FANART)
 
     _scan_seasons(tracker, [_season(1), _season(2)], libs=libs)
     fs_map = _season_fs(tracker, 1)
@@ -904,7 +904,7 @@ def test_show_and_season_passes_share_one_fanart_call(
         "seasons": {1: [_fanart(FANART_SEASON, "en")]},
     }
     tracker = _make_tracker(tmp_path)
-    libs = one_library(frozenset({"poster"}), poster_source=POSTER_SOURCE_FANART)
+    libs = one_library(frozenset({"poster"}), art_source=ART_SOURCE_FANART)
     caches = {"fanart_cache": {}, "show_cache": {}}
 
     run_scan(TVSHOW, tracker, libs, "k", _make_settings(), items=[show], **caches)
@@ -1111,7 +1111,7 @@ def test_broken_tmdb_still_falls_through_to_tvdb(
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
 @patch("resources.lib.providers.tmdb.fetch_movie")
-def test_textless_poster_source_records_it(mock_movie, mock_update, tmp_path, kodi_stubs):
+def test_textless_art_source_records_it(mock_movie, mock_update, tmp_path, kodi_stubs):
     textless = "https://image.tmdb.org/t/p/original/textless.jpg"
     item = _movie("")
     mock_movie.side_effect = _movie_fetch([_tmdb(textless, None)])

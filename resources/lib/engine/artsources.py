@@ -125,7 +125,7 @@ def resolve_art(
     """The field's outcome and the provider of its value (a textless
     poster's with art.TEXTLESS_SOURCE_SUFFIX).
 
-    A poster needs TMDB's answer, whatever the poster source: TMDB's posters
+    A poster needs TMDB's answer, whatever the art source: TMDB's posters
     are always a candidate tier, so without them the pick could be wrong. No
     candidate is an answer with no value, which keeps the current art.
     """
@@ -138,7 +138,7 @@ def resolve_art(
     pick = pick_poster(
         (primary.tmdb or {}).get("posters") or [],
         lambda: _fanart_posters(ctx, sources.item, primary, ids, identity),
-        ctx.poster_source, lang, fallback,
+        ctx.art_source, lang, fallback,
         str(sources.item.get("poster") or ""),
     )
     if pick is TRANSIENT:
