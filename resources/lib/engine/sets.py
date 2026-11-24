@@ -322,14 +322,21 @@ def pick_set_name(
 
 def set_nfo_state(member_files: tuple[str, ...]) -> str:
     """A set's NFO state from its counted members (it has no NFO of its
-    own): NFO when every member has one, UNREACHABLE when any member's media
-    cannot be reached (nothing can be concluded then), otherwise NO_NFO.
-    Every member is checked, so an unreachable one is never hidden behind a
-    member without an NFO."""
-    states = [nfo_state(MOVIE.name, path) for path in member_files]
-    if UNREACHABLE in states:
+    own): NO_NFO as soon as a member answers without an NFO, UNREACHABLE
+    when none did and a member's media cannot be reached, NFO when every
+    member has one. A reachable member without an NFO already settles the
+    set, whatever an unreachable one would say: the set's own fields live in
+    Kodi's database, not on a share, so a member whose video is gone (a
+    replaced release Kodi has not cleaned) must not hold the set back."""
+    unreachable = False
+    for path in member_files:
+        state = nfo_state(MOVIE.name, path)
+        if state == NO_NFO:
+            return NO_NFO
+        unreachable = unreachable or state == UNREACHABLE
+    if unreachable:
         return UNREACHABLE
-    return NFO if states and all(s == NFO for s in states) else NO_NFO
+    return NFO if member_files else NO_NFO
 
 
 # ---------------------------------------------------------------------------

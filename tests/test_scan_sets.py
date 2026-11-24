@@ -11,6 +11,7 @@ import pytest
 
 from resources.lib.data import kodi
 from resources.lib.data.libraries import ART_SOURCE_FANART, Library, LibraryConfig
+from resources.lib.data.localart import EXISTS
 from resources.lib.data.media_types import MOVIE, SET
 from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
 from resources.lib.data.tracker import REASON_CHANGED_OUTSIDE
@@ -292,20 +293,52 @@ def test_set_on_all_nfo_members_keeps_name_and_plot(tmp_path, kodi_stubs, fake, 
 def test_set_nfo_state():
     with patch("resources.lib.engine.sets.nfo_state", side_effect=[NFO, NFO]):
         assert set_nfo_state(("a", "b")) == NFO
-    with patch("resources.lib.engine.sets.nfo_state", side_effect=[NO_NFO, UNREACHABLE]):
+    with patch("resources.lib.engine.sets.nfo_state", side_effect=[NFO, UNREACHABLE]):
         assert set_nfo_state(("a", "b")) == UNREACHABLE
     with patch("resources.lib.engine.sets.nfo_state", side_effect=[NFO, NO_NFO]):
         assert set_nfo_state(("a", "b")) == NO_NFO
+    # A reachable member without an NFO decides the set whatever the
+    # unreachable one would say.
+    with patch("resources.lib.engine.sets.nfo_state", side_effect=[UNREACHABLE, NO_NFO]):
+        assert set_nfo_state(("a", "b")) == NO_NFO
+    with patch("resources.lib.engine.sets.nfo_state", side_effect=[NO_NFO, UNREACHABLE]):
+        assert set_nfo_state(("a", "b")) == NO_NFO
 
 
-def test_unreachable_member_leaves_set_untouched(tmp_path, kodi_stubs, fake, tmdb_api):
+def test_unreachable_member_leaves_all_nfo_set_untouched(tmp_path, kodi_stubs, fake, tmdb_api):
     _one_set(fake)
     tracker = _make_tracker(tmp_path)
-    with patch("resources.lib.engine.sets.nfo_state", side_effect=[NO_NFO, UNREACHABLE]):
+    with patch("resources.lib.engine.sets.nfo_state", side_effect=[NFO, UNREACHABLE]):
         stats = _scan(tracker, _library())
     assert stats["unreachable"] == 1
     assert _set_writes(fake) == []
     assert _fs(tracker) == {}
+    tracker.close()
+
+
+def test_member_whose_video_is_gone_does_not_stall_its_set(tmp_path, kodi_stubs, fake,
+                                                          tmdb_api):
+    """A replaced release Kodi has not cleaned yet: its file is gone, the
+    other member answers without an NFO, so the set is scanned."""
+    _one_set(fake)
+    tracker = _make_tracker(tmp_path)
+    with patch("resources.lib.engine.sets.nfo_state", side_effect=[UNREACHABLE, NO_NFO]):
+        stats = _scan(tracker, _library())
+    assert stats["unreachable"] == 0
+    assert _set_write(fake)["title"] == NL_NAME
+    tracker.close()
+
+
+def test_set_local_art_is_judged_by_its_folder(tmp_path, kodi_stubs, fake, tmdb_api):
+    """A set has no video of its own: its local art is not tied to any
+    member's file, so a member whose video is gone cannot make it
+    unreachable."""
+    local = "smb://nas/MovieSets/Despicable Me/poster.jpg"
+    _one_set(fake, art={"poster": local})
+    tracker = _make_tracker(tmp_path)
+    with patch("resources.lib.engine.scan.local_art_state", return_value=EXISTS) as check:
+        _scan(tracker, _library(toggles=("movie_sets", "posters")))
+    check.assert_called_once_with(local, "")
     tracker.close()
 
 

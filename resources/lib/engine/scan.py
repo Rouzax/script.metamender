@@ -915,10 +915,13 @@ def _check_local_art(
     Missing and unreachable answers are not remembered, so they are asked
     again next scan. Web links are never checked. None of this touches a
     field's clock: a file on disk is not a provider answer.
+
+    A set has no video of its own (its ``file`` only stands for its library),
+    so its art is judged by the art's folder alone.
     """
     missing: set[str] = set()
     unreachable: set[str] = set()
-    media_path = str(item.get("file") or "")
+    media_path = "" if media_type == SET.name else str(item.get("file") or "")
     for f in sorted(ART_FIELDS.intersection(fields)):
         current = kodi_form(item.get(f) or "")
         path = unwrap(current)
