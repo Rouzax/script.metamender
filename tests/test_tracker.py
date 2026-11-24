@@ -708,6 +708,18 @@ def test_adopt_identity_matches_tmdb_ids(tmp_path):
     db.close()
 
 
+def test_adopt_identity_moves_the_set_move(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.upsert_item("movie", "Foo (2001)", kodi_id=3, tmdb_id="170")
+    db.record_set_move("Foo (2001)", 3, "Foo Collection", 9, "2026-11-01")
+    db.lock_set_move("Foo (2001)")
+    assert db.adopt_identity("movie", "tmdb:170", 3) == "Foo (2001)"
+    assert db.get_set_move("Foo (2001)") is None
+    move = db.get_set_move("tmdb:170")
+    assert (move["kodi_id"], move["to_setid"], move["locked"]) == (3, 9, 1)
+    db.close()
+
+
 def test_adopt_identity_noop_when_identity_exists(tmp_path):
     db = TrackerDB(str(tmp_path / "backfill.db"))
     db.upsert_item("movie", "imdb:tt1", kodi_id=3, imdb_id="tt1")

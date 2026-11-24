@@ -1,7 +1,7 @@
 """Candidates for one art field during a scan: the episode thumb from TMDB
-or TheTVDB, and every other art type (movie, show or season poster, fanart,
-clear logo, key art and the fanart.tv-only types) picked from TMDB's and
-fanart.tv's images.
+or TheTVDB, and every other art type (movie, show, season or movie set
+poster, fanart, clear logo, key art and the fanart.tv-only types) picked
+from TMDB's and fanart.tv's images.
 
 Whether the slot may be touched at all is decided before any fetch
 (art.art_gate in run_scan); this module only answers what the image should be.
@@ -75,6 +75,20 @@ def _fanart_images(
     types; a season's posters come from its show's answer, so one call
     covers the show and all its seasons."""
     key = _FANART_KEYS.get(field, field)
+    if ctx.media_type.name == "set":
+        # fanart.tv serves a collection's art on the movies endpoint, under
+        # the collection's TMDB id.
+        collection_id = primary.tmdb_id
+        if not collection_id:
+            return []
+        answer = _fanart_answer(
+            ctx, ("collection", str(collection_id)),
+            lambda: fanart.fetch_movie_art(
+                collection_id, None, FANART_API_KEY, ctx.fanart_client_key,
+            ),
+            identity,
+        )
+        return answer if answer is TRANSIENT else (answer or {}).get(key) or []
     if ctx.media_type.name == "movie":
         tmdb_id, imdb_id = primary.tmdb_id, primary.imdb_id
         if not (tmdb_id or imdb_id):

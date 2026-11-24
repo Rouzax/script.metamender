@@ -211,6 +211,40 @@ shows no image.
   [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files).
 - **It is extra fanart** (`fanart1` and so on), which is never filled.
 
+### A movie set was left alone
+
+A set keeps its name, plot and art when:
+
+- **Movie sets is not ticked** for the library the set follows. A set
+  follows the library most of its movies are in; see
+  [Which library a set follows](libraries.md#which-library-a-set-follows).
+- **Two libraries hold equally many of its movies**, so MetaMender cannot
+  tell which language to use. Movies in a subfolder with its own language
+  count as a library of their own.
+- **None of its movies is in an included library** or folder.
+- **Its movies do not share one TMDB collection**: no collection holds more
+  than half of them, as with a set you made by hand. A movie TMDB knows no
+  collection for counts against every collection.
+- **TMDB did not answer** when MetaMender asked for a movie's collection.
+  That movie then counts for no collection in that scan, which can leave
+  the set alone; MetaMender asks again at the next scan.
+- **It is a duplicate** of a set MetaMender renamed: MetaMender moves its
+  movies into the renamed set and leaves the duplicate itself as it is.
+  Kodi removes it, once empty, when you clean the library. See
+  [Duplicate sets](libraries.md#duplicate-sets).
+- **It shares a collection with the set MetaMender manages** but has a name
+  of its own, such as "Favourites". MetaMender does not touch it or move
+  movies out of it. If no set of a collection carries a name of that
+  collection, none of them is managed.
+- **Every one of its movies has an NFO file**: its name, plot and art are
+  only filled when empty.
+- **Its name changed outside MetaMender**, so the name is locked. The
+  Details window can unlock it.
+- **One of its movies could not be reached** (a share offline): MetaMender
+  checks again at the next scan.
+- **It is settled.** Like other fields, a set is checked while its newest
+  movie is new and then left alone. **Update now** checks it once more.
+
 ### MetaMender changed something I wanted to keep
 
 Open the Details window, select the field and choose **Restore original**. The

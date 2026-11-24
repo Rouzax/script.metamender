@@ -48,6 +48,22 @@ New Features:
     enough; background scans check local files weekly, and opening
     MetaMender from Program add-ons or Update now checks at once. A share
     that is offline is never taken for a deleted file.
+  - Movie sets, per library: with Movie sets ticked, a set gets TMDB's
+    name for its collection in the library's language (then the fallback
+    language, then English) and its plot like a movie's, and its poster,
+    fanart and other art with those ticks, from TMDB's collection images
+    and fanart.tv's collection art. A set follows the library most of its
+    movies are in; a tie, or movies that do not mostly share one TMDB
+    collection, leave it alone. The name is replaced once; Restore
+    original puts it back, and a name changed outside MetaMender is
+    locked. A set whose movies all have NFO files keeps its name, plot
+    and art.
+  - Duplicate sets merged: a set Kodi creates under a renamed set's old
+    name (a new or refreshed movie, or an NFO with the old name) has its
+    movies moved into the renamed set. A movie you moved yourself is never
+    moved again, a set with a name of its own is never merged, and the
+    emptied set is left for Kodi's library clean to remove. MetaMender
+    otherwise never creates or deletes a set or changes its movies.
   - Optional Personal fanart.tv API key setting.
   - Season posters: a TMDB season poster that is the same file as one of
     its show's posters is skipped, and among equally liked fanart.tv
@@ -55,8 +71,8 @@ New Features:
     seasons' posters is preferred.
   - Seasons have a Details window, and Update now on a season or show
     refreshes the season posters too.
-  - Posters, Episode thumbs, Fanart and Other art are off for every
-    library, including libraries set up before this version.
+  - Posters, Episode thumbs, Fanart, Other art and Movie sets are off for
+    every library, including libraries set up before this version.
   - Manual and help at the top of the settings: a window with a QR code
     and the address of the online manual, to open on a phone or computer.
 

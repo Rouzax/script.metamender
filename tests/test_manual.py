@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from resources.lib.data.libraries import Library, LibraryConfig
-from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, SET, TVSHOW
 from resources.lib.service import manual
 
 _LIBRARIES = LibraryConfig([
@@ -247,6 +247,22 @@ def test_manual_scans_seasons_between_shows_and_episodes(monkeypatch, patched):
     # One cache per cycle: a show's answers serve its season posters.
     assert len({id(c.kwargs["fanart_cache"]) for c in calls}) == 1
     assert len({id(c.kwargs["show_cache"]) for c in calls}) == 1
+
+
+def test_manual_runs_set_pass_after_movies(monkeypatch, patched):
+    libraries = LibraryConfig([Library(
+        path="smb://nas/Movies/", label="Movies", included=True, language="nl-NL",
+        fallback_language="", toggles=frozenset({"movie_sets"}))])
+    patched["sync"].return_value = libraries
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    patched["run_scan"].side_effect = lambda **kw: {"updated": 2 if kw["media_type"] is SET
+                                                    else 0}
+    manual.run()
+    calls = patched["run_scan"].call_args_list
+    assert [c.kwargs["media_type"] for c in calls] == [MOVIE, SET, TVSHOW, EPISODE]
+    assert len({id(c.kwargs["fanart_cache"]) for c in calls}) == 1
+    # Updated sets count in the summary.
+    manual.notify.assert_any_call(manual.updated_text(2))
 
 
 def test_manual_without_libraries_scans_nothing(monkeypatch, patched):

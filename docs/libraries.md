@@ -112,6 +112,7 @@ never changed, whatever you tick here.
 | Fanart | Fills the main background image (fanart) of movies and shows, and refreshes it from TMDB or fanart.tv while a title is new, preferring one without text; only the main fanart, never the extra fanart (`fanart1`, `fanart2` and so on); see [Art](#art) |
 | Other art | Fills and refreshes the other art types: clear logo, key art, landscape, banner, disc art (movies only) and clear art, and character art (shows only); see [Art](#art) |
 | Episode thumbs | Replaces an episode thumb Kodi grabbed from the video, and a broken or empty one, with the official episode still |
+| Movie sets | Gives movie sets their name and plot in the library's language, and their art together with Posters, Fanart and Other art; merges the duplicate sets a renamed set leaves behind; see [Movie sets](#movie-sets) |
 | Details | Genre, studio, country, runtime and first aired date |
 
 Unticking a field stops MetaMender changing it from then on; the values it
@@ -436,6 +437,101 @@ fanart.tv only, so these stay empty more often than posters and fanart.
 The [Details window](details.md#posters-and-episode-thumbs) shows such art as
 **Replaced:** *was a local file that no longer exists*. **Restore original**
 is not offered for it, since the file is gone; **Keep this value** is.
+
+## Movie sets
+
+A movie set is Kodi's group of related movies, such as all the Toy Story
+films. Your scraper names it after TMDB's collection, in the scraper's
+language, so a Dutch library's set keeps an English name ("Despicable Me
+Collection") and plot while its movies are in Dutch. With **Movie sets**
+ticked, MetaMender gives the set TMDB's name and plot in the library's
+language, and its art with the art ticks. **Movie sets** is off until you
+tick it, also in a library set up before MetaMender handled sets.
+
+Sets are checked right after the movies.
+
+### Which library a set follows
+
+A set has no folder of its own, so it follows the library most of its
+movies are in, and takes that library's language, fallback language, Art
+source and ticks. A subfolder with its own language counts as a library of
+its own here. Movies in a library or folder you left out do not count.
+
+MetaMender leaves a set alone, and changes nothing about it, when:
+
+- two libraries hold equally many of its movies;
+- none of its movies is in an included library;
+- the library it follows does not have **Movie sets** ticked;
+- no single TMDB collection holds more than half of its movies. MetaMender
+  finds a movie's collection on TMDB, once per movie. A set you made by
+  hand from movies of several collections is left alone this way.
+
+A set you made yourself whose movies mostly belong to one TMDB collection,
+and that is the only set of that collection, is treated as the
+collection's set: its name is replaced once, like a scraper's, and
+**Restore original** puts it back.
+
+### Name
+
+The set gets TMDB's name of the collection in the library's language, then
+in the fallback language, then the English name. The name is not affected
+by **Title to show**.
+
+- **The name the set has when you tick Movie sets** may be replaced once,
+  since it is usually the scraper's or an old TMDB name. **Restore
+  original** in the set's Details window puts it back and keeps it.
+- **A name changed outside MetaMender** after that is yours: it is locked,
+  and the Details window can unlock it.
+- **While the set is new**, MetaMender follows TMDB when it renames the
+  collection. A set's age is that of its newest movie.
+
+### Plot
+
+As a movie's plot: an empty plot is filled, and a plot in another language
+is replaced by the one in the library's language. The fallback language only
+fills an empty plot.
+
+### Art
+
+With **Movie sets** ticked, the set's art follows the art ticks: **Posters**
+for its poster, **Fanart** for its fanart, and **Other art** for its clear
+logo, key art, landscape, banner, disc art and clear art. Sets have no
+character art. The images come from TMDB's collection images and from
+fanart.tv's art for the collection, picked by the same rules as a movie's
+(see [Art](#art)), and the same things are left alone (see
+[What MetaMender leaves alone](#what-metamender-leaves-alone)).
+
+### Sets whose movies have NFO files
+
+A set has no NFO file of its own. When every movie of the set that counts
+has an NFO file, the set is treated like an item with one: its name, plot
+and art are only filled when empty, never replaced.
+
+### Duplicate sets
+
+Kodi files a movie into a set by the set's name. After MetaMender renames a
+set, your scraper still uses the old name, so a new movie of that
+collection, a movie you refresh, or one whose NFO file carries the old name
+lands in a new set with the old name. MetaMender merges such a duplicate:
+it moves its movies into the renamed set. This is the only time MetaMender
+moves a movie between sets.
+
+- **Only a set named after the collection is merged**: a TMDB name of the
+  collection, the name the set had when MetaMender first looked at it, or a
+  name MetaMender gave it. A set with any other name that shares a
+  collection, such as one you called "Favourites", is left alone, and no
+  movie is moved out of it or into it.
+- **Only movies of the collection move**, and only from a library with
+  **Movie sets** ticked.
+- **A movie you moved yourself stays put.** If you take a movie MetaMender
+  moved and put it in another set, MetaMender never moves it again. A movie
+  you refresh in Kodi is a new entry to Kodi, so it may be moved once more.
+- **The emptied set is not deleted.** Kodi removes sets without movies the
+  next time you clean the library (**Clean library** in Kodi's video
+  settings or menu).
+
+Apart from merging duplicates, MetaMender never creates a set, never
+deletes one and never takes a movie out of a set.
 
 ## When your changes apply
 

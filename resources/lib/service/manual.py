@@ -20,10 +20,10 @@ from typing import Any
 import xbmc
 
 from resources.lib.constants import DEFAULT_ADDON_ID
-from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, SET, TVSHOW
 from resources.lib.data.tracker import TrackerDB
 from resources.lib.engine.breaker import CircuitBreaker
-from resources.lib.engine.scan import run_scan, scans_seasons
+from resources.lib.engine.scan import run_scan, scans_seasons, scans_sets
 from resources.lib.service import attention
 from resources.lib.service.daemon import (
     _get_db_path,
@@ -126,7 +126,9 @@ def run() -> None:
         fanart_cache: dict[tuple[str, str], Any] = {}
         show_cache: dict[str, Any] = {}
 
-        for media_type in (MOVIE, TVSHOW):
+        # Sets after the movies, whose pass stores each movie's collection.
+        first = (MOVIE, SET, TVSHOW) if scans_sets(libraries) else (MOVIE, TVSHOW)
+        for media_type in first:
             stats = run_scan(
                 media_type=media_type,
                 tracker=tracker,
@@ -174,11 +176,14 @@ def run() -> None:
         tvshow_stats = all_stats.get("tvshow", {})
         season_stats = all_stats.get("season", {})
         episode_stats = all_stats.get("episode", {})
+        set_stats = all_stats.get("set", {})
 
         log.info(
             "Manual scan complete",
             event="manual.complete",
             movies_updated=movie_stats.get("updated", 0),
+            sets_updated=set_stats.get("updated", 0),
+            movies_moved=set_stats.get("moved", 0),
             tvshows_updated=tvshow_stats.get("updated", 0),
             seasons_updated=season_stats.get("updated", 0),
             episodes_updated=episode_stats.get("updated", 0),
@@ -200,6 +205,7 @@ def run() -> None:
             + tvshow_stats.get("updated", 0)
             + season_stats.get("updated", 0)
             + episode_stats.get("updated", 0)
+            + set_stats.get("updated", 0)
         )
         parts = []
         if total_updated:

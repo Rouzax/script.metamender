@@ -589,7 +589,9 @@ class TrackerDB:
 
     def _move_keep(self, media_type: str, old: str, new: str) -> None:
         """Re-key an item's field_keep, art_seen and art_checks rows with its
-        items row (no commit)."""
+        items row (no commit), and its type's own table: a movie's set move
+        must follow it, or a move the user undid would be forgotten and the
+        movie moved again."""
         # A row already at ``new`` is a stray of an item that left; the
         # moved rows belong to the item now at that identity, so they win.
         for table in _IDENTITY_TABLES:
@@ -597,6 +599,12 @@ class TrackerDB:
                 "UPDATE OR REPLACE {} SET identity = ? "
                 "WHERE media_type = ? AND identity = ?".format(table),
                 (new, media_type, old),
+            )
+        if media_type in _TYPE_TABLES:
+            self._conn.execute(
+                "UPDATE OR REPLACE {} SET identity = ? WHERE identity = ?".format(
+                    _TYPE_TABLES[media_type]),
+                (new, old),
             )
 
     def _get_item_id(self, media_type: str, identity: str) -> int | None:

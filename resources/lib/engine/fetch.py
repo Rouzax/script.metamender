@@ -1,5 +1,5 @@
-"""Fetching an item's primary TMDB record (movie, show or episode) during a
-scan, including the episode paths through TVDB ids.
+"""Fetching an item's primary TMDB record (movie, show, season, episode or
+movie set) during a scan, including the episode paths through TVDB ids.
 
 Logs under the 'scan' logger; the events are listed in engine/scan.py.
 """
@@ -26,6 +26,7 @@ from resources.lib.engine.scanctx import (
     _get_season_data,
     _ScanCtx,
 )
+from resources.lib.engine.sets import collection_text, pick_set_name
 from resources.lib.providers import tmdb
 from resources.lib.utils import (
     TransientProviderError,
@@ -339,6 +340,63 @@ def _fetch_season(
         tmdb=tmdb_data,
         tmdb_id=show_tmdb_id,
         show_tmdb_id=show_tmdb_id,
+        imdb_id=None,
+        imdb_id_transient=False,
+    )
+
+
+def _fetch_set(
+    ctx: _ScanCtx,
+    item: dict[str, Any],
+    kodi_id: Any,
+    title: str,
+    identity: str,
+    ids: _Ids,
+    language: str,
+    fallback_lang: str = "",
+) -> _Primary:
+    """Fetch a movie set's TMDB collection: its name and plot in every
+    language and its images, from one request.
+
+    The record's "title" is the name pick_set_name chooses (library
+    language, fallback, English; "title_from_fallback" when not the first)
+    and "plot" the library language's; the set pass's fallback plot step
+    reads "plots" rather than asking again. Every name TMDB knows is kept
+    as a known name of the collection, so a set Kodi makes under one of
+    them later is recognised as a duplicate. A disabled or failing TMDB
+    makes the record TRANSIENT."""
+    collection_id = ids.tmdb or ""
+    data: Any = None
+    if ctx.breaker.is_disabled("tmdb"):
+        data = TRANSIENT
+    elif collection_id:
+        answer = _call_provider(
+            "tmdb",
+            lambda: tmdb.fetch_collection(
+                collection_id, ctx.tmdb_api_key, ctx.image_languages,
+            ),
+            ctx, identity,
+        )
+        if answer is TRANSIENT or answer is None:
+            data = answer
+        else:
+            names = answer.get("names") or {}
+            plots = answer.get("plots") or {}
+            name, from_fallback = pick_set_name(names, language, fallback_lang or None)
+            data = {
+                "title": name,
+                "title_from_fallback": from_fallback,
+                "plot": collection_text(plots, language),
+                "names": names,
+                "plots": plots,
+                "posters": answer.get("posters") or [],
+                "backdrops": answer.get("backdrops") or [],
+            }
+            ctx.tracker.add_set_names(identity, names.values())
+    return _Primary(
+        tmdb=data,
+        tmdb_id=collection_id or None,
+        show_tmdb_id=None,
         imdb_id=None,
         imdb_id_transient=False,
     )
