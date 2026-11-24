@@ -351,13 +351,15 @@ def _ask_tmdb(ctx: _ScanCtx, fetch: Callable[[], Any], identity: str) -> Any:
 
 def _member_collections(
     ctx: _ScanCtx, members: list[dict[str, Any]], setids: set[int],
-    libraries: LibraryConfig, today: str,
+    libraries: LibraryConfig, today: str, stats: dict[str, Any],
 ) -> dict[str, str]:
     """The stored TMDB collection of every counted member of ``setids``,
     keyed on its TMDB id. A member without a stored answer is asked once
     (/movie/{id}, no append) and the answer kept for good; one TMDB did not
     answer is left out, so it counts for no collection this scan and can
-    only keep its set from being managed, never make it managed."""
+    only keep its set from being managed, never make it managed. It counts
+    in stats["transient"], so Update now says it could not check rather
+    than that the set is left alone."""
     collections: dict[str, str] = {}
     for member in members:
         if int(member.get("setid") or 0) not in setids:
@@ -374,6 +376,7 @@ def _member_collections(
                 compute_identity(member, MOVIE),
             )
             if answer is TRANSIENT:
+                stats["transient"] = stats.get("transient", 0) + 1
                 continue
             stored = str(answer or "")
             ctx.tracker.set_movie_collection(tmdb_id, stored, today)
@@ -615,7 +618,7 @@ def prepare_sets(
     # tie, no counted member, Movie sets not ticked) costs no TMDB request.
     probe, _ = plan_sets(kodi_sets, members, libraries, {}, {}, {}, {})
     asking = {p.setid for p in probe if p.reason == LEFT_NO_COLLECTION}
-    collections = _member_collections(ctx, members, asking, libraries, today)
+    collections = _member_collections(ctx, members, asking, libraries, today, stats)
 
     holders, names, set_moves = _tracker_facts(tracker, members, collections)
     _lock_user_moves(tracker, members, set_moves)

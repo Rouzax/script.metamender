@@ -397,6 +397,20 @@ def test_transient_collection_lookup_leaves_clock_alone(tmp_path, kodi_stubs, fa
     tracker.close()
 
 
+def test_transient_member_lookup_counts_as_transient(tmp_path, kodi_stubs, fake, tmdb_api):
+    """Update now tells "could not check" from "left alone" by this count."""
+    _one_set(fake)
+    tmdb_api["member"].side_effect = TransientProviderError("down")
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library(), reset=True, only_set=1)
+    # One per member TMDB did not answer for.
+    assert stats["transient"] == 2
+    assert tracker.get_movie_collection("20352") is None
+    assert _fs(tracker) == {}
+    assert _set_writes(fake) == []
+    tracker.close()
+
+
 def test_transient_collection_fetch_leaves_clock_alone(tmp_path, kodi_stubs, fake, tmdb_api):
     _one_set(fake)
     tmdb_api["collection"].side_effect = TransientProviderError("down")

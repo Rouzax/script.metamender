@@ -428,6 +428,16 @@ def test_update_now_on_set_left_alone_after_asking_tmdb_says_so(set_patched):
     assert [c.args[0] for c in set_patched["notify"].call_args_list] == ["s32774"]
 
 
+def test_update_now_on_set_with_tmdb_down_says_could_not_check(set_patched):
+    """A member's collection TMDB did not answer is not a reason to leave
+    the set alone: the pass counts it as transient."""
+    set_patched["describe"].side_effect = [_set_plan(), _set_plan("no_collection")]
+    set_patched["run_scan"].return_value = {"updated": 0, "transient": 1}
+    actions.update_now("set", "40")
+    assert [c.args[0] for c in set_patched["notify"].call_args_list] == [
+        "Could not check now: Heat Collection"]
+
+
 def test_update_now_on_a_duplicate_set_runs_the_merge(set_patched):
     set_patched["describe"].return_value = _set_plan("duplicate", "Heat Collectie")
     set_patched["run_scan"].return_value = {"updated": 0}
