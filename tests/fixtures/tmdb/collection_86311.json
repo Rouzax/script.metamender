@@ -1,0 +1,161 @@
+{
+ "id": 86311,
+ "name": "The Avengers Collection",
+ "overview": "A superhero film series produced by Marvel Studios based on the Marvel Comics superhero team of the same name, and part of the Marvel Cinematic Universe (MCU).  The series features an ensemble cast from the Marvel Cinematic Universe series films, as they join forces for the peacekeeping organization S.H.I.E.L.D. led by Nick Fury.",
+ "poster_path": "/yFSIUVTCvgYrpalUktulvk3Gi5Y.jpg",
+ "backdrop_path": "/2UNUv4NJdC36E5myDHACBJ99EwL.jpg",
+ "images": {
+  "posters": [
+   {
+    "aspect_ratio": 0.667,
+    "height": 1500,
+    "iso_3166_1": "US",
+    "iso_639_1": "en",
+    "file_path": "/yFSIUVTCvgYrpalUktulvk3Gi5Y.jpg",
+    "vote_average": 6.58,
+    "vote_count": 25,
+    "width": 1000
+   },
+   {
+    "aspect_ratio": 0.667,
+    "height": 3000,
+    "iso_3166_1": "US",
+    "iso_639_1": "en",
+    "file_path": "/5LkXlUPrRuhMAeVugr1xXcsZbV8.jpg",
+    "vote_average": 6.2,
+    "vote_count": 16,
+    "width": 2000
+   },
+   {
+    "aspect_ratio": 0.667,
+    "height": 1500,
+    "iso_3166_1": "US",
+    "iso_639_1": "en",
+    "file_path": "/yQpAleQ1KHebVem2vwWL6VPqILT.jpg",
+    "vote_average": 5.566,
+    "vote_count": 15,
+    "width": 1000
+   },
+   {
+    "aspect_ratio": 0.701,
+    "height": 1426,
+    "iso_3166_1": "US",
+    "iso_639_1": "en",
+    "file_path": "/kYVHFyJLZB7xxTlffhwuzeqsAvT.jpg",
+    "vote_average": 4.818,
+    "vote_count": 11,
+    "width": 1000
+   },
+   {
+    "aspect_ratio": 0.667,
+    "height": 1500,
+    "iso_3166_1": "US",
+    "iso_639_1": "en",
+    "file_path": "/bvjltR2nDuhf1NlnwCrgNwvHuIh.jpg",
+    "vote_average": 4.722,
+    "vote_count": 9,
+    "width": 1000
+   }
+  ],
+  "backdrops": [
+   {
+    "aspect_ratio": 1.778,
+    "height": 1080,
+    "iso_3166_1": null,
+    "iso_639_1": null,
+    "file_path": "/2UNUv4NJdC36E5myDHACBJ99EwL.jpg",
+    "vote_average": 7.05,
+    "vote_count": 10,
+    "width": 1920
+   },
+   {
+    "aspect_ratio": 1.778,
+    "height": 1080,
+    "iso_3166_1": null,
+    "iso_639_1": null,
+    "file_path": "/zuW6fOiusv4X9nnW3paHGfXcSll.jpg",
+    "vote_average": 6.312,
+    "vote_count": 9,
+    "width": 1920
+   },
+   {
+    "aspect_ratio": 1.778,
+    "height": 2160,
+    "iso_3166_1": null,
+    "iso_639_1": null,
+    "file_path": "/usw3thM9UfLMnvzXhAdukpwA3lg.jpg",
+    "vote_average": 3.334,
+    "vote_count": 3,
+    "width": 3840
+   },
+   {
+    "aspect_ratio": 1.778,
+    "height": 1080,
+    "iso_3166_1": null,
+    "iso_639_1": null,
+    "file_path": "/ejn74maHVJS0n3hqpsngYy5nTGB.jpg",
+    "vote_average": 3.334,
+    "vote_count": 1,
+    "width": 1920
+   },
+   {
+    "aspect_ratio": 1.778,
+    "height": 1080,
+    "iso_3166_1": null,
+    "iso_639_1": null,
+    "file_path": "/irDiLpzsJVFRg6FAbOL7IVvYrpl.jpg",
+    "vote_average": 2.542,
+    "vote_count": 4,
+    "width": 1920
+   }
+  ]
+ },
+ "translations": {
+  "translations": [
+   {
+    "iso_3166_1": "NL",
+    "iso_639_1": "nl",
+    "name": "Nederlands",
+    "english_name": "Dutch",
+    "data": {
+     "title": "The Avengers Collectie",
+     "overview": "Een superheldenfilmserie geproduceerd door Marvel Studios op basis van het Marvel Comics superheldenteam met dezelfde naam en onderdeel van de Marvel Cinematic Universe (MCU). De serie bevat een ensemblecast uit de films van de Marvel Cinematic Universe-serie, wanneer ze hun krachten bundelen voor de vredesorganisatie S.H.I.E.L.D. onder leiding van Nick Fury.",
+     "homepage": ""
+    }
+   },
+   {
+    "iso_3166_1": "DE",
+    "iso_639_1": "de",
+    "name": "Deutsch",
+    "english_name": "German",
+    "data": {
+     "title": "Marvel's The Avengers Filmreihe",
+     "overview": "Die Organisation S.H.I.E.L.D., ein international agierender Nachrichtendienst, vereint viele Marvel Superhelden wie z. B. Iron Man, Thor, Captain America, Hawkeye, dem Unglaublichen Hulk und Black Widow, um die Erde vor scheinbar übermächtigen Gegnern zu schützen.",
+     "homepage": ""
+    }
+   },
+   {
+    "iso_3166_1": "US",
+    "iso_639_1": "en",
+    "name": "English",
+    "english_name": "English",
+    "data": {
+     "title": "",
+     "overview": "A superhero film series produced by Marvel Studios based on the Marvel Comics superhero team of the same name, and part of the Marvel Cinematic Universe (MCU).  The series features an ensemble cast from the Marvel Cinematic Universe series films, as they join forces for the peacekeeping organization S.H.I.E.L.D. led by Nick Fury.",
+     "homepage": ""
+    }
+   },
+   {
+    "iso_3166_1": "AT",
+    "iso_639_1": "de",
+    "name": "Deutsch",
+    "english_name": "German",
+    "data": {
+     "title": "",
+     "overview": "",
+     "homepage": ""
+    }
+   }
+  ]
+ }
+}

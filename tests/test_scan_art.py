@@ -59,9 +59,9 @@ _DUTCH = {"sources": [], "default_language": "nl-NL", "fallback_language": "en-U
 @pytest.fixture(autouse=True)
 def _no_fanart():
     """fanart.tv answers "no posters" unless a test patches it."""
-    with patch("resources.lib.providers.fanart.fetch_movie_posters", return_value=[]), \
-         patch("resources.lib.providers.fanart.fetch_show_posters",
-               return_value={"show": [], "seasons": {}}):
+    with patch("resources.lib.providers.fanart.fetch_movie_art", return_value={}), \
+         patch("resources.lib.providers.fanart.fetch_show_art",
+               return_value={"show": {}, "seasons": {}}):
         yield
 
 
@@ -382,7 +382,7 @@ def test_poster_changed_outside_locks_field(mock_movie, mock_update, tmp_path, k
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.fanart.fetch_movie_art")
 @patch("resources.lib.providers.tmdb.fetch_movie")
 def test_local_poster_never_fetched(mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs):
     item = _movie("smb://server/movies/poster.jpg")
@@ -402,7 +402,7 @@ def test_local_poster_never_fetched(mock_movie, mock_fanart, mock_update, tmp_pa
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.fanart.fetch_movie_art")
 @patch("resources.lib.providers.tmdb.fetch_movie")
 def test_nfo_item_web_poster_kept_without_fetch(
     mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
@@ -442,7 +442,7 @@ def test_poster_no_candidate_keeps_current_and_advances_clock(
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.fanart.fetch_movie_art")
 @patch("resources.lib.providers.tmdb.fetch_movie")
 def test_fanart_transient_leaves_poster_clock_alone(
     mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
@@ -468,7 +468,7 @@ def test_fanart_transient_leaves_poster_clock_alone(
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.fanart.fetch_movie_art")
 @patch("resources.lib.providers.tmdb.fetch_movie")
 def test_fanart_auth_failure_does_not_stop_scan(
     mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
@@ -505,7 +505,7 @@ def test_fanart_auth_failure_does_not_stop_scan(
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.fanart.fetch_movie_art")
 @patch("resources.lib.providers.tmdb.fetch_movie")
 def test_fanart_auth_failure_leaves_tmdb_answered_pick_alone(
     mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
@@ -548,14 +548,14 @@ def test_rejected_poster_write_leaves_clock_and_provenance(
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.fanart.fetch_movie_art")
 @patch("resources.lib.providers.tmdb.fetch_movie")
 def test_fanart_source_poster_preferred(
     mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
 ):
     item = _movie("")
     mock_movie.side_effect = _movie_fetch([_tmdb(NL_POSTER, "nl")])
-    mock_fanart.return_value = [_fanart(FANART_NL, "nl")]
+    mock_fanart.return_value = {"poster": [_fanart(FANART_NL, "nl")]}
     tracker = _make_tracker(tmp_path)
     libs = one_library(frozenset({"poster"}), language="nl-NL",
                        fallback_language="en-US", art_source=ART_SOURCE_FANART)
@@ -616,7 +616,7 @@ def test_unconfigured_language_poster_only_fills(mock_movie, mock_update, tmp_pa
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_movie_posters")
+@patch("resources.lib.providers.fanart.fetch_movie_art")
 @patch("resources.lib.providers.tmdb.fetch_movie")
 def test_unconfigured_language_web_poster_not_fetched(
     mock_movie, mock_fanart, mock_update, tmp_path, kodi_stubs
@@ -642,7 +642,7 @@ def test_unconfigured_language_web_poster_not_fetched(
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_show_posters")
+@patch("resources.lib.providers.fanart.fetch_show_art")
 @patch("resources.lib.providers.tmdb.fetch_tvshow")
 def test_show_poster_uses_fanart_show_posters(
     mock_show, mock_fanart, mock_update, tmp_path, kodi_stubs
@@ -652,7 +652,7 @@ def test_show_poster_uses_fanart_show_posters(
     item["poster"] = ""
     url = "https://assets.fanart.tv/fanart/tv/777/tvposter/en.jpg"
     mock_show.return_value = dict(_tmdb_tvshow_response(), posters=[])
-    mock_fanart.return_value = {"show": [_fanart(url, "en")], "seasons": {}}
+    mock_fanart.return_value = {"show": {"poster": [_fanart(url, "en")]}, "seasons": {}}
     tracker = _make_tracker(tmp_path)
 
     run_scan(TVSHOW, tracker, _libs(frozenset({"poster"})), "k", _make_settings(),
@@ -779,7 +779,7 @@ def test_specials_season_gets_poster(
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_show_posters")
+@patch("resources.lib.providers.fanart.fetch_show_art")
 @patch("resources.lib.providers.tmdb.fetch_season_posters")
 @patch("resources.lib.providers.tmdb.fetch_tvshow")
 def test_season_poster_from_fanart_when_source_fanart(
@@ -788,7 +788,7 @@ def test_season_poster_from_fanart_when_source_fanart(
     mock_show.return_value = dict(_tmdb_tvshow_response(), season_air_dates={})
     mock_posters.return_value = [_tmdb(SEASON_POSTER, "en")]
     mock_fanart.return_value = {
-        "show": [_fanart("https://assets.fanart.tv/show.jpg", "en")],
+        "show": {"poster": [_fanart("https://assets.fanart.tv/show.jpg", "en")]},
         "seasons": {1: [_fanart(FANART_SEASON, "en")],
                     2: [_fanart("https://assets.fanart.tv/s2.jpg", "en")]},
     }
@@ -887,7 +887,7 @@ def test_season_listing_new_only_skips_known_seasons(
 
 
 @patch("resources.lib.data.kodi.update_item", return_value=True)
-@patch("resources.lib.providers.fanart.fetch_show_posters")
+@patch("resources.lib.providers.fanart.fetch_show_art")
 @patch("resources.lib.providers.tmdb.fetch_season_posters")
 @patch("resources.lib.providers.tmdb.fetch_tvshow")
 def test_show_and_season_passes_share_one_fanart_call(
@@ -900,7 +900,7 @@ def test_show_and_season_passes_share_one_fanart_call(
                                   season_air_dates={1: "2025-01-01"})
     mock_posters.return_value = []
     mock_fanart.return_value = {
-        "show": [_fanart("https://assets.fanart.tv/show.jpg", "en")],
+        "show": {"poster": [_fanart("https://assets.fanart.tv/show.jpg", "en")]},
         "seasons": {1: [_fanart(FANART_SEASON, "en")]},
     }
     tracker = _make_tracker(tmp_path)

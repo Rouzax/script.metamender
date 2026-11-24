@@ -66,21 +66,22 @@ def _fanart_posters(
             return []
         answer = _fanart_answer(
             ctx, ("movie", str(tmdb_id or imdb_id)),
-            lambda: fanart.fetch_movie_posters(
+            lambda: fanart.fetch_movie_art(
                 tmdb_id, imdb_id, FANART_API_KEY, ctx.fanart_client_key,
             ),
             identity,
         )
-        return answer if answer is TRANSIENT else (answer or [])
+        return answer if answer is TRANSIENT else (answer or {}).get("poster") or []
     if ids.tvdb_transient:
         return TRANSIENT
     tvdb_id = ids.tvdb
     if not tvdb_id:
         return []
-    # The whole answer is cached: it carries the show's season posters too.
+    # The whole answer is cached: it carries the show's other art and its
+    # season posters too.
     answer = _fanart_answer(
         ctx, ("tv", str(tvdb_id)),
-        lambda: fanart.fetch_show_posters(tvdb_id, FANART_API_KEY, ctx.fanart_client_key),
+        lambda: fanart.fetch_show_art(tvdb_id, FANART_API_KEY, ctx.fanart_client_key),
         identity,
     )
     if answer is TRANSIENT:
@@ -89,7 +90,7 @@ def _fanart_posters(
     if ctx.media_type.name == "season":
         season = int(item.get("season", 0) or 0)
         return (answer.get("seasons") or {}).get(season) or []
-    return answer.get("show") or []
+    return (answer.get("show") or {}).get("poster") or []
 
 
 def _resolve_thumb(
