@@ -161,14 +161,25 @@ def _first_plan(
 
 
 def _managed_setid(
-    group: list[tuple[SetPlan, int]], holder: Optional[int],
-) -> int:
-    """The set managed for a collection: the one the tracker row records,
-    else the one with most counted members, then the lowest setid."""
+    group: list[tuple[SetPlan, int]], holder: Optional[int], known: frozenset[str],
+) -> Optional[int]:
+    """The set managed for a collection, or None when none may be.
+
+    The set the tracker row records wins. Without one (a collection's first
+    scan, or a holder Kodi no longer has) only a set carrying a known name of
+    the collection may be chosen, by most counted members, then lowest
+    setid: a set the user named, such as "Favourites", must never become the
+    target that the scraper's set is merged into. A collection with one set
+    has nothing to merge, so that set is managed whatever its name."""
     setids = {plan.setid for plan, _ in group}
     if holder is not None and holder in setids:
         return holder
-    return min(group, key=lambda pc: (-pc[1], pc[0].setid))[0].setid
+    if len(group) == 1:
+        return group[0][0].setid
+    named = [pc for pc in group if _name_key(pc[0].title) in known]
+    if not named:
+        return None
+    return min(named, key=lambda pc: (-pc[1], pc[0].setid))[0].setid
 
 
 def _moves_out_of(
@@ -213,11 +224,13 @@ def plan_sets(
     records; ``names`` maps a set identity to its known lowercased names;
     ``set_moves`` maps a movie identity to its recorded move.
 
-    Among the sets whose members chose one collection, one is managed. Any
-    other is a duplicate only when its name is a known name of the
-    collection (the scraper's or an old TMDB name, which is how Kodi makes
-    one); a set the user named is shared and left alone, and never becomes
-    the managed set's merge target in reverse.
+    Among the sets whose members chose one collection, at most one is
+    managed (see _managed_setid). Any other is a duplicate only when its name
+    is a known name of the collection (the scraper's or an old TMDB name,
+    which is how Kodi makes one); a set the user named is shared and left
+    alone, and is never a merge target unless the tracker already records it
+    as the collection's set. When no set may be managed, every set of the
+    collection is shared and nothing moves.
     """
     by_set: dict[int, list[dict[str, Any]]] = {}
     for member in members:
@@ -234,12 +247,12 @@ def plan_sets(
     moves: list[Move] = []
     for cid, group in by_collection.items():
         identity = compute_identity({"collection_id": cid}, SET)
-        managed = _managed_setid(group, holders.get(identity))
         known = names.get(identity, frozenset())
+        managed = _managed_setid(group, holders.get(identity), known)
         for plan, _ in group:
             if plan.setid == managed:
                 continue
-            if _name_key(plan.title) in known:
+            if managed is not None and _name_key(plan.title) in known:
                 final[plan.setid] = replace(plan, reason=LEFT_DUPLICATE, managed_setid=managed)
                 moves.extend(_moves_out_of(final[plan.setid], managed,
                                            by_set.get(plan.setid, []), libraries,

@@ -234,8 +234,8 @@ def test_user_named_set_sharing_a_collection_is_shared_not_duplicate():
 
 
 def test_shared_set_is_never_a_merge_target():
-    # Favourites holds the tracker row's setid and the most members, but a
-    # duplicate is only ever merged into the managed set it names.
+    # The tracker records the scraper-named set as the collection's set, so
+    # it stays managed although Favourites has more members.
     names = {"collection:86066": frozenset({"despicable me collection"})}
     managed = [_movie(i, 1, KIDS) for i in range(1, 3)]
     favourites = [_movie(i, 3, KIDS) for i in range(10, 14)]
@@ -259,7 +259,9 @@ def test_managed_set_is_the_holder():
 
 
 def test_managed_set_without_holder_is_the_larger_then_lower_id():
-    names = {"collection:86066": frozenset({"despicable me collection"})}
+    # Only sets carrying a known name are candidates.
+    names = {"collection:86066": frozenset({"despicable me collection",
+                                            "verschrikkelijke ikke collectie"})}
     plans, _ = _two_sets("Despicable Me Collection", names=names)
     assert [p.reason for p in plans] == [None, LEFT_DUPLICATE]
     # A holder that is no longer a Kodi set counts as no holder.
@@ -271,8 +273,39 @@ def test_managed_set_without_holder_is_the_larger_then_lower_id():
         sets=[M(5, "Despicable Me Collection"), M(4, "Verschrikkelijke Ikke Collectie")],
         members=[_movie(1, 5, KIDS), _movie(2, 4, KIDS)],
         collections={"1001": "86066", "1002": "86066"},
-        names={"collection:86066": frozenset({"despicable me collection"})})
+        names=names)
     assert {p.setid: p.reason for p in plans} == {4: None, 5: LEFT_DUPLICATE}
+
+
+def test_without_holder_a_set_with_an_unknown_name_is_never_managed():
+    # First scan of the collection: Favourites is larger, but only the
+    # scraper-named set may be managed, and nothing moves into Favourites.
+    names = {"collection:86066": frozenset({"despicable me collection"})}
+    scraper = [_movie(i, 1, KIDS) for i in range(1, 3)]
+    favourites = [_movie(i, 3, KIDS) for i in range(10, 14)]
+    plans, moves = _plan(
+        sets=[M(1, "Despicable Me Collection"), D(3, "Favourites")],
+        members=scraper + favourites,
+        collections={m["uniqueid"]["tmdb"]: "86066" for m in scraper + favourites},
+        names=names)
+    assert [p.reason for p in plans] == [None, LEFT_SHARED]
+    assert plans[0].managed_setid is None and plans[1].managed_setid is None
+    assert not moves
+
+
+def test_without_holder_or_known_name_every_set_is_shared():
+    plans, moves = _two_sets("Despicable Me Collection")
+    assert [p.reason for p in plans] == [LEFT_SHARED, LEFT_SHARED]
+    assert not moves
+    # A known name of another collection does not count.
+    plans, moves = _two_sets("Despicable Me Collection",
+                             names={"collection:2150": frozenset({"despicable me collection"})})
+    assert [p.reason for p in plans] == [LEFT_SHARED, LEFT_SHARED]
+    assert not moves
+
+
+def test_lone_set_is_managed_without_holder_or_names():
+    assert _only().reason is None
 
 
 def test_sets_of_other_collections_do_not_interact():
