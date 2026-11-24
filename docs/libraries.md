@@ -401,15 +401,15 @@ To fill the art straight away, delete the files and then open MetaMender
 from **Add-ons > Program add-ons > MetaMender** to run a manual scan.
 Otherwise the background scans find the deleted files within about a week:
 they check whether a local art file still exists once a week, not at every
-scan. **Update now** on a movie, show, season or episode also checks its
-files straight away.
+scan. **Update now** on a movie, movie set, show, season or episode also
+checks its files straight away.
 
 Only the art types ticked for the library are checked:
 
 | Tick | Art it covers |
 |---|---|
-| Posters | Movie, show and season posters |
-| Fanart | The main fanart of movies and shows |
+| Posters | Movie, movie set, show and season posters |
+| Fanart | The main fanart of movies, movie sets and shows |
 | Other art | Clear logo, key art, landscape, banner, disc art (movies), clear art and character art (shows) |
 | Episode thumbs | Episode thumbs |
 
@@ -419,13 +419,21 @@ on) is never filled.
 **A share that is offline is not a deleted file.** When the drive or network
 share holding the art does not answer (a sleeping NAS, the network down),
 MetaMender changes nothing and checks again at the next scan. It only
-concludes that a file is gone when the video still answers and the art was
-in the video's folder, or when the folder the art was in still exists and
-still holds other files. An empty folder is not enough, because a network
-share that is not mounted can look like an empty folder. If you deleted a
-whole art folder that lies outside the video's folder, or the last file in
-one, MetaMender cannot tell it from an offline share and leaves the art as
-it is; recreate the folder with any file in it and run a manual scan.
+concludes that a file is gone when the item's video still answers and the
+art was in the video's folder or in a folder that still holds other files.
+A movie set has no video file, so for its art a folder that still holds
+other files is enough on its own. An empty folder is not enough, because a
+network share that is not mounted can look like an empty folder; for the
+same reason a show or season whose show folder is empty counts as offline.
+If you deleted a whole art folder that lies outside the video's folder, or
+the last file in one, MetaMender cannot tell it from an offline share and
+leaves the art as it is; recreate the folder with any file in it and run a
+manual scan.
+
+**A movie or episode whose video file is gone is left alone**, its art and
+every other field, for example an older release you replaced that Kodi has
+not removed from its library yet. Clean the library (**Clean library** in
+Kodi's video settings or menu) so Kodi drops the old entry.
 
 **When neither site has an image** of that type for the item, the slot stays
 as it is: Kodi still points at the deleted file and shows no image. For a

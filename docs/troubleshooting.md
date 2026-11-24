@@ -203,6 +203,11 @@ shows no image.
 - **The share was offline at the check.** MetaMender never treats an
   unreachable drive or share as a deleted file; it checks again at the next
   scan.
+- **The video file itself is gone**, for example an older release you
+  replaced that Kodi still lists. MetaMender leaves such an item alone until
+  you clean the library (**Clean library** in Kodi's video settings or
+  menu). See
+  [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files).
 - **You deleted the whole art folder, or emptied it**, and it was not inside
   the video's folder. An empty or missing folder looks the same as a network
   share that is not mounted, so MetaMender leaves the art alone. Recreate the
@@ -240,8 +245,13 @@ A set keeps its name, plot and art when:
   only filled when empty.
 - **Its name changed outside MetaMender**, so the name is locked. The
   Details window can unlock it.
-- **One of its movies could not be reached** (a share offline): MetaMender
-  checks again at the next scan.
+- **One of its movies could not be reached and every other movie has an
+  NFO file**, so MetaMender cannot tell whether the set counts as having
+  NFO files; it checks again at the next scan. One movie without an NFO
+  file that can be reached settles this, so the set is not held back. If
+  the share is online, the unreachable movie is likely an older release you
+  replaced whose file is gone: clean the library (**Clean library** in
+  Kodi's video settings or menu) so Kodi drops it.
 - **It is settled.** Like other fields, a set is checked while its newest
   movie is new and then left alone. **Update now** checks it once more.
 
