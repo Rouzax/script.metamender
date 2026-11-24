@@ -136,3 +136,4 @@ feat/7d-provider-replacement.
 - [x] v1.1.0 (2026-11-13): setup asks which rating to show, where plots and titles come from, and whether to replace other countries' ratings
 - [x] v1.2.0 (2026-11-22): settings per library, keep the original title, automatic upgrade from 1.1, MetaMender's own setup dialogs
 - [x] v1.2.1 (2026-11-22): scans hold their writes while you browse the library; Stop scan in the context menu
+- [x] v1.3.0 (2026-11-24): posters, fanart, other art and episode thumbs per library; movie sets named in the library's language, with duplicate sets merged; deleted local art filled
