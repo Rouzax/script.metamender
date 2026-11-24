@@ -34,12 +34,11 @@ your own country.
     language; the **Art source** decides which site is asked first, and an
     empty image gets an English one when nothing better exists. Local image
     files stay, and so does art you change afterwards, but art whose local
-    file you deleted is filled like empty art, once MetaMender can tell its
-    share is online and not just offline
+    file you deleted is filled like empty art, once MetaMender can tell the
+    share it lives on is reachable
     ([deleted local art files](libraries.md#if-you-delete-your-local-art-files)).
-    A replaced image can be put
-    back from the Details window.
-    [Posters and episode thumbs](libraries.md#posters-and-episode-thumbs)
+    A replaced image can be put back from the Details window.
+    [Art and episode thumbs](libraries.md#art-and-episode-thumbs)
 
 **Movie sets in your language, if you want them.**
 :   A movie set gets TMDB's name and plot for its collection in the

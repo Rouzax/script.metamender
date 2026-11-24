@@ -108,7 +108,7 @@ never changed, whatever you tick here.
 | Credits | Directors and writers |
 | Trailers | Trailer links from TMDB |
 | Taglines | Movie taglines in the library's language |
-| Posters | Fills empty posters of movies, shows and seasons, and refreshes posters from TMDB or fanart.tv while a title is new; see [Posters and episode thumbs](#posters-and-episode-thumbs) |
+| Posters | Fills empty posters of movies, shows and seasons, and refreshes posters from TMDB or fanart.tv while a title is new; see [Art and episode thumbs](#art-and-episode-thumbs) |
 | Fanart | Fills the main background image (fanart) of movies and shows, and refreshes it from TMDB or fanart.tv while a title is new, preferring one without text; only the main fanart, never the extra fanart (`fanart1`, `fanart2` and so on); see [Art](#art) |
 | Other art | Fills and refreshes the other art types: clear logo, key art, landscape, banner, disc art (movies only) and clear art, and character art (shows only); see [Art](#art) |
 | Episode thumbs | Replaces an episode thumb Kodi grabbed from the video, and a broken or empty one, with the official episode still |
@@ -312,7 +312,7 @@ for the countries, where ratings come from and what MetaMender writes.
     MetaMender writes into ratings that are still empty after a year of
     monthly checks, so you can see that the item was checked.
 
-## Posters and episode thumbs
+## Art and episode thumbs
 
 **Posters**, **Fanart**, **Other art** and **Episode thumbs** are off until
 you tick them, also in a library you set up before MetaMender handled art. MetaMender changes only
@@ -351,7 +351,7 @@ A title that is already old gets one check. For a season, its age is that of its
   ticked. If it is later something other than that one or the one MetaMender
   wrote, you (or another add-on, or a refresh in Kodi that brings different
   art) chose it, and MetaMender locks it for good.
-  The [Details window](details.md#posters-and-episode-thumbs) says so, and
+  The [Details window](details.md#art-and-episode-thumbs) says so, and
   **Let MetaMender update this again** unlocks it: MetaMender then treats
   the poster it finds as the one it first saw.
 - **Art from an NFO file.** On an item with an NFO file, MetaMender only fills
@@ -434,7 +434,7 @@ older title it looks once, and after that only when you use **Update now**
 on it. Landscape, banner, disc art, clear art and character art come from
 fanart.tv only, so these stay empty more often than posters and fanart.
 
-The [Details window](details.md#posters-and-episode-thumbs) shows such art as
+The [Details window](details.md#art-and-episode-thumbs) shows such art as
 **Replaced:** *was a local file that no longer exists*. **Restore original**
 is not offered for it, since the file is gone; **Keep this value** is.
 
