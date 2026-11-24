@@ -15,6 +15,7 @@ from resources.lib.engine.sets import (
     LEFT_SHARED,
     LEFT_TIE_LIBRARY,
     Move,
+    describe_set,
     plan_sets,
     user_moved,
 )
@@ -381,3 +382,65 @@ def test_user_moved_movie_is_not_moved_again():
     # A recorded user move stays one for good.
     assert user_moved({"kodi_id": 7, "to_setid": 1, "locked": 1}, 7, 1) is True
     assert user_moved({"kodi_id": 7, "to_setid": 1, "locked": 1}, 9, 2) is True
+
+
+# ---------------------------------------------------------------------------
+# describe_set: one set's plan from what is stored, for Details
+# ---------------------------------------------------------------------------
+
+
+class _StoredTracker:
+    """The tracker reads describe_set makes; any write fails the test."""
+
+    def __init__(self, collections, holders=None, names=None):
+        self.collections = collections
+        self.holders = holders or {}
+        self.names = names or {}
+
+    def get_movie_collection(self, tmdb_id):
+        return self.collections.get(tmdb_id)
+
+    def get_item(self, media_type, identity):
+        setid = self.holders.get(identity)
+        return None if setid is None else {"kodi_id": setid}
+
+    def get_set_names(self, identity):
+        return self.names.get(identity, frozenset())
+
+    def get_set_move(self, identity):
+        return None
+
+
+def _describe(monkeypatch, sets, members, tracker, setid):
+    from resources.lib.engine import sets as sets_module
+    monkeypatch.setattr(sets_module.kodi, "get_all_items", lambda mt, **kw: sets)
+    monkeypatch.setattr(sets_module.kodi, "get_set_members", lambda: members)
+    return describe_set(setid, _config(), tracker)
+
+
+def test_describe_set_uses_stored_collections_only(monkeypatch):
+    members = [_movie(i, 1, KIDS) for i in range(1, 4)]
+    stored = {"1001": "86066", "1002": "86066"}
+    plan = _describe(monkeypatch, [M(1, "Set")], members, _StoredTracker(stored), 1)
+    assert plan.reason is None and plan.collection_id == "86066"
+    # A movie never asked about counts for no collection.
+    plan = _describe(monkeypatch, [M(1, "Set")], members,
+                     _StoredTracker({"1001": "86066"}), 1)
+    assert plan.reason == LEFT_NO_MAJORITY
+
+
+def test_describe_set_of_a_set_kodi_lacks_is_none(monkeypatch):
+    assert _describe(monkeypatch, [M(1, "Set")], [], _StoredTracker({}), 2) is None
+
+
+def test_describe_shared_set_names_the_managed_set(monkeypatch):
+    members = [_movie(1, 1, KIDS), _movie(2, 2, KIDS)]
+    stored = {"1001": "86066", "1002": "86066"}
+    tracker = _StoredTracker(stored, holders={"collection:86066": 1})
+    plan = _describe(monkeypatch, [M(1, "Toy Story"), M(2, "Favourites")], members,
+                     tracker, 2)
+    assert plan.reason == LEFT_SHARED and plan.managed_setid == 1
+    # No set may be managed: the other set of the collection is named.
+    plan = _describe(monkeypatch, [M(1, "Mine"), M(2, "Favourites")], members,
+                     _StoredTracker(stored), 2)
+    assert plan.reason == LEFT_SHARED and plan.managed_setid == 1

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, SET, TVSHOW
 from resources.lib.engine.protect import fingerprint
 from resources.lib.ui import details_model
 from resources.lib.ui.details_model import ACTION_KEEP, ACTION_RESTORE, build_rows, header_line
@@ -641,3 +641,56 @@ def test_replaced_text_for_local_original():
     row = _art_rows({"poster": "https://image.tmdb.org/t/p/original/a.jpg"},
                     keep=keep, media_type=MOVIE, field="poster")
     assert row.action == ACTION_RESTORE
+
+
+# ---------------------------------------------------------------------------
+# Movie sets and set moves on the Ids row
+# ---------------------------------------------------------------------------
+
+
+def _set_ids(**item):
+    base = {"setid": 40, "title": "Heat Collection", "plot": "", "poster": ""}
+    base.update(item)
+    rows = build_rows(SET, base, {"tmdb_id": "1001"}, {}, {}, TODAY)
+    return rows[0]
+
+
+@pytest.mark.parametrize("reason, name, text", [
+    ("tie_library", "", "Left alone: its movies are split evenly between libraries"),
+    ("no_members", "", "Left alone: none of its movies is in an included library"),
+    ("off", "Films", "Left alone: Movie sets is not ticked for Films"),
+    ("no_collection", "", "Left alone: TMDB has no collection for its movies"),
+    ("no_majority", "", "Left alone: no TMDB collection holds more than half of its movies"),
+    ("duplicate", "Heat Collection",
+     "Merged into Heat Collection: Kodi removes this set at its next library clean"),
+    ("shared", "Heat Collection",
+     "Left alone: the set Heat Collection already follows this TMDB collection"),
+])
+def test_set_ids_row_says_why_a_set_is_left_alone(reason, name, text):
+    ids = _set_ids(set_reason=reason, set_reason_name=name)
+    assert ("", text) in ids.lines
+
+
+def test_set_ids_row_names_its_collection_and_lists_moves():
+    ids = _set_ids(collection_id="1001", set_moves=[
+        {"title": "Heat", "from_name": "Heat Collectie", "moved_on": "2026-11-10"},
+    ])
+    assert ids.lines[0] == ("TMDB collection", "1001")
+    assert ("", "Heat: moved here from Heat Collectie on 10 Nov 2026") in ids.lines
+    # A set's collection is not one of the movie ids MetaMender found.
+    assert not any(label == "TMDB" for label, _ in ids.lines)
+
+
+def test_set_ids_row_falls_back_to_the_stored_collection():
+    assert _set_ids().lines[0] == ("TMDB collection", "1001")
+
+
+def test_movie_ids_row_shows_its_move():
+    item = {"title": "Heat", "uniqueid": {"tmdb": "949"}}
+    move = {"user": False, "set": "Heat Collection", "from_name": "Heat Collectie",
+            "moved_on": "2026-11-10"}
+    ids = build_rows(MOVIE, dict(item, set_move=move), None, {}, {}, TODAY)[0]
+    assert ("", "Moved by MetaMender from the set Heat Collectie on 10 Nov 2026") in ids.lines
+    ids = build_rows(MOVIE, dict(item, set_move=dict(move, user=True, set="Favourites")),
+                     None, {}, {}, TODAY)[0]
+    assert ("", "Left in the set Favourites: you moved it there") in ids.lines

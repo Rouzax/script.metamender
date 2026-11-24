@@ -6,8 +6,8 @@ setting and want to see the result.
 
 ## Where to find it
 
-In your library, open the context menu of a movie, TV show, season or episode
-(long-press OK on a remote, or the C key or right mouse button) and choose
+In your library, open the context menu of a movie, TV show, season, episode
+or movie set (long-press OK on a remote, or the C key or right mouse button) and choose
 **MetaMender > Update now**.
 
 ![The MetaMender submenu in the context menu](screenshots/library/context-submenu.png)
@@ -33,6 +33,16 @@ for it.
 - **A TV show** refreshes the show itself, its season posters and every
   episode in it.
 - **A season** refreshes its poster and every episode of that season.
+- **A movie set** refreshes the set itself (its name, plot and art), not its
+  movies. First it merges the set's duplicates: movies of the set's TMDB
+  collection that sit in a duplicate set are moved into it (see
+  [Duplicate sets](libraries.md#duplicate-sets)). On a duplicate, Update now
+  merges it into the set MetaMender manages and refreshes that set. A
+  notification says **Updated** when the set changed or a movie moved.
+  For a set MetaMender leaves alone, nothing changes and the notification
+  says **MetaMender leaves this set alone; Details says why**: its
+  [Details window](details.md#a-set-metamender-leaves-alone) gives the
+  reason.
 
 Season posters are only refreshed in a library with **Posters** ticked, and
 only for a show whose TMDB id MetaMender knows; a season of a show without

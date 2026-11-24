@@ -89,3 +89,12 @@ def test_the_licence_matches_the_licence_file():
     assert _root().findtext(".//license") == "GPL-3.0-only"
     assert "GNU GENERAL PUBLIC LICENSE" in (ROOT / "LICENSE.txt").read_text()[:200]
     assert "Version 3" in (ROOT / "LICENSE.txt").read_text()[:200]
+
+
+def test_context_items_visible_on_sets():
+    """Update now, Details and Stop scan are offered on a movie set too."""
+    menu = _root().find("./extension[@point='kodi.context.item']/menu/menu")
+    conditions = [item.findtext("visible") for item in menu.findall("item")]
+    joined = " ".join(conditions)
+    assert joined.count("String.IsEqual(ListItem.DBType,set)") == 3
+    assert all("String.IsEqual(ListItem.DBType,set)" in c for c in conditions)

@@ -59,6 +59,15 @@ from resources.lib.engine.scanctx import (
     holds_written_value,
     kodi_form,
 )
+from resources.lib.engine.sets import (
+    LEFT_DUPLICATE,
+    LEFT_NO_COLLECTION,
+    LEFT_NO_MAJORITY,
+    LEFT_NO_MEMBERS,
+    LEFT_OFF,
+    LEFT_SHARED,
+    LEFT_TIE_LIBRARY,
+)
 from resources.lib.service.details import can_restore
 from resources.lib.utils import is_empty, lang
 
@@ -148,6 +157,19 @@ _UNLOCKED_NO_COUNTRY = 32625
 _TVMAZE_ONLY = 32599
 # How a number match found an id (numbermatch's match note), "matched" key.
 _MATCHED_HOW = {"date": 32597, "title": 32598, "tmdb_list": 32555}
+
+# A movie set's Ids row: its TMDB collection, why the scan leaves it alone
+# (engine/sets.py reasons, "{}" the library or the set named) and the
+# movies MetaMender moved into it; a movie's row: its own move.
+_COLLECTION = 32763
+_SET_LEFT_ALONE = {
+    LEFT_TIE_LIBRARY: 32764, LEFT_NO_MEMBERS: 32765, LEFT_OFF: 32766,
+    LEFT_NO_COLLECTION: 32767, LEFT_NO_MAJORITY: 32768, LEFT_DUPLICATE: 32769,
+    LEFT_SHARED: 32770,
+}
+_MOVED_HERE = 32771
+_MOVED_BY_METAMENDER = 32772
+_MOVED_BY_YOU = 32773
 
 
 @dataclass
@@ -430,8 +452,40 @@ def _tvmaze_only(item: dict[str, Any]) -> bool:
     return held == {"tvmaze"}
 
 
+def _set_ids_lines(item: dict[str, Any], row: dict[str, Any]) -> list[tuple[str, str]]:
+    """A movie set's Ids lines. The details session puts on the item what
+    the set planning says of it: ``collection_id``, ``set_reason`` with
+    ``set_reason_name`` (the library or set its text names) and
+    ``set_moves`` (title, from_name, moved_on of each movie moved in)."""
+    lines: list[tuple[str, str]] = []
+    collection = item.get("collection_id") or row.get("tmdb_id")
+    if collection:
+        lines.append((lang(_COLLECTION), str(collection)))
+    reason = _SET_LEFT_ALONE.get(str(item.get("set_reason") or ""))
+    if reason:
+        lines.append(("", lang(reason).format(item.get("set_reason_name") or "")))
+    for move in item.get("set_moves") or ():
+        lines.append(("", lang(_MOVED_HERE).format(
+            move.get("title") or "", move.get("from_name") or "",
+            long_date(move.get("moved_on")))))
+    return lines
+
+
+def _movie_move_line(move: dict[str, Any]) -> tuple[str, str]:
+    """A movie's set move, as the details session puts it on the item
+    (``set_move``): moved by MetaMender, or since put in ``set`` by the user."""
+    if move.get("user"):
+        return "", lang(_MOVED_BY_YOU).format(move.get("set") or "")
+    return "", lang(_MOVED_BY_METAMENDER).format(
+        move.get("from_name") or "", long_date(move.get("moved_on")))
+
+
 def _ids_row(media_type: MediaType, item: dict[str, Any],
              item_row: dict[str, Any] | None) -> DetailRow:
+    if media_type.name == "set":
+        # A set has no ids of its own; its row's TMDB id is its collection.
+        lines = _set_ids_lines(item, item_row or {}) or [("", lang(32558))]
+        return DetailRow(IDS_KEY, lang(32510), "", "", lang(32510), lines, "")
     kodi_tmdb, kodi_imdb, kodi_tvdb, kodi_unknown = extract_ids(item)
     row = item_row or {}
     number_matched = bool(row.get("number_matched"))
@@ -498,6 +552,8 @@ def _ids_row(media_type: MediaType, item: dict[str, Any],
                 # the other site's values were used.
                 lines.append((lang(32531), lang(32565).format(_SOURCE_NAMES[site])))
                 rejected = True
+    if item.get("set_move"):
+        lines.append(_movie_move_line(item["set_move"]))
     if not lines:
         lines.append(("", lang(32558)))
 

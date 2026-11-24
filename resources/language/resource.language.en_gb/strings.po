@@ -1654,3 +1654,51 @@ msgstr ""
 msgctxt "#32762"
 msgid "was a local file that no longer exists"
 msgstr ""
+
+msgctxt "#32763"
+msgid "TMDB collection"
+msgstr ""
+
+msgctxt "#32764"
+msgid "Left alone: its movies are split evenly between libraries"
+msgstr ""
+
+msgctxt "#32765"
+msgid "Left alone: none of its movies is in an included library"
+msgstr ""
+
+msgctxt "#32766"
+msgid "Left alone: Movie sets is not ticked for {}"
+msgstr ""
+
+msgctxt "#32767"
+msgid "Left alone: TMDB has no collection for its movies"
+msgstr ""
+
+msgctxt "#32768"
+msgid "Left alone: no TMDB collection holds more than half of its movies"
+msgstr ""
+
+msgctxt "#32769"
+msgid "Merged into {}: Kodi removes this set at its next library clean"
+msgstr ""
+
+msgctxt "#32770"
+msgid "Left alone: the set {} already follows this TMDB collection"
+msgstr ""
+
+msgctxt "#32771"
+msgid "{}: moved here from {} on {}"
+msgstr ""
+
+msgctxt "#32772"
+msgid "Moved by MetaMender from the set {} on {}"
+msgstr ""
+
+msgctxt "#32773"
+msgid "Left in the set {}: you moved it there"
+msgstr ""
+
+msgctxt "#32774"
+msgid "MetaMender leaves this set alone; Details says why"
+msgstr ""

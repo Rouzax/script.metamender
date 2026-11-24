@@ -1,15 +1,16 @@
 # The Details window
 
 The Details window answers "why does this field look like this?" for one movie,
-TV show, season or episode: where each value came from, what it replaced, when
+TV show, season, episode or movie set: where each value came from, what it replaced, when
 MetaMender last checked it and when it checks again, and why it left a field
 alone. Opening it changes nothing.
 
 ## Opening it
 
-Open the context menu of a movie, show, season or episode in your library and
-choose **MetaMender > Details**. A season has one field, its poster, so its
-window is short; the season's **Ids** are its show's.
+Open the context menu of a movie, show, season, episode or movie set in your
+library and choose **MetaMender > Details**. A season has one field, its
+poster, so its window is short; the season's **Ids** are its show's. For a
+movie set, see [Movie sets](#movie-sets).
 
 ![The Details window for an episode](screenshots/details/details-plot-updated.png)
 
@@ -120,6 +121,12 @@ found (for a season, its show's TMDB and TheTVDB ids):
 
 Ids MetaMender found stay in its own records; it does not add them to Kodi.
 
+When MetaMender moved a movie out of a duplicate set (see
+[Duplicate sets](libraries.md#duplicate-sets)), the movie's **Ids** entry says
+so: "Moved by MetaMender from the set *old name* on *date*", or, once you have
+put the movie in another set yourself, "Left in the set *name*: you moved it
+there". MetaMender then never moves it again.
+
 When an episode's number points at a different episode on TMDB or TheTVDB (the
 title and the date both disagree), MetaMender uses nothing from that site and
 shows both versions side by side, so you can see why:
@@ -172,6 +179,48 @@ since MetaMender does not touch it anyway.
 
 Restoring a show's title also moves MetaMender's records of its episodes along
 with it; should that fail, a notification says so.
+
+## Movie sets
+
+A movie set's window shows the fields MetaMender manages for the set while
+**Movie sets** is ticked for the library the set follows (see
+[Movie sets](libraries.md#movie-sets)): **Title** (the set's name),
+**Plot**, and the art the library's art ticks cover. Each tells its story
+like any other field: where it came from, what it replaced, when it is
+checked again, and the lock.
+
+- **Restore original** on the **Title** puts back the name the set had when
+  you ticked **Movie sets** (usually your scraper's) and locks it, so
+  MetaMender keeps it from then on. Restore works the same way for the plot
+  and the art.
+- **Keep this value** locks the name, plot or art as it is now.
+- A name changed outside MetaMender is locked with the reason **Changed
+  outside MetaMender, left as it is**; **Let MetaMender update this again**
+  unlocks it, and the next scan may give the set TMDB's name again.
+
+The set's **Ids** entry shows its **TMDB collection** and, one line per
+movie, each movie MetaMender moved into the set from a duplicate: "*movie*:
+moved here from *old set name* on *date*". A move has no Restore; to undo
+one, move the movie back in Kodi, and MetaMender leaves it there.
+
+### A set MetaMender leaves alone
+
+For a set MetaMender does not manage, the **Ids** entry says why, and no
+fields are listed (except one you locked while the set was managed, so you
+can still unlock it). Nothing in the set changes.
+
+| The Ids entry says | What it means |
+|---|---|
+| Left alone: its movies are split evenly between libraries | Two libraries (or folders with their own language) hold equally many of its movies, so MetaMender cannot tell which language to use. |
+| Left alone: none of its movies is in an included library | Every movie of the set is in a library or folder you left out, or in none. |
+| Left alone: Movie sets is not ticked for *library* | The set follows that library, and **Movie sets** is off there. |
+| Left alone: TMDB has no collection for its movies | None of its movies belongs to a TMDB collection, as far as MetaMender knows. A movie MetaMender has not asked TMDB about yet counts for none; the next scan or **Update now** asks. |
+| Left alone: no TMDB collection holds more than half of its movies | The movies come from several collections, as in a set you made by hand. |
+| Merged into *set*: Kodi removes this set at its next library clean | A duplicate of the set MetaMender manages: its movies are moved into *set*. Kodi deletes the empty set when you clean the library. |
+| Left alone: the set *set* already follows this TMDB collection | The set has a name of its own (such as "Favourites") and shares a collection with *set*. MetaMender moves nothing into or out of it. |
+
+See [A movie set was left alone](troubleshooting.md#a-movie-set-was-left-alone)
+for what to do about each.
 
 ## Update now and Close
 

@@ -140,6 +140,19 @@ def test_details_scenes_focus_rows_their_demo_item_has(demo):
             assert focused[0].action, f"{name}: the focused row has no button"
 
 
+def test_movie_set_demo_preset_builds_title_row(demo):
+    from resources.lib.data.media_types import SET
+    from resources.lib.ui.details_model import build_rows
+    media_type, item, item_row, fs_map, keep, language = demo.PRESETS["movie_set"]()
+    assert media_type is SET
+    rows = {r.key: r for r in build_rows(media_type, item, item_row, fs_map, keep,
+                                         demo.TODAY, language=language)}
+    title = rows["title"]
+    assert title.group == "updated" and title.action == "restore"
+    ids = [text for _, text in rows["ids"].lines]
+    assert any("moved here from" in text for text in ids)
+
+
 def test_demo_rows_cover_every_group(demo):
     from resources.lib.ui.details_model import build_rows
     groups = set()

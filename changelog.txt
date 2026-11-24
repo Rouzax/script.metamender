@@ -64,6 +64,12 @@ New Features:
     moved again, a set with a name of its own is never merged, and the
     emptied set is left for Kodi's library clean to remove. MetaMender
     otherwise never creates or deletes a set or changes its movies.
+  - Details and Update now on a movie set, from the MetaMender context
+    menu. Details shows the set's name, plot and art with where they came
+    from, Restore original and the lock, the set's TMDB collection, the
+    movies MetaMender moved into it, and why a set is left alone. Update
+    now refreshes the set (not its movies) after merging its duplicates.
+    A movie's Details says when MetaMender moved it between sets.
   - Optional Personal fanart.tv API key setting.
   - Season posters: a TMDB season poster that is the same file as one of
     its show's posters is skipped, and among equally liked fanart.tv

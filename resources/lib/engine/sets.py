@@ -11,7 +11,8 @@ anything less leaves the set alone with a reason Details can show.
 The planning (plan_sets) is pure. prepare_sets runs it against Kodi and the
 tracker before the set pass: it asks TMDB for the collections it still
 lacks, merges duplicate sets by moving their movies, and hands the pass the
-managed sets to scan.
+managed sets to scan. describe_set plans one set the same way from what is
+stored, for Details and Update now, without asking a site or writing.
 
 Logging:
     Logger: 'sets'
@@ -517,6 +518,59 @@ def _restore_plot(kodi_set: dict[str, Any]) -> str:
     return before
 
 
+def _tracker_facts(
+    tracker: Any, members: list[dict[str, Any]], collections: dict[str, str],
+) -> tuple[dict[str, int], dict[str, frozenset[str]], dict[str, dict[str, Any]]]:
+    """plan_sets' holders, names and set_moves, read from the tracker."""
+    holders: dict[str, int] = {}
+    names: dict[str, frozenset[str]] = {}
+    for identity in {_set_identity(cid) for cid in collections.values() if cid}:
+        row = tracker.get_item(SET.name, identity)
+        if row and row.get("kodi_id") is not None:
+            holders[identity] = int(row["kodi_id"])
+        names[identity] = tracker.get_set_names(identity)
+    set_moves: dict[str, dict[str, Any]] = {}
+    for member in members:
+        movie = compute_identity(member, MOVIE)
+        recorded = tracker.get_set_move(movie)
+        if recorded is not None:
+            set_moves[movie] = recorded
+    return holders, names, set_moves
+
+
+def describe_set(setid: int, libraries: LibraryConfig, tracker: Any) -> Optional[SetPlan]:
+    """The plan of one Kodi set as the next scan would make it, for Details
+    and Update now; None when Kodi has no such set.
+
+    Reads only: it uses the collections already stored (a movie TMDB was
+    never asked about counts for none, as one TMDB did not answer does in a
+    scan), asks no site and records nothing. For a shared set,
+    ``managed_setid`` is the set that follows the collection, or, when no
+    set of it is managed, another set of the collection, so Details can
+    name the set it shares with.
+    """
+    kodi_sets = kodi.get_all_items(SET, art=False)
+    if not any(int(s.get("setid") or 0) == setid for s in kodi_sets):
+        return None
+    members = kodi.get_set_members()
+    collections: dict[str, str] = {}
+    for member in members:
+        tmdb_id = extract_ids(member)[0]
+        if tmdb_id and tmdb_id not in collections:
+            stored = tracker.get_movie_collection(tmdb_id)
+            if stored is not None:
+                collections[tmdb_id] = stored
+    holders, names, set_moves = _tracker_facts(tracker, members, collections)
+    plans, _ = plan_sets(kodi_sets, members, libraries, collections, holders, names,
+                         set_moves)
+    plan = next(p for p in plans if p.setid == setid)
+    if plan.reason != LEFT_SHARED:
+        return plan
+    same = [p for p in plans if p.collection_id == plan.collection_id and p.setid != setid]
+    managed = [p for p in same if p.reason is None] or sorted(same, key=lambda p: p.setid)
+    return replace(plan, managed_setid=managed[0].setid if managed else None)
+
+
 def prepare_sets(
     ctx: _ScanCtx,
     libraries: LibraryConfig,
@@ -563,20 +617,7 @@ def prepare_sets(
     asking = {p.setid for p in probe if p.reason == LEFT_NO_COLLECTION}
     collections = _member_collections(ctx, members, asking, libraries, today)
 
-    identities = {_set_identity(cid) for cid in collections.values() if cid}
-    holders: dict[str, int] = {}
-    names: dict[str, frozenset[str]] = {}
-    for identity in identities:
-        row = tracker.get_item(SET.name, identity)
-        if row and row.get("kodi_id") is not None:
-            holders[identity] = int(row["kodi_id"])
-        names[identity] = tracker.get_set_names(identity)
-    set_moves: dict[str, dict[str, Any]] = {}
-    for member in members:
-        movie = compute_identity(member, MOVIE)
-        recorded = tracker.get_set_move(movie)
-        if recorded is not None:
-            set_moves[movie] = recorded
+    holders, names, set_moves = _tracker_facts(tracker, members, collections)
     _lock_user_moves(tracker, members, set_moves)
 
     plans, moves = plan_sets(kodi_sets, members, libraries, collections, holders, names,
