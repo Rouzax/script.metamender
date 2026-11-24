@@ -203,9 +203,10 @@ shows no image.
 - **The share was offline at the check.** MetaMender never treats an
   unreachable drive or share as a deleted file; it checks again at the next
   scan.
-- **You deleted the whole art folder**, and it was not inside the video's
-  folder. MetaMender cannot tell that from an offline share, so it leaves the
-  art alone. Recreate the empty folder and run a manual scan.
+- **You deleted the whole art folder, or emptied it**, and it was not inside
+  the video's folder. An empty or missing folder looks the same as a network
+  share that is not mounted, so MetaMender leaves the art alone. Recreate the
+  folder with any file in it and run a manual scan.
 - **Neither site has that art** for the item, so the slot stays empty. See
   [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files).
 - **It is extra fanart** (`fanart1` and so on), which is never filled.

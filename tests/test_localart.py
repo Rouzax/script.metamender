@@ -68,6 +68,50 @@ def test_stacked_media_uses_the_first_part(vfs, tmp_path):
     assert local_art_state(art, media) == MISSING
 
 
+def test_unmounted_mount_point_is_unreachable(vfs, tmp_path):
+    """A share mounted at a local path leaves an empty folder when it is
+    down: with the media gone too, nothing proves the art was deleted."""
+    root = tmp_path / "storage" / "movies"
+    root.mkdir(parents=True)
+    art = str(root / "Film (2020)-poster.jpg")
+    assert local_art_state(art, str(root / "Film (2020).mkv")) == UNREACHABLE
+
+
+def test_empty_folder_without_media_is_unreachable(vfs, tmp_path):
+    (tmp_path / "Sets").mkdir()
+    assert local_art_state(str(tmp_path / "Sets" / "poster.jpg"), "") == UNREACHABLE
+
+
+def test_non_empty_folder_with_the_file_absent_is_missing(vfs, tmp_path):
+    vfs("Sets", "fanart.jpg")
+    assert local_art_state(str(tmp_path / "Sets" / "poster.jpg"), "") == MISSING
+
+
+def test_media_exists_and_art_absent_is_missing(vfs, tmp_path):
+    media = vfs("storage", "movies", "Film (2020).mkv")
+    art = str(tmp_path / "storage" / "movies" / "Film (2020)-poster.jpg")
+    assert local_art_state(art, media) == MISSING
+
+
+def test_art_folder_elsewhere_needs_media_and_contents(vfs, tmp_path):
+    """Art outside the video's folder: its folder must hold something, and
+    the media must still answer."""
+    media = vfs("Movies", "Film", "film.mkv")
+    (tmp_path / "Art" / "Film").mkdir(parents=True)
+    art = str(tmp_path / "Art" / "Film" / "poster.jpg")
+    assert local_art_state(art, media) == UNREACHABLE
+    vfs("Art", "Film", "fanart.jpg")
+    assert local_art_state(art, media) == MISSING
+    gone = str(tmp_path / "Movies" / "Gone" / "film.mkv")
+    assert local_art_state(art, gone) == UNREACHABLE
+
+
+def test_listdir_error_is_unreachable(vfs, kodi_stubs, tmp_path):
+    vfs("Sets", "fanart.jpg")
+    kodi_stubs["xbmcvfs"].listdir.side_effect = OSError("share went away")
+    assert local_art_state(str(tmp_path / "Sets" / "poster.jpg"), "") == UNREACHABLE
+
+
 def test_vfs_error_is_unreachable(vfs, kodi_stubs, tmp_path):
     media = vfs("Movies", "Film", "film.mkv")
     gone = str(tmp_path / "Movies" / "Film" / "poster.jpg")

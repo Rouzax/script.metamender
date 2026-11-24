@@ -418,11 +418,13 @@ on) is never filled.
 **A share that is offline is not a deleted file.** When the drive or network
 share holding the art does not answer (a sleeping NAS, the network down),
 MetaMender changes nothing and checks again at the next scan. It only
-concludes that a file is gone when the folder it was in still exists, or
-when the video still answers and the art was in the video's folder. If you
-deleted a whole art folder that lies outside the video's folder, MetaMender
-cannot tell it from an offline share and leaves the art as it is; recreate
-the empty folder and run a manual scan.
+concludes that a file is gone when the video still answers and the art was
+in the video's folder, or when the folder the art was in still exists and
+still holds other files. An empty folder is not enough, because a network
+share that is not mounted can look like an empty folder. If you deleted a
+whole art folder that lies outside the video's folder, or the last file in
+one, MetaMender cannot tell it from an offline share and leaves the art as
+it is; recreate the folder with any file in it and run a manual scan.
 
 **When neither site has an image** of that type for the item, the slot stays
 as it is: Kodi still points at the deleted file and shows no image. For a
