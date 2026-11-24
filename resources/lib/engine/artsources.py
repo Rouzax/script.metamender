@@ -15,7 +15,7 @@ from resources.lib.constants import FANART_API_KEY
 from resources.lib.engine.art import (
     TEXTLESS_SOURCE_SUFFIX,
     is_placeholder_art,
-    pick_poster,
+    pick_art,
 )
 from resources.lib.engine.chain import TRANSIENT, FieldOutcome
 from resources.lib.engine.fetch import _Primary
@@ -42,7 +42,7 @@ def _fanart_answer(
     A disabled fanart.tv, tripped or with its keys rejected, is not an
     answer: a poster whose pick needs it waits with its clock untouched,
     as text fields do while TheTVDB is out. A pick TMDB settles on its own
-    never asks (art.pick_poster is lazy).
+    never asks (art.pick_art is lazy).
     """
     if key in ctx.fanart_cache:
         return ctx.fanart_cache[key]
@@ -135,7 +135,8 @@ def resolve_art(
         return _TRANSIENT_OUTCOME, None
     lang = image_language(folder_lang)
     fallback = image_language(fallback_lang) if fallback_lang.strip() else None
-    pick = pick_poster(
+    pick = pick_art(
+        "poster",
         (primary.tmdb or {}).get("posters") or [],
         lambda: _fanart_posters(ctx, sources.item, primary, ids, identity),
         ctx.art_source, lang, fallback,
