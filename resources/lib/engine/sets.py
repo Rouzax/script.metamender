@@ -493,15 +493,20 @@ def collection_is_stale(row: Optional[dict[str, str]], today: str) -> bool:
 def _member_collections(
     ctx: _ScanCtx, movies: list[dict[str, Any]], wanted: Callable[[dict[str, Any]], bool],
     libraries: LibraryConfig, today: str, stats: dict[str, Any],
-) -> dict[str, str]:
+    stop: Callable[[], bool],
+) -> tuple[dict[str, str], bool]:
     """The TMDB collection of every counted movie ``wanted`` accepts, keyed
-    on its TMDB id. A movie without a stored answer, or whose "none" is
-    NONE_RECHECK_DAYS old, is asked (/movie/{id}, no append) and the answer
-    kept; one TMDB did not answer is left out (a stale "none" stays as
-    stored and counts as "none"), so it counts for no collection this scan
-    and can only keep its set from being managed, never make it managed. It counts in
+    on its TMDB id, and whether ``stop`` ended the lookups.
+
+    A movie without a stored answer, or whose "none" is NONE_RECHECK_DAYS
+    old, is asked (/movie/{id}, no append) and the answer kept; one TMDB did
+    not answer is left out (a stale "none" stays as stored and counts as
+    "none"), so it counts for no collection this scan and can only keep its
+    set from being managed, never make it managed. It counts in
     stats["transient"], so Update now says it could not check rather than
-    that the set is left alone."""
+    that the set is left alone. ``stop`` runs before each request: a first
+    scan can ask about every movie in no set, so shutdown and Stop scan
+    must be able to end it. The answers already received stay recorded."""
     collections: dict[str, str] = {}
     for member in movies:
         if not wanted(member):
@@ -514,6 +519,8 @@ def _member_collections(
         row = ctx.tracker.get_movie_collection_row(tmdb_id)
         stored = None if row is None else row["collection_id"]
         if collection_is_stale(row, today):
+            if stop():
+                return collections, True
             answer = _ask_tmdb(
                 ctx, _collection_lookup(tmdb_id, ctx.tmdb_api_key),
                 compute_identity(member, MOVIE),
@@ -525,7 +532,7 @@ def _member_collections(
                 ctx.tracker.set_movie_collection(tmdb_id, stored, today)
         if stored is not None:
             collections[tmdb_id] = stored
-    return collections
+    return collections, False
 
 
 def _collection_lookup(tmdb_id: str, api_key: str) -> Callable[[], Any]:
@@ -798,8 +805,11 @@ def _plan_set_joins(
     plans: list[SetPlan], libraries: LibraryConfig, collections: dict[str, str],
     names: dict[str, frozenset[str]], set_moves: dict[str, dict[str, Any]],
     only_collection: Optional[str], today: str, stats: dict[str, Any],
-) -> tuple[list[Join], dict[str, str]]:
-    """The joins to write and the collection map they were planned with.
+    stop: Callable[[], bool],
+) -> tuple[list[Join], dict[str, str], bool]:
+    """The joins to write, the collection map they were planned with, and
+    whether ``stop`` ended the candidates' lookups (then no join is
+    planned).
 
     Candidates (movies in no set, counted, in a library with Movie sets
     ticked, not taken out by the user) are looked up as set members are
@@ -821,7 +831,10 @@ def _plan_set_joins(
     if only_collection is not None:
         found = _stored_collections(ctx.tracker, [m for m in movies if candidate(m)])
     else:
-        found = _member_collections(ctx, movies, candidate, libraries, today, stats)
+        found, stopped = _member_collections(ctx, movies, candidate, libraries, today,
+                                             stats, stop)
+        if stopped:
+            return [], {}, True
     members = _set_members(movies)
     join_cols = {**_stored_collections(ctx.tracker, members), **collections, **found}
     for cid in {c for c in join_cols.values() if c}:
@@ -832,7 +845,7 @@ def _plan_set_joins(
     joins = plan_joins(movies, plans, libraries, join_cols, set_moves, with_sets)
     if only_collection is not None:
         joins = [j for j in joins if j.collection_id == only_collection]
-    return joins, join_cols
+    return joins, join_cols, False
 
 
 def _tracker_facts(
@@ -889,6 +902,7 @@ def prepare_sets(
     only_setid: Optional[int],
     stats: dict[str, Any],
     before_write: Optional[Callable[[], bool]] = None,
+    stop: Optional[Callable[[], bool]] = None,
 ) -> list[dict[str, Any]]:
     """The managed sets for the set pass, after merging duplicate sets.
 
@@ -903,6 +917,9 @@ def prepare_sets(
     or grown set is returned as it now is. ``before_write`` runs before each
     move and join (run_scan's browse hold, shutdown and Stop scan checks);
     when it returns False no further movie is written and no set is
+    returned. ``stop`` runs before each TMDB lookup of a movie's collection
+    (run_scan's shutdown and Stop scan checks, without the browse hold); when
+    it returns True nothing further is asked or written and no set is
     returned.
 
     A set left alone that the tracker holds a row for (its Movie sets tick
@@ -922,6 +939,7 @@ def prepare_sets(
     tracker = ctx.tracker
     today = date.today().isoformat()
     write_ok = before_write or (lambda: True)
+    stop_now = stop or (lambda: False)
     kodi_sets = kodi.get_all_items(SET)
     movies = kodi.get_movies_for_sets()
     members = _set_members(movies)
@@ -932,9 +950,13 @@ def prepare_sets(
     # tie, no counted member, Movie sets not ticked) costs no TMDB request.
     probe, _ = plan_sets(kodi_sets, members, libraries, {}, {}, {}, {})
     asking = {p.setid for p in probe if p.reason == LEFT_NO_COLLECTION}
-    collections = _member_collections(
+    collections, stopped = _member_collections(
         ctx, members, lambda m: int(m.get("setid") or 0) in asking, libraries, today, stats,
+        stop_now,
     )
+    if stopped:
+        tracker.commit()
+        return []
 
     # Every listed movie's recorded move, so a joined movie the user took
     # back out of its set is locked too.
@@ -956,16 +978,18 @@ def prepare_sets(
 
     only_collection = next((p.collection_id for p in plans if p.setid == target), None)
     if not stopped and (only_setid is None or only_collection is not None):
-        joins, join_cols = _plan_set_joins(
+        joins, join_cols, stopped = _plan_set_joins(
             ctx, movies, kodi_sets, plans, libraries, collections, names, set_moves,
-            only_collection, today, stats,
+            only_collection, today, stats, stop_now,
         )
-        current = {sid: dict(s, plot=plots.get(sid, s.get("plot") or ""))
-                   for sid, s in by_setid.items()}
-        joined, stopped = _join_movies(ctx, joins, current, names, libraries, today, stats,
-                                       write_ok)
+        join_setids: dict[str, int] = {}
+        if not stopped:
+            current = {sid: dict(s, plot=plots.get(sid, s.get("plot") or ""))
+                       for sid, s in by_setid.items()}
+            join_setids, stopped = _join_movies(ctx, joins, current, names, libraries, today,
+                                               stats, write_ok)
         tracker.commit()
-        if joined:
+        if join_setids:
             # A created or grown set is planned again from Kodi's own
             # listing, so the pass scans it with its new members and plot.
             kodi_sets = kodi.get_all_items(SET)

@@ -1005,31 +1005,45 @@ def _hold_while_browsing(media_type: MediaType, monitor: Any,
     )
 
 
-def _before_set_move(
+def _set_pass_stop(
     monitor: Any, reset: bool, stats: dict[str, Any],
 ) -> Callable[[], bool]:
-    """The check sets.prepare_sets runs before moving a movie between sets:
-    False on shutdown or Stop scan (recorded in ``stats`` as the scan loop
-    does), otherwise it holds while the user browses the video library. A
-    move rewrites the library like any scan write. Update now (``reset``)
-    ignores Stop scan and holds only while keys are pressed."""
-    def check() -> bool:
-        # The hold ends on shutdown and on Stop scan too, so both are
-        # checked after it.
-        _hold_while_browsing(
-            SET, monitor, UPDATE_NOW_IDLE_SECONDS if reset else BROWSE_IDLE_SECONDS)
+    """The check sets.prepare_sets runs between TMDB lookups: True on
+    shutdown or Stop scan (recorded in ``stats`` as the scan loop does).
+    Update now (``reset``) ignores Stop scan. A lookup writes nothing to the
+    library, so it does not hold while the user browses."""
+    def stop() -> bool:
         if monitor is not None and monitor.abortRequested():
             log.info("Scan interrupted by shutdown", event="scan.abort",
                      media_type=SET.name, processed=0)
             stats["aborted"] = True
-            return False
+            return True
         if not reset and _stop_requested():
             log.info("Scan stopped by the user", event="scan.stopped",
                      media_type=SET.name, processed=0)
             stats["stopped"] = True
             stats["aborted"] = True
-            return False
-        return True
+            return True
+        return False
+    return stop
+
+
+def _before_set_move(
+    monitor: Any, reset: bool, stats: dict[str, Any],
+) -> Callable[[], bool]:
+    """The check sets.prepare_sets runs before moving a movie between sets
+    or into one: False on shutdown or Stop scan (_set_pass_stop), otherwise
+    it holds while the user browses the video library. A move rewrites the
+    library like any scan write. Update now (``reset``) holds only while
+    keys are pressed."""
+    stop = _set_pass_stop(monitor, reset, stats)
+
+    def check() -> bool:
+        # The hold ends on shutdown and on Stop scan too, so both are
+        # checked after it.
+        _hold_while_browsing(
+            SET, monitor, UPDATE_NOW_IDLE_SECONDS if reset else BROWSE_IDLE_SECONDS)
+        return not stop()
     return check
 
 
@@ -1514,7 +1528,8 @@ def run_scan(
         items = _season_items(tracker, shared.show_id_map, new_only)
     elif items is None and media_type is SET:
         items = prepare_sets(shared, libraries, new_only, only_set, stats,
-                             _before_set_move(monitor, reset, stats))
+                             _before_set_move(monitor, reset, stats),
+                             _set_pass_stop(monitor, reset, stats))
     elif items is None:
         art = manages_art(media_type, libraries)
         items = (

@@ -786,6 +786,9 @@ def test_stop_during_joins_keeps_the_written_join_only(tmp_path, kodi_stubs, fak
     fake.add_movie(1, 0, "20352")
     fake.add_movie(2, 0, "93456")
     tracker = _make_tracker(tmp_path)
+    # Stored answers: no lookup runs, so the stop checks are the writes'.
+    for tmdb_id in ("20352", "93456"):
+        tracker.set_movie_collection(tmdb_id, "86066", date.today().isoformat())
     # Not stopped at the start of the pass nor before the first join.
     stops = iter([False, False])
     with patch("resources.lib.engine.scan._stop_requested",
@@ -797,6 +800,39 @@ def test_stop_during_joins_keeps_the_written_join_only(tmp_path, kodi_stubs, fak
     assert fake.movies[2]["setid"] == 0
     assert stats["stopped"] and stats["processed"] == 0
     assert stats["joined"] == 1
+    tracker.close()
+
+
+def test_stop_during_lookups_asks_no_further_and_joins_nothing(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_movie(1, 0, "20352")
+    fake.add_movie(2, 0, "93456")
+    tracker = _make_tracker(tmp_path)
+    # Not stopped at the start of the pass nor before the first lookup.
+    stops = iter([False, False])
+    with patch("resources.lib.engine.scan._stop_requested",
+               side_effect=lambda: next(stops, True)):
+        stats = _scan(tracker, _library(), monitor=_Monitor())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == ["20352"]
+    # The answer received is real and stays recorded.
+    assert tracker.get_movie_collection("20352") == "86066"
+    assert tracker.get_movie_collection("93456") is None
+    assert _movie_moves(fake) == []
+    tmdb_api["collection"].assert_not_called()
+    assert stats["stopped"] and stats["aborted"]
+    assert stats["joined"] == 0 and stats["processed"] == 0
+    tracker.close()
+
+
+def test_shutdown_during_lookups_ends_the_set_pass(tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_movie(1, 0, "20352")
+    monitor = MagicMock()
+    monitor.abortRequested.return_value = True
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library(), monitor=monitor)
+    tmdb_api["member"].assert_not_called()
+    assert _movie_moves(fake) == []
+    assert stats["aborted"] and not stats["stopped"]
     tracker.close()
 
 
