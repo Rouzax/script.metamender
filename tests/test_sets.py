@@ -414,7 +414,7 @@ class _StoredTracker:
 def _describe(monkeypatch, sets, members, tracker, setid):
     from resources.lib.engine import sets as sets_module
     monkeypatch.setattr(sets_module.kodi, "get_all_items", lambda mt, **kw: sets)
-    monkeypatch.setattr(sets_module.kodi, "get_set_members", lambda: members)
+    monkeypatch.setattr(sets_module.kodi, "get_movies_for_sets", lambda: members)
     return describe_set(setid, _config(), tracker)
 
 

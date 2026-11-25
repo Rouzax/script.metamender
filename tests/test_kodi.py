@@ -509,27 +509,43 @@ def test_build_properties_set():
     assert _build_properties(SET) == ["title", "plot", "art"]
 
 
-def test_get_set_members_filters_unset(kodi_stubs):
-    from resources.lib.data.kodi import get_set_members
+def test_get_movies_for_sets_keeps_movies_in_no_set(kodi_stubs):
+    from resources.lib.data.kodi import get_movies_for_sets
     kodi_stubs["xbmc"].executeJSONRPC = _answers({"VideoLibrary.GetMovies": {"result": {
         "movies": [
-            {"movieid": 1, "setid": 4, "set": "Shrek Collection", "file": "a.mkv"},
+            {"movieid": 1, "setid": 3, "set": "Shrek Collection", "file": "a.mkv"},
             {"movieid": 2, "setid": 0, "set": "", "file": "b.mkv"},
-            {"movieid": 3, "set": "", "file": "c.mkv"},
         ]}}})
-    members = get_set_members()
+    movies = get_movies_for_sets()
     sent = json.loads(kodi_stubs["xbmc"].executeJSONRPC.call_args.args[0])
     assert sent["params"]["properties"] == [
         "title", "set", "setid", "file", "uniqueid", "premiered"]
-    assert [m["movieid"] for m in members] == [1]
+    assert [m["movieid"] for m in movies] == [1, 2]
 
 
-def test_get_set_members_raises_on_error(kodi_stubs):
-    from resources.lib.data.kodi import get_set_members
+def test_get_movies_for_sets_raises_on_error(kodi_stubs):
+    from resources.lib.data.kodi import get_movies_for_sets
     from resources.lib.utils import KodiQueryError
     kodi_stubs["xbmc"].executeJSONRPC = _answers({})
     with pytest.raises(KodiQueryError):
-        get_set_members()
+        get_movies_for_sets()
+
+
+def test_movie_set_folder(kodi_stubs):
+    from resources.lib.data.kodi import movie_set_folder
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({"Settings.GetSettingValue": {
+        "result": {"value": "smb://nas/sets/"}}})
+    assert movie_set_folder() == "smb://nas/sets/"
+    sent = json.loads(kodi_stubs["xbmc"].executeJSONRPC.call_args.args[0])
+    assert sent["params"] == {"setting": "videolibrary.moviesetsfolder"}
+
+
+def test_movie_set_folder_empty_on_error_or_exception(kodi_stubs):
+    from resources.lib.data.kodi import movie_set_folder
+    kodi_stubs["xbmc"].executeJSONRPC = _answers({})
+    assert movie_set_folder() == ""
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(side_effect=RuntimeError("down"))
+    assert movie_set_folder() == ""
 
 
 def test_get_movie_setid(kodi_stubs):

@@ -243,7 +243,7 @@ def plan_sets(
     """A plan for every Kodi set (in the order given) and the moves that
     merge duplicate sets.
 
-    ``members`` are the movies in a set (kodi.get_set_members);
+    ``members`` are the movies in a set (kodi.get_movies_for_sets, setid above 0);
     ``collections`` maps a movie's TMDB id to its stored collection ("" for
     none); ``holders`` maps a set identity to the setid its tracker row
     records; ``names`` maps a set identity to its known lowercased names;
@@ -562,7 +562,8 @@ def describe_set(setid: int, libraries: LibraryConfig, tracker: Any) -> Optional
     kodi_sets = kodi.get_all_items(SET, art=False)
     if not any(int(s.get("setid") or 0) == setid for s in kodi_sets):
         return None
-    members = kodi.get_set_members()
+    members = [m for m in kodi.get_movies_for_sets()
+               if int(m.get("setid") or 0) > 0]
     collections: dict[str, str] = {}
     for member in members:
         tmdb_id = extract_ids(member)[0]
@@ -617,7 +618,8 @@ def prepare_sets(
     tracker = ctx.tracker
     today = date.today().isoformat()
     kodi_sets = kodi.get_all_items(SET)
-    members = kodi.get_set_members()
+    members = [m for m in kodi.get_movies_for_sets()
+               if int(m.get("setid") or 0) > 0]
     by_setid = {int(s.get("setid") or 0): s for s in kodi_sets}
     by_movieid = {int(m.get("movieid") or 0): m for m in members}
 

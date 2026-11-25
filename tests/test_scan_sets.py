@@ -77,7 +77,7 @@ class FakeKodi:
         return [kodi.flatten_art(dict(s, art=dict(s["art"])), SET) for s in self.sets.values()]
 
     def members(self):
-        return [dict(m) for m in self.movies.values() if m["setid"] > 0]
+        return [dict(m) for m in self.movies.values()]
 
     def movie_setid(self, movieid):
         if self.land_in is not None:
@@ -120,7 +120,7 @@ class FakeKodi:
 def fake():
     fk = FakeKodi()
     with patch("resources.lib.data.kodi.get_all_items", side_effect=fk.list_items), \
-            patch("resources.lib.data.kodi.get_set_members", side_effect=fk.members), \
+            patch("resources.lib.data.kodi.get_movies_for_sets", side_effect=fk.members), \
             patch("resources.lib.data.kodi.get_movie_setid", side_effect=fk.movie_setid), \
             patch("resources.lib.data.kodi.get_item_by_id", side_effect=fk.details), \
             patch("resources.lib.data.kodi.update_item", fk.update), \

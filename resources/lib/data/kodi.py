@@ -189,10 +189,10 @@ def get_all_items(
     return items
 
 
-def get_set_members() -> list[dict[str, Any]]:
-    """Every movie that sits in a set (``setid`` above 0), with what the set
-    planning needs. Raises KodiQueryError when the listing fails: no answer
-    is not the same as no members."""
+def get_movies_for_sets() -> list[dict[str, Any]]:
+    """Every movie in the library, in a set or not (``setid`` 0), with what
+    the set planning needs. Raises KodiQueryError when the listing fails: no
+    answer is not the same as no movies."""
     query = {
         "jsonrpc": "2.0",
         "method": MOVIE.kodi_list_method,
@@ -203,14 +203,31 @@ def get_set_members() -> list[dict[str, Any]]:
     try:
         data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
     except Exception as exc:
-        log.exception("Failed to query set members", event="kodi.query", media_type="set")
-        raise KodiQueryError("JSON-RPC query failed for set members") from exc
+        log.exception("Failed to query movies for sets", event="kodi.query", media_type="set")
+        raise KodiQueryError("JSON-RPC query failed for movies for sets") from exc
     if "error" in data or "result" not in data:
-        log.error("Set member query returned an error", event="kodi.query",
+        log.error("Movies for sets query returned an error", event="kodi.query",
                   media_type="set", error=str(data.get("error", "no result key")))
-        raise KodiQueryError("JSON-RPC error response for set members")
-    movies = data["result"].get(MOVIE.kodi_result_key, [])
-    return [m for m in movies if int(m.get("setid") or 0) > 0]
+        raise KodiQueryError("JSON-RPC error response for movies for sets")
+    return list(data["result"].get(MOVIE.kodi_result_key, []))
+
+
+def movie_set_folder() -> str:
+    """Kodi's movie set information folder (``videolibrary.moviesetsfolder``),
+    "" when unset or when the setting cannot be read."""
+    query = {
+        "jsonrpc": "2.0",
+        "method": "Settings.GetSettingValue",
+        "params": {"setting": "videolibrary.moviesetsfolder"},
+        "id": 1,
+    }
+    try:
+        data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
+        value = data["result"]["value"]
+    except Exception:  # noqa: BLE001  any failure means "no folder", never an error
+        log.debug("Movie set folder setting unreadable", event="kodi.set_folder_unreadable")
+        return ""
+    return value if isinstance(value, str) else ""
 
 
 def get_movie_setid(movieid: int) -> int | None:
