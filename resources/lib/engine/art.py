@@ -124,7 +124,9 @@ def unwrap(value: Optional[str]) -> str:
         return text
     if text.startswith(_IMAGE_PREFIX):
         inner = text[len(_IMAGE_PREFIX):]
-        inner = inner.removesuffix("/")
+        # Not str.removesuffix: the official repository's checker assumes
+        # Kodi 21 may run Python 3.8.
+        inner = inner[:-1] if inner.endswith("/") else inner  # noqa: FURB188
         return urllib.parse.unquote(inner)
     return text
 

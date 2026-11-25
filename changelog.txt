@@ -13,6 +13,11 @@ Bug Fixes:
     the remote alone it runs at full speed. After Background, browsing
     the library pauses it the same way.
 
+Internal:
+  - No str.removesuffix() or removeprefix(), which Python 3.8 lacks; the
+    official repository's checker assumes Kodi 21 may run 3.8. A test
+    keeps them out.
+
 v1.3.0 (2026-11-24)
 -------------------
 New Features:
