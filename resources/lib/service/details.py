@@ -508,10 +508,15 @@ class DetailsSession:
         # alone are never scanned.
         managed = managed_fields(self.media_type, enabled, cert_usable, scan_identity) \
             if scan_identity else []
+        shown = _shown_fields(self.media_type, managed, fs_map, keep)
+        if "runtime" in shown:
+            # The item's runtime is the library's value; Kodi shows the
+            # file's length over it (kodi.file_runtime).
+            item["file_runtime"] = kodi.file_runtime(self.media_type, self.kodi_id)
         rows = build_rows(
             self.media_type, item, item_row, fs_map, keep, date.today().isoformat(),
             language=text_language,
-            fields=_shown_fields(self.media_type, managed, fs_map, keep),
+            fields=shown,
             managed=managed,
             cert_country_missing=certifications_on(self.media_type, enabled) and not cert_usable,
             threshold_days=settings["stale_threshold_days"],

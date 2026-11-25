@@ -287,6 +287,8 @@ def opened(tmp_path, monkeypatch):
     monkeypatch.setattr(details_model, "lang", lambda i: _PO_STRINGS.get(i, ""))
     monkeypatch.setattr(details, "notify", notes.append)
     monkeypatch.setattr(details.kodi, "get_item_by_id", get_item)
+    monkeypatch.setattr(details.kodi, "file_runtime",
+                        lambda media_type, kodi_id: calls.get("file_runtime"))
     monkeypatch.setattr(details, "_get_db_path", lambda: db_path)
     monkeypatch.setattr(details, "_get_sources_config_path", lambda: str(tmp_path / "s.json"))
     monkeypatch.setattr(details, "load_libraries", libraries)
@@ -335,6 +337,15 @@ def test_open_details_movie_shows_its_rows_and_writes_nothing(opened):
     tracker = TrackerDB(opened["db_path"])
     assert tracker._conn.execute("SELECT COUNT(*) FROM field_status").fetchone()[0] == before
     tracker.close()
+
+
+def test_open_details_runtime_is_the_file_length_kodi_shows(opened):
+    opened["calls"]["file_runtime"] = 3424
+    details.open_details("movie", "7")
+    _session, view = opened["shown"][0]
+    runtime = next(r for r in view.rows if r.key == "runtime")
+    assert dict(runtime.lines)[""] == "57 min"
+    assert runtime.group == "left"
 
 
 def test_open_details_episode_heading_and_folder_language(opened):

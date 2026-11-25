@@ -357,6 +357,30 @@ def get_episode_show_id(episodeid: int) -> int | None:
     return int(detail["tvshowid"])
 
 
+def file_runtime(media_type: MediaType, item_id: int) -> int | None:
+    """The runtime Kodi shows for a movie or episode when it is the video
+    file's own length, in seconds; None when Kodi shows the library's value
+    or the query fails.
+
+    Kodi keeps the library's runtime apart from the length it read from the
+    file and reports the file's, unless that is under 60% of the library's
+    (CVideoInfoTag::GetDuration). A listing without stream details carries
+    the library's value only, so this is asked per item; a runtime equal to
+    the file's length is the one Kodi shows.
+    """
+    detail = _details(media_type.kodi_get_method, media_type.kodi_id_field, item_id,
+                      media_type.kodi_detail_key, ["runtime", "streamdetails"])
+    if not detail:
+        return None
+    video = (detail.get("streamdetails") or {}).get("video") or []
+    try:
+        length = int(video[0].get("duration") or 0) if video else 0
+        shown = int(detail.get("runtime") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return length if length > 0 and shown == length else None
+
+
 def update_item(
     item_id: int,
     media_type: MediaType,

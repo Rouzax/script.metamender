@@ -12,6 +12,10 @@ Bug Fixes:
     pressing keys, so the next press reaches the window; when you leave
     the remote alone it runs at full speed. After Background, browsing
     the library pauses it the same way.
+  - Runtime is no longer written to a movie or episode whose video file
+    Kodi has read: Kodi shows the file's own length there, so the write
+    was never seen and only reloaded the list. Details says "video file"
+    for such a runtime.
 
 Internal:
   - No str.removesuffix() or removeprefix(), which Python 3.8 lacks; the

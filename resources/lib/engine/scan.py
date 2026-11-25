@@ -115,6 +115,7 @@ from resources.lib.data.sources import kodi_ui_language
 from resources.lib.data.tracker import (
     REASON_CHANGED_OUTSIDE,
     REASON_FILL_ONLY,
+    REASON_FROM_FILE,
     REASON_LOCAL_ART,
     REASON_LOCKED,
     REASON_NFO,
@@ -1968,6 +1969,15 @@ def run_scan(
             frozenset(missing),
         )
         stats["protected"] += len(extracted) - len(fields_to_write) - len(held)
+        # Kodi shows a video file's own length over the library's runtime, so
+        # a runtime written there would never be seen. The listing carries
+        # the library's value only, so the file is looked up before a write.
+        from_file: set[str] = set()
+        if "runtime" in fields_to_write and kodi.file_runtime(media_type, kodi_id):
+            del fields_to_write["runtime"]
+            from_file.add("runtime")
+            log.debug("Runtime left to the video file's length",
+                      event="scan.runtime_from_file", identity=identity)
 
         ratings_source: str | None = None
         ratings_votes: int | None = None
@@ -2102,7 +2112,7 @@ def run_scan(
                 # A certification is rechecked monthly at any age.
                 mature = f == "mpaa" or (age is not None and age >= threshold)
                 next_due = fallback_recheck_due(None if mature else next_due, today)
-            reason = _field_reason(
+            reason = REASON_FROM_FILE if f in from_file else _field_reason(
                 f, written, held, extracted, nfo_managed, item, cert_kept,
             )
             if reset and int(fs.get("fetch_count") or 0) > 0:
