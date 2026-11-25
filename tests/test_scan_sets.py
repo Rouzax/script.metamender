@@ -418,6 +418,20 @@ def test_member_collection_fetched_once(tmp_path, kodi_stubs, fake, tmdb_api):
     tracker.close()
 
 
+def test_stale_none_is_asked_again(tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    tmdb_api["member"].return_value = "10"
+    tracker = _make_tracker(tmp_path)
+    old = (date.today() - timedelta(days=200)).isoformat()
+    tracker.set_movie_collection("20352", "", old)
+    tracker.set_movie_collection("93456", "", date.today().isoformat())
+    _scan(tracker, _library())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == ["20352"]
+    assert tracker.get_movie_collection("20352") == "10"
+    assert tracker.get_movie_collection("93456") == ""
+    tracker.close()
+
+
 def test_transient_collection_lookup_leaves_clock_alone(tmp_path, kodi_stubs, fake, tmdb_api):
     _one_set(fake)
     tmdb_api["member"].side_effect = TransientProviderError("down")

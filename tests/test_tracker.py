@@ -1388,6 +1388,9 @@ def test_movie_collection_round_trip(tmp_path):
     db.set_movie_collection("603", "9999", "2026-11-08")
     db.commit()
     assert db.get_movie_collection("603") == "9999"
+    assert db.get_movie_collection_row("603") == {
+        "collection_id": "9999", "checked_on": "2026-11-08"}
+    assert db.get_movie_collection_row("1") is None
     db.close()
 
 

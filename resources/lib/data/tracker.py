@@ -1068,6 +1068,19 @@ class TrackerDB:
         ).fetchone()
         return None if row is None else row["collection_id"]
 
+    def get_movie_collection_row(self, tmdb_id: str) -> dict[str, str] | None:
+        """The stored collection answer of a movie with the date it was
+        asked (``collection_id`` "" for none, ``checked_on`` "" when never
+        dated), or None when TMDB has not been asked yet."""
+        row = self._conn.execute(
+            "SELECT collection_id, checked_on FROM movie_collections WHERE tmdb_id = ?",
+            (tmdb_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"collection_id": row["collection_id"] or "",
+                "checked_on": row["checked_on"] or ""}
+
     def set_movie_collection(self, tmdb_id: str, collection_id: str, checked_on: str) -> None:
         """Record a movie's TMDB collection, "" for none (no commit)."""
         try:

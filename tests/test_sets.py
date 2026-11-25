@@ -14,7 +14,9 @@ from resources.lib.engine.sets import (
     LEFT_OFF,
     LEFT_SHARED,
     LEFT_TIE_LIBRARY,
+    NONE_RECHECK_DAYS,
     Move,
+    collection_is_stale,
     describe_set,
     plan_sets,
     user_moved,
@@ -444,3 +446,19 @@ def test_describe_shared_set_names_the_managed_set(monkeypatch):
     plan = _describe(monkeypatch, [M(1, "Mine"), M(2, "Favourites")], members,
                      _StoredTracker(stored), 2)
     assert plan.reason == LEFT_SHARED and plan.managed_setid == 1
+
+
+def test_none_answer_rechecked_after_180_days():
+    assert NONE_RECHECK_DAYS == 180
+    today = "2026-11-25"
+    assert collection_is_stale({"collection_id": "", "checked_on": "2026-05-29"}, today)
+    assert not collection_is_stale({"collection_id": "", "checked_on": "2026-05-30"}, today)
+    assert collection_is_stale(None, today)
+    # A "none" without a date counts as stale.
+    assert collection_is_stale({"collection_id": "", "checked_on": ""}, today)
+
+
+def test_collection_answer_never_stale():
+    row = {"collection_id": "10", "checked_on": "2020-01-01"}
+    assert not collection_is_stale(row, "2026-11-25")
+    assert not collection_is_stale({"collection_id": "10", "checked_on": ""}, "2026-11-25")

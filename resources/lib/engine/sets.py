@@ -56,6 +56,10 @@ LEFT_NO_MAJORITY = "no_majority"    # no collection holds more than half the mem
 LEFT_DUPLICATE = "duplicate"        # a second set of a managed collection; merged
 LEFT_SHARED = "shared"              # a set of the user's own that shares a collection
 
+# A stored "in no collection" answer is asked again at this age: TMDB adds
+# movies to collections over time. An answer naming a collection is final.
+NONE_RECHECK_DAYS = 180
+
 _SETS_TOGGLE = "movie_sets"
 
 
@@ -356,38 +360,59 @@ def _ask_tmdb(ctx: _ScanCtx, fetch: Callable[[], Any], identity: str) -> Any:
     return _call_provider("tmdb", fetch, ctx, identity)
 
 
+def collection_is_stale(row: Optional[dict[str, str]], today: str) -> bool:
+    """Whether a movie's stored collection answer is to be asked again: it
+    was never asked, or it is "none" and undated or at least
+    NONE_RECHECK_DAYS old on ``today``."""
+    if row is None:
+        return True
+    if row.get("collection_id"):
+        return False
+    checked_on = row.get("checked_on") or ""
+    if not checked_on:
+        return True
+    try:
+        age = date.fromisoformat(today) - date.fromisoformat(checked_on)
+    except ValueError:
+        return True
+    return age.days >= NONE_RECHECK_DAYS
+
+
 def _member_collections(
-    ctx: _ScanCtx, members: list[dict[str, Any]], setids: set[int],
+    ctx: _ScanCtx, movies: list[dict[str, Any]], wanted: Callable[[dict[str, Any]], bool],
     libraries: LibraryConfig, today: str, stats: dict[str, Any],
 ) -> dict[str, str]:
-    """The stored TMDB collection of every counted member of ``setids``,
-    keyed on its TMDB id. A member without a stored answer is asked once
-    (/movie/{id}, no append) and the answer kept for good; one TMDB did not
-    answer is left out, so it counts for no collection this scan and can
-    only keep its set from being managed, never make it managed. It counts
-    in stats["transient"], so Update now says it could not check rather
-    than that the set is left alone."""
+    """The TMDB collection of every counted movie ``wanted`` accepts, keyed
+    on its TMDB id. A movie without a stored answer, or whose "none" is
+    NONE_RECHECK_DAYS old, is asked (/movie/{id}, no append) and the answer
+    kept; one TMDB did not answer is left out (a stale "none" stays as
+    stored and counts as "none"), so it counts for no collection this scan
+    and can only keep its set from being managed, never make it managed. It counts in
+    stats["transient"], so Update now says it could not check rather than
+    that the set is left alone."""
     collections: dict[str, str] = {}
-    for member in members:
-        if int(member.get("setid") or 0) not in setids:
+    for member in movies:
+        if not wanted(member):
             continue
         if libraries.included_for(str(member.get("file") or "")) is None:
             continue
         tmdb_id = extract_ids(member)[0]
         if not tmdb_id or tmdb_id in collections:
             continue
-        stored = ctx.tracker.get_movie_collection(tmdb_id)
-        if stored is None:
+        row = ctx.tracker.get_movie_collection_row(tmdb_id)
+        stored = None if row is None else row["collection_id"]
+        if collection_is_stale(row, today):
             answer = _ask_tmdb(
                 ctx, _collection_lookup(tmdb_id, ctx.tmdb_api_key),
                 compute_identity(member, MOVIE),
             )
             if answer is TRANSIENT:
                 stats["transient"] = stats.get("transient", 0) + 1
-                continue
-            stored = str(answer or "")
-            ctx.tracker.set_movie_collection(tmdb_id, stored, today)
-        collections[tmdb_id] = stored
+            else:
+                stored = str(answer or "")
+                ctx.tracker.set_movie_collection(tmdb_id, stored, today)
+        if stored is not None:
+            collections[tmdb_id] = stored
     return collections
 
 
@@ -627,7 +652,9 @@ def prepare_sets(
     # tie, no counted member, Movie sets not ticked) costs no TMDB request.
     probe, _ = plan_sets(kodi_sets, members, libraries, {}, {}, {}, {})
     asking = {p.setid for p in probe if p.reason == LEFT_NO_COLLECTION}
-    collections = _member_collections(ctx, members, asking, libraries, today, stats)
+    collections = _member_collections(
+        ctx, members, lambda m: int(m.get("setid") or 0) in asking, libraries, today, stats,
+    )
 
     holders, names, set_moves = _tracker_facts(tracker, members, collections)
     _lock_user_moves(tracker, members, set_moves)
