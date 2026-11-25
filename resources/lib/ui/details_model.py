@@ -25,6 +25,7 @@ from resources.lib.data.tracker import (
     REASON_NFO,
     REASON_NOTHING,
     REASON_OTHER_ART,
+    REASON_SET_FOLDER,
     REASON_UNCHANGED,
     REASON_UNCHECKED,
     REASON_UPDATED,
@@ -130,6 +131,7 @@ _WHY = {
     REASON_LOCAL_ART: 32730,
     REASON_OTHER_ART: 32731,
     REASON_CHANGED_OUTSIDE: 32732,
+    REASON_SET_FOLDER: 32787,
 }
 # A runtime Kodi takes from the video file: the hint and the Why line.
 _FROM_FILE_HINT = 32775
@@ -174,6 +176,9 @@ _SET_LEFT_ALONE = {
 _MOVED_HERE = 32771
 _MOVED_BY_METAMENDER = 32772
 _MOVED_BY_YOU = 32773
+# The same for a movie that was in no set: MetaMender added it.
+_ADDED_HERE = 32786
+_ADDED_BY_METAMENDER = 32785
 
 
 @dataclass
@@ -354,7 +359,7 @@ def _field_row(
     elif reason == REASON_UNCHECKED:
         group, hint, why = GROUP_WAITING, "", _WHY[REASON_UNCHECKED]
     elif settled or reason in (REASON_UNCHANGED, REASON_NFO, REASON_FILL_ONLY,
-                               REASON_LOCAL_ART, REASON_OTHER_ART):
+                               REASON_LOCAL_ART, REASON_OTHER_ART, REASON_SET_FOLDER):
         group = GROUP_LEFT
         why = _WHY.get(reason or "", 0)
         if settled and reason == REASON_NOTHING:
@@ -478,19 +483,24 @@ def _set_ids_lines(item: dict[str, Any], row: dict[str, Any]) -> list[tuple[str,
     if reason:
         lines.append(("", lang(reason).format(item.get("set_reason_name") or "")))
     for move in item.get("set_moves") or ():
-        lines.append(("", lang(_MOVED_HERE).format(
-            move.get("title") or "", move.get("from_name") or "",
-            long_date(move.get("moved_on")))))
+        title, moved_on = move.get("title") or "", long_date(move.get("moved_on"))
+        if move.get("from_name"):
+            lines.append(("", lang(_MOVED_HERE).format(title, move["from_name"], moved_on)))
+        else:
+            lines.append(("", lang(_ADDED_HERE).format(title, moved_on)))
     return lines
 
 
 def _movie_move_line(move: dict[str, Any]) -> tuple[str, str]:
     """A movie's set move, as the details session puts it on the item
-    (``set_move``): moved by MetaMender, or since put in ``set`` by the user."""
+    (``set_move``): moved or added by MetaMender, or since put in ``set`` by
+    the user. An empty ``from_name`` means the movie was in no set."""
     if move.get("user"):
         return "", lang(_MOVED_BY_YOU).format(move.get("set") or "")
-    return "", lang(_MOVED_BY_METAMENDER).format(
-        move.get("from_name") or "", long_date(move.get("moved_on")))
+    moved_on = long_date(move.get("moved_on"))
+    if not move.get("from_name"):
+        return "", lang(_ADDED_BY_METAMENDER).format(moved_on)
+    return "", lang(_MOVED_BY_METAMENDER).format(move["from_name"], moved_on)
 
 
 def _ids_row(media_type: MediaType, item: dict[str, Any],

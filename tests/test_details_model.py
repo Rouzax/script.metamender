@@ -696,6 +696,31 @@ def test_movie_ids_row_shows_its_move():
     assert ("", "Left in the set Favourites: you moved it there") in ids.lines
 
 
+def test_set_ids_row_lists_a_movie_added_to_it():
+    # A join has no set it came from: the line says added, not moved.
+    ids = _set_ids(collection_id="1001", set_moves=[
+        {"title": "Heat", "from_name": "", "moved_on": "2026-11-10"},
+    ])
+    assert ("", "Heat: added here on 10 Nov 2026") in ids.lines
+    assert not any("moved here" in text for _, text in ids.lines)
+
+
+def test_movie_ids_row_shows_it_was_added_to_its_set():
+    item = {"title": "Heat", "uniqueid": {"tmdb": "949"}}
+    move = {"user": False, "set": "Heat Collection", "from_name": "", "moved_on": "2026-11-10"}
+    ids = build_rows(MOVIE, dict(item, set_move=move), None, {}, {}, TODAY)[0]
+    assert ("", "Added to this set by MetaMender on 10 Nov 2026") in ids.lines
+    assert not any("from the set" in text for _, text in ids.lines)
+
+
+def test_set_name_kept_for_the_set_information_folder():
+    item = {"setid": 40, "title": "Heat Collection", "plot": "", "poster": ""}
+    fs_map = {"title": _fs("set_folder", next_retry="2026-11-19")}
+    title = _by_key(build_rows(SET, item, {"tmdb_id": "1001"}, fs_map, {}, TODAY))["title"]
+    assert title.group == "left"
+    assert dict(title.lines)["Why"] == "Named after your movie set information folder"
+
+
 def test_runtime_kodi_takes_from_the_file():
     # Kodi shows the file's 57 minutes over the 45 MetaMender wrote: the row
     # says what Kodi shows and that MetaMender leaves it.

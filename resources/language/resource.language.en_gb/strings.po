@@ -1742,3 +1742,15 @@ msgstr ""
 msgctxt "#32784"
 msgid "Fills clear logos, key art, landscape, banner, clear art and character art."
 msgstr ""
+
+msgctxt "#32785"
+msgid "Added to this set by MetaMender on {}"
+msgstr ""
+
+msgctxt "#32786"
+msgid "{}: added here on {}"
+msgstr ""
+
+msgctxt "#32787"
+msgid "Named after your movie set information folder"
+msgstr ""
