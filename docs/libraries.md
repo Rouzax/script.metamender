@@ -64,7 +64,7 @@ on a library's page only returns to the list.
 
 ## A library's page
 
-![The page of a library with nothing switched on yet](screenshots/setup/setup-library-page-new.png)
+![The page of a TV shows library with nothing switched on yet](screenshots/setup/setup-library-page-new.png)
 
 The page holds every choice for one library, in groups. The first two groups,
 **Language** and **What to fill**, are always there; the others appear only
