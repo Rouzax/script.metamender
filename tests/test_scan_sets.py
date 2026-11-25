@@ -16,7 +16,7 @@ from resources.lib.data.libraries import ART_SOURCE_FANART, Library, LibraryConf
 from resources.lib.data.localart import EXISTS
 from resources.lib.data.media_types import MOVIE, SET
 from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
-from resources.lib.data.tracker import REASON_CHANGED_OUTSIDE
+from resources.lib.data.tracker import REASON_CHANGED_OUTSIDE, REASON_SET_FOLDER
 from resources.lib.engine import sets
 from resources.lib.engine.art import Poster
 from resources.lib.engine.scan import run_scan
@@ -246,6 +246,61 @@ def test_set_name_changed_outside_is_locked(tmp_path, kodi_stubs, fake, tmdb_api
     assert "title" not in _set_write(fake)
     assert "title" in tracker.locked_fields("set", IDENTITY)
     assert _fs(tracker)["title"]["last_reason"] == REASON_CHANGED_OUTSIDE
+    tracker.close()
+
+
+def _folders(tmp_path, monkeypatch, kodi_stubs, fake, *names):
+    monkeypatch.setattr(setfolder, "xbmcvfs", kodi_stubs["xbmcvfs"])
+    root = tmp_path / "MovieSets"
+    root.mkdir()
+    for name in names:
+        (root / name).mkdir()
+    fake.set_folder = str(root)
+
+
+def test_set_keeps_the_name_its_information_folder_has(
+        tmp_path, kodi_stubs, fake, tmdb_api, monkeypatch):
+    _folders(tmp_path, monkeypatch, kodi_stubs, fake, EN_NAME)
+    _one_set(fake)
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    write = _set_write(fake)
+    assert "title" not in write
+    assert write["plot"] == NL_PLOT
+    assert fake.sets[1]["title"] == EN_NAME
+    assert _fs(tracker)["title"]["last_reason"] == REASON_SET_FOLDER
+    assert "title" not in tracker.locked_fields("set", IDENTITY)
+    _make_due(tracker)
+    fake.update.reset_mock()
+    _scan(tracker, _library())
+    assert "title" not in _set_write(fake)
+    assert _fs(tracker)["title"]["last_reason"] == REASON_SET_FOLDER
+    tracker.close()
+
+
+def test_set_takes_the_tmdb_name_its_information_folder_has(
+        tmp_path, kodi_stubs, fake, tmdb_api, monkeypatch):
+    _folders(tmp_path, monkeypatch, kodi_stubs, fake, "Alien - Filmreihe")
+    _one_set(fake, title="Alien Collection")
+    tmdb_api["collection"].return_value = _collection(
+        names={"en": "Alien Collection", "nl-NL": NL_NAME, "nl": NL_NAME,
+               "de": "Alien - Filmreihe"})
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert _set_write(fake)["title"] == "Alien - Filmreihe"
+    tracker.close()
+
+
+@pytest.mark.parametrize("folder_state", ["unset", "error"])
+def test_set_renamed_when_no_folder_applies(
+        tmp_path, kodi_stubs, fake, tmdb_api, monkeypatch, folder_state):
+    if folder_state == "error":
+        _folders(tmp_path, monkeypatch, kodi_stubs, fake, EN_NAME)
+        kodi_stubs["xbmcvfs"].exists = MagicMock(side_effect=OSError("down"))
+    _one_set(fake)
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert _set_write(fake)["title"] == NL_NAME
     tracker.close()
 
 

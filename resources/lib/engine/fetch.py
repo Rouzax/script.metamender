@@ -12,6 +12,7 @@ from typing import Any
 from resources.lib.constants import (
     PROVIDER_CIRCUIT_BREAKER_THRESHOLD,
 )
+from resources.lib.data.setfolder import folder_for
 from resources.lib.engine.art import drop_show_copies
 from resources.lib.engine.chain import TRANSIENT
 from resources.lib.engine.ids import (
@@ -383,6 +384,11 @@ def _fetch_set(
             names = answer.get("names") or {}
             plots = answer.get("plots") or {}
             name, from_fallback = pick_set_name(names, language, fallback_lang or None)
+            if name and ctx.set_folder:
+                # Kodi's set art picker and Export library look for the
+                # set's folder by its name, so a name that has one wins.
+                others = [n for n in dict.fromkeys(names.values()) if n and n != name]
+                name = folder_for(ctx.set_folder, [name] + others) or name
             data = {
                 "title": name,
                 "title_from_fallback": from_fallback,

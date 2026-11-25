@@ -111,6 +111,7 @@ from resources.lib.data.localart import EXISTS, MISSING, local_art_state
 from resources.lib.data.media_types import SEASON, SET, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import load_preset
+from resources.lib.data.setfolder import folder_for
 from resources.lib.data.sources import kodi_ui_language
 from resources.lib.data.tracker import (
     REASON_CHANGED_OUTSIDE,
@@ -121,6 +122,7 @@ from resources.lib.data.tracker import (
     REASON_NFO,
     REASON_NOTHING,
     REASON_OTHER_ART,
+    REASON_SET_FOLDER,
     REASON_UNCHANGED,
     REASON_UNCHECKED,
     REASON_UPDATED,
@@ -755,6 +757,7 @@ def _gate_art(
     fs_map: dict[str, dict[str, Any]],
     decisions: dict[str, str],
     missing: set[str],
+    set_folder: str = "",
 ) -> None:
     """Take the art fields MetaMender may not touch out of ``decisions``
     (art.art_gate) before anything is fetched, and record why. A field in
@@ -776,7 +779,7 @@ def _gate_art(
         return
     keep = tracker.get_keep(media_type, identity)
     if name:
-        _gate_set_name(tracker, identity, item, fs_map, decisions, keep)
+        _gate_set_name(tracker, identity, item, fs_map, decisions, keep, set_folder)
     for f in gated:
         current = kodi_form(item.get(f) or "")
         current_fp = fingerprint(current)
@@ -808,9 +811,12 @@ def _gate_set_name(
     fs_map: dict[str, dict[str, Any]],
     decisions: dict[str, str],
     keep: dict[str, dict[str, Any]],
+    set_folder: str = "",
 ) -> None:
     """_gate_art's rule for a movie set's name: a name changed outside
-    MetaMender since its first look is the user's, locked for good."""
+    MetaMender since its first look is the user's, locked for good. A name
+    that has a subfolder in the movie set information folder is kept too,
+    but not locked: the set follows TMDB again once the folder is gone."""
     current = kodi_form(item.get("title") or "")
     current_fp = fingerprint(current)
     first_fp = tracker.get_first_fp(SET.name, identity, "title")
@@ -820,6 +826,11 @@ def _gate_set_name(
     written_fp = ((keep.get("title") or {}).get("written_fp")
                   or (fs_map.get("title") or {}).get("written_value"))
     if name_gate(current_fp, first_fp, written_fp) is None:
+        if current and folder_for(set_folder, [current]) == current:
+            del decisions["title"]
+            _art_reason(tracker, SET.name, identity, "title", fs_map, REASON_SET_FOLDER)
+            log.debug("Set name left as it is", event="scan.art_gated",
+                      identity=identity, field="title", verdict=REASON_SET_FOLDER)
         return
     del decisions["title"]
     tracker.set_locked(SET.name, identity, "title", True)
@@ -1823,7 +1834,8 @@ def run_scan(
                 stats["transient"] += 1
                 _art_reason(tracker, media_type.name, identity, f, fs_map, REASON_UNCHECKED)
 
-        _gate_art(tracker, media_type.name, identity, item, fs_map, decisions, missing)
+        _gate_art(tracker, media_type.name, identity, item, fs_map, decisions, missing,
+                  ctx.set_folder)
         _drop_protected_art(tracker, media_type.name, identity, item, fs_map, decisions,
                             fill_only, REASON_FILL_ONLY, missing)
         due = any(d == FETCH_NOW for d in decisions.values())
