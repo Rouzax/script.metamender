@@ -64,7 +64,7 @@ page.
 | Genre | Movies, shows | TMDB, library language | Replaces a different genre list. |
 | Director, writer | Movies, episodes | TMDB | Replaces a different value. |
 | Studio, country | Movies | TMDB | Replaces a different value. |
-| Runtime | Movies, episodes | TMDB | Replaces a different value. |
+| Runtime | Movies, episodes | TMDB | Replaces a different value, unless Kodi shows the video file's own length: then the runtime is left alone. Kodi shows the file's length once it has read it, so a runtime written there would never be seen. |
 | First aired | Episodes | TMDB | Replaces a different date. |
 | Trailer | Movies | TMDB | Replaces a different link. |
 | Poster | Movies, shows, seasons | TMDB and fanart.tv (order: **Art source**): library language, then fallback, then a poster without text, then English for an empty poster only; see [Art](libraries.md#art) | Fills an empty or broken poster, and one whose local file was deleted. Replaces a poster from TMDB or fanart.tv when a better one clearly leads; never a local file that exists, a poster from another website, or one changed outside MetaMender. See [Art and episode thumbs](libraries.md#art-and-episode-thumbs). |

@@ -79,6 +79,13 @@ def display_path(path: str) -> str:
     return _URL_CREDENTIALS.sub(r"\1", path)
 
 
+def remove_suffix(text: str, suffix: str) -> str:
+    """``str.removesuffix``, which Python 3.8 lacks."""
+    if suffix and text.endswith(suffix):
+        return text[:-len(suffix)]
+    return text
+
+
 def is_empty(value: Any) -> bool:
     """Whether a value is effectively empty (None, "", 0, 0.0, or [])."""
     if value is None:

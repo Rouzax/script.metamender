@@ -49,6 +49,7 @@ REASON_LOCKED = "locked"        # the user locked the field
 REASON_LOCAL_ART = "local_art"  # the art is a local file, never replaced
 REASON_OTHER_ART = "other_art"  # the art came from a scraper or the user, not MetaMender
 REASON_CHANGED_OUTSIDE = "changed_outside"  # the art changed outside MetaMender; locked
+REASON_FROM_FILE = "from_file"  # Kodi shows the video file's own length as the runtime
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS items (

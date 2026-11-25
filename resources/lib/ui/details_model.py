@@ -19,6 +19,7 @@ from resources.lib.data.media_types import MediaType
 from resources.lib.data.tracker import (
     REASON_CHANGED_OUTSIDE,
     REASON_FILL_ONLY,
+    REASON_FROM_FILE,
     REASON_LOCAL_ART,
     REASON_LOCKED,
     REASON_NFO,
@@ -69,7 +70,7 @@ from resources.lib.engine.sets import (
     LEFT_TIE_LIBRARY,
 )
 from resources.lib.service.details import can_restore
-from resources.lib.utils import is_empty, lang
+from resources.lib.utils import is_empty, lang, remove_suffix
 
 GROUP_UPDATED = "updated"
 GROUP_LEFT = "left"
@@ -130,6 +131,9 @@ _WHY = {
     REASON_OTHER_ART: 32731,
     REASON_CHANGED_OUTSIDE: 32732,
 }
+# A runtime Kodi takes from the video file: the hint and the Why line.
+_FROM_FILE_HINT = 32775
+_FROM_FILE_WHY = 32776
 # What the art in a slot is, as the Details value line says it (never a URL).
 _ART_TEXT = {
     EMPTY: 32721, FRAME_GRAB: 32722, BROKEN: 32723, WEB_TMDB: 32724,
@@ -220,7 +224,7 @@ def _parse(iso: str | None) -> date | None:
 def _source_name(source: str | None) -> str:
     if not source:
         return ""
-    source = source.removesuffix(TEXTLESS_SOURCE_SUFFIX).removesuffix(ENGLISH_SOURCE_SUFFIX)
+    source = remove_suffix(remove_suffix(source, TEXTLESS_SOURCE_SUFFIX), ENGLISH_SOURCE_SUFFIX)
     if source == _SCRAPER_SOURCE:
         return lang(32534)
     if source.startswith("tmdb-"):
@@ -320,6 +324,15 @@ def _field_row(
     # holds the restored original, so this wins over "changed".
     unlocked = reason in (REASON_LOCKED, REASON_CHANGED_OUTSIDE) and not locked
 
+    # Kodi shows the video file's own length over the library's runtime
+    # (kodi.file_runtime), so MetaMender never writes it there and the row
+    # has no source, original or next check of its own.
+    if not locked and field == "runtime" and (
+            item.get("file_runtime") or reason == REASON_FROM_FILE):
+        shown = {"runtime": item.get("file_runtime") or current}
+        return DetailRow(field, label, GROUP_LEFT, lang(_FROM_FILE_HINT), label,
+                         [("", _value_text(field, shown)), (lang(32531), lang(_FROM_FILE_WHY))],
+                         "", False)
     if locked:
         group, hint = GROUP_LEFT, lang(32548)
         why = _WHY[REASON_CHANGED_OUTSIDE if reason == REASON_CHANGED_OUTSIDE

@@ -4,7 +4,9 @@ OSMC's Kodi 21 (Debian 11) runs Python 3.9, so the oldest Python the add-on
 meets is older than the one the tests run on. These checks catch what 3.9
 rejects without needing a 3.9 interpreter: syntax newer than 3.9, and a
 `X | Y` type union evaluated at runtime. Annotations are fine, because every
-module defers them with `from __future__ import annotations`.
+module defers them with `from __future__ import annotations`. The official
+repository's checker also assumes Kodi 21 may run Python 3.8, so the str
+methods 3.9 added are kept out too.
 """
 from __future__ import annotations
 
@@ -63,6 +65,23 @@ def runtime_unions(source: str) -> list[int]:
     )
 
 
+# str methods added in Python 3.9; utils.remove_suffix covers removesuffix.
+_PY39_STR_METHODS = {"removeprefix", "removesuffix"}
+
+
+def py39_str_calls(source: str) -> list[int]:
+    """Line numbers of calls to a str method that Python 3.8 lacks."""
+    return sorted(
+        node.lineno for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr in _PY39_STR_METHODS
+    )
+
+
+def test_finds_a_py39_str_method() -> None:
+    assert py39_str_calls("x = 'a/'.removesuffix('/')\ny = x.removeprefix('a')\n") == [1, 2]
+
+
 def test_finds_a_runtime_union() -> None:
     assert runtime_unions("from __future__ import annotations\nA = tuple[int | None, str]\n") == [2]
 
@@ -86,3 +105,8 @@ def test_parses_as_python_3_9(path: Path) -> None:
 @pytest.mark.parametrize("path", SHIPPED, ids=lambda p: str(p.relative_to(ROOT)))
 def test_no_runtime_type_union(path: Path) -> None:
     assert runtime_unions(path.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("path", SHIPPED, ids=lambda p: str(p.relative_to(ROOT)))
+def test_no_py39_str_method(path: Path) -> None:
+    assert py39_str_calls(path.read_text(encoding="utf-8")) == []

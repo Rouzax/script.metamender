@@ -26,6 +26,8 @@ def _make_xbmc_stub() -> MagicMock:
     stub.log = MagicMock()
     stub.executeJSONRPC = MagicMock(return_value="{}")
     stub.getCondVisibility = MagicMock(return_value=False)
+    # Nobody at the remote for an hour: no browse hold unless a test says so.
+    stub.getGlobalIdleTime = MagicMock(return_value=3600)
     stub.Monitor = MagicMock
 
     class FakeMonitor:
