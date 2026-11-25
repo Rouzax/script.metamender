@@ -36,3 +36,14 @@ def test_folder_for_none(kodi_stubs, monkeypatch):
     assert folder_for("smb://nas/sets", ["Alien Collection"]) is None
     kodi_stubs["xbmcvfs"].exists = MagicMock(side_effect=OSError("down"))
     assert folder_for("smb://nas/sets", ["Alien Collection"]) is None
+
+
+def test_folder_for_windows_root_joins_with_backslashes(kodi_stubs, monkeypatch):
+    _exists_only(kodi_stubs, "D:\\Sets\\Star Wars_ Saga\\", monkeypatch=monkeypatch)
+    assert folder_for("D:\\Sets\\", ["Star Wars: Saga"]) == "Star Wars: Saga"
+    assert folder_for("D:\\Sets", ["Star Wars: Saga"]) == "Star Wars: Saga"
+
+
+def test_folder_for_mixed_root_joins_with_slashes(kodi_stubs, monkeypatch):
+    _exists_only(kodi_stubs, "smb://nas/a\\b/Alien Collection/", monkeypatch=monkeypatch)
+    assert folder_for("smb://nas/a\\b/", ["Alien Collection"]) == "Alien Collection"

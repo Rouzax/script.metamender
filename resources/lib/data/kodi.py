@@ -225,6 +225,8 @@ def movie_set_folder() -> str:
         data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
         value = data["result"]["value"]
     except Exception:  # noqa: BLE001  any failure means "no folder", never an error
+        # DEBUG, not an error: the folder is optional, and an unreadable
+        # setting only means set names are not matched to folders this scan.
         log.debug("Movie set folder setting unreadable", event="kodi.set_folder_unreadable")
         return ""
     return value if isinstance(value, str) else ""
