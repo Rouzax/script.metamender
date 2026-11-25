@@ -597,7 +597,12 @@ Where the movie goes:
   movie, named as under [Name](#name) for the movie's library, and gives it
   its plot and art in the same scan. Other movies of that collection join
   the same set. A collection gets a set even when you have only one of its
-  movies, as your scraper does.
+  movies, as your scraper does. Before it creates a set, MetaMender asks
+  TMDB once about every movie in a set that it has no answer for, in any
+  library, also one you left out, so it never creates a set beside one you
+  keep there. If TMDB does not answer for a movie in a set, no set is
+  created in that scan; movies still join sets that already exist, and
+  the set is created at a later scan.
 - **The collection has a set MetaMender leaves alone**, such as a set you
   called "Favourites" that holds one of its movies, or a set that follows a
   library without **Movie sets** ticked: the movie stays in no set.
@@ -609,14 +614,22 @@ What stays as it is:
 - **A movie in another set** stays there, also when that is a set you made,
   such as "Favourites".
 - **A movie in no TMDB collection** stays in no set.
-- **A movie you take out of its set stays out.** To undo an addition, use
-  Kodi's **Remove from set** on the movie, or put it in another set;
-  MetaMender never adds that movie again. There is no **Restore original**
-  for the set a movie is in. A movie you refresh in Kodi is a new entry to
-  Kodi, so it may be added once more.
-- **A movie you took out of a set before you ticked Movie sets** looks the
-  same as one the scraper never put in a set, so MetaMender adds it once.
-  Take it out again and it stays out.
+- **A movie you take out of its set stays out.** At every scan MetaMender
+  notes which movies are in the sets it looks after. A movie it saw in such
+  a set and later finds in no set was taken out by you, so MetaMender never
+  adds it to a set again, also after you refresh it in Kodi. This holds
+  whoever put the movie in the set, and also when you remove a whole set:
+  each of its movies stays in no set. To undo an addition, use Kodi's
+  **Remove from set** on the movie, or put it in another set. There is no
+  **Restore original** for the set a movie is in.
+- **A movie MetaMender never saw in a set it looks after** looks the same
+  as one the scraper never put in a set, so MetaMender adds it once. That
+  is a movie you took out of its set before this version of MetaMender
+  first scanned the set, before you ticked **Movie sets**, or out of a set
+  MetaMender leaves alone. Take it out again and it stays out.
+- **A movie Kodi drops from its set when you refresh it**, for example
+  because its NFO file names no set, is a new entry to Kodi that you did
+  not take out, so MetaMender adds it again.
 
 When Kodi could mistake the set's name for the name of another set (Kodi
 matches set names without regard to upper and lower case), MetaMender does

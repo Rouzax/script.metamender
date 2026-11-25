@@ -1026,3 +1026,223 @@ def test_update_now_on_a_set_joins_only_its_collection(tmp_path, kodi_stubs, fak
     assert stats["joined"] == 1 and stats["sets_created"] == 0
     assert stats["processed"] == 1
     tracker.close()
+
+
+def _member_answers(timeouts: set[str], answer: str = "86066"):
+    """A movie collection lookup that times out for ``timeouts`` and names
+    ``answer`` for every other movie."""
+    def lookup(tmdb_id, _key):
+        if tmdb_id in timeouts:
+            raise TransientProviderError("timeout")
+        return answer
+    return lookup
+
+
+def test_no_set_is_created_while_a_set_member_lookup_timed_out(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """The member of the user's set "Mine" may be of the collection: a set
+    made beside it could not be taken back."""
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555")
+    fake.add_movie(1, 0, "20352")
+    tmdb_api["member"].side_effect = _member_answers({"555"})
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == ["555", "20352"]
+    assert _movie_moves(fake) == []
+    assert list(fake.sets) == [9]
+    assert stats["sets_created"] == 0 and stats["transient"] == 1
+    assert tracker.get_set_move("tmdb:20352") is None
+    tracker.close()
+
+
+def test_joins_into_a_managed_set_run_while_a_set_member_lookup_timed_out(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555")
+    fake.add_movie(3, 0, "211672")
+    tmdb_api["member"].side_effect = _member_answers({"555"})
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library())
+    assert _movie_moves(fake) == [(3, EN_NAME)]
+    assert stats["joined"] == 1 and stats["sets_created"] == 0
+    tracker.close()
+
+
+def _ticked_and_unticked() -> LibraryConfig:
+    return LibraryConfig([
+        Library(path=LIB, label="Kids", included=True, language="nl-NL",
+                fallback_language="", toggles=frozenset({"movie_sets"})),
+        Library(path=OTHER, label="Mine", included=True, language="nl-NL",
+                fallback_language="", toggles=frozenset()),
+    ])
+
+
+OTHER = "smb://nas/Other/"
+
+
+def test_set_member_without_an_answer_is_asked_before_a_set_is_created(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """A set the user keeps in a library without Movie sets ticked: its
+    member was never asked about, so it is asked before a set is made."""
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555", premiered="2001-01-01", lib=OTHER)
+    fake.add_movie(1, 0, "20352")
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _ticked_and_unticked())
+    assert sorted(c.args[0] for c in tmdb_api["member"].call_args_list) == ["20352", "555"]
+    assert tracker.get_movie_collection("555") == "86066"
+    assert _movie_moves(fake) == []
+    assert list(fake.sets) == [9]
+    assert stats["sets_created"] == 0
+    tmdb_api["collection"].assert_not_called()
+    tracker.close()
+
+
+def test_set_member_asked_before_a_creation_is_asked_once(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """A member of no collection is stored for good: the next scan does not
+    ask about it again and the set is made."""
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555", lib=OTHER)
+    fake.add_movie(1, 0, "20352")
+    tmdb_api["member"].side_effect = lambda tmdb_id, _key: "" if tmdb_id == "555" else "86066"
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _ticked_and_unticked())
+    assert tracker.get_movie_collection("555") == ""
+    assert _movie_moves(fake) == [(1, NL_NAME)]
+    tmdb_api["member"].reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _ticked_and_unticked())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == []
+    tracker.close()
+
+
+def test_creation_waits_when_the_asked_set_member_times_out(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555", lib=OTHER)
+    fake.add_movie(1, 0, "20352")
+    tmdb_api["member"].side_effect = _member_answers({"555"})
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _ticked_and_unticked())
+    assert _movie_moves(fake) == []
+    assert stats["transient"] == 1
+    assert tracker.get_movie_collection("555") is None
+    tracker.close()
+
+
+def test_movie_taken_out_of_a_set_seen_before_stays_out(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """The user put the movie in the set and MetaMender never moved it:
+    seen in the managed set, then in no set, it was taken out by the user."""
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    fake.movies[3]["setid"] = 0
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert fake.movies[3]["setid"] == 0
+    assert tracker.get_set_seen("tmdb:211672")["locked"] == 1
+    # Kodi re-adding it (a new movieid) does not undo the user's choice.
+    del fake.movies[3]
+    fake.add_movie(30, 0, "211672")
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    tracker.close()
+
+
+def test_movie_readded_by_kodi_out_of_a_seen_set_may_join(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    # A refresh: Kodi deletes the movie and adds it again in no set.
+    del fake.movies[3]
+    fake.add_movie(30, 0, "211672")
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == [(30, NL_NAME)]
+    assert fake.movies[30]["setid"] == 1
+    tracker.close()
+
+
+def test_movie_never_seen_in_a_set_joins(tmp_path, kodi_stubs, fake, tmdb_api):
+    """A removal made before any scan recorded the set cannot be known."""
+    _one_set(fake)
+    fake.add_movie(3, 0, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == [(3, EN_NAME)]
+    tracker.close()
+
+
+def test_misfiled_join_puts_back_the_plot_of_the_set_it_landed_in(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_set(5, "Other", "Other plot")
+    fake.add_movie(3, 0, "211672")
+    fake.file_into = 5
+    real = fake.update.side_effect
+
+    def overwrite_plot(item_id, media_type, log_title="", **fields):
+        done = real(item_id, media_type, log_title, **fields)
+        if media_type is MOVIE and fields.get("set"):
+            fake.sets[5]["plot"] = ""
+        return done
+    fake.update.side_effect = overwrite_plot
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert fake.sets[5]["plot"] == "Other plot"
+    assert _set_write(fake, 5) == {"plot": "Other plot"}
+    tracker.close()
+
+
+def test_misfiled_creation_writes_no_further_movie_of_the_collection(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_set(5, "Other")
+    fake.add_movie(1, 0, "20352")
+    fake.add_movie(2, 0, "93456")
+    fake.file_into = 5
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library())
+    assert _movie_moves(fake) == [(1, NL_NAME), (1, "")]
+    assert fake.movies[2]["setid"] == 0
+    assert stats["joined"] == 0
+    tracker.close()
+
+
+def test_join_into_a_set_kodi_no_longer_lists_is_skipped(tmp_path, kodi_stubs, fake):
+    tracker = _make_tracker(tmp_path)
+    ctx = MagicMock(tracker=tracker)
+    join = sets.Join(movieid=3, identity="tmdb:3", title="Film 3", collection_id="86066",
+                     to_setid=42, file=LIB + "film3/film.mkv")
+    done, stopped = sets._join_movies(ctx, [join], {}, {}, _library(), "2026-11-26", {},
+                                      lambda: True)
+    assert (done, stopped) == ({}, False)
+    fake.update.assert_not_called()
+    tracker.close()
+
+
+def test_movies_of_a_set_the_user_removed_stay_out(tmp_path, kodi_stubs, fake, tmdb_api):
+    """Removing a set in Kodi leaves its movies in no set, as the same
+    entries: each was taken out by the user."""
+    _one_set(fake)
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    del fake.sets[1]
+    for movie in fake.movies.values():
+        movie["setid"] = 0
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert fake.sets == {}
+    tracker.close()

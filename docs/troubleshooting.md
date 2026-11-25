@@ -266,15 +266,22 @@ MetaMender adds a movie in no set to its collection's set at the next scan
   library or folder is left out.
 - **TMDB lists it in no collection.** MetaMender asks again once that answer
   is 180 days old.
-- **You took it out of the set**, or put it in another set, after MetaMender
-  added or moved it. MetaMender respects that for good.
+- **You took it out of the set**, or put it in another set, after
+  MetaMender saw it in a set it looks after, or added or moved it.
+  MetaMender respects that for good, also after you refresh the movie in
+  Kodi. A movie you took out before MetaMender first saw it in the set is
+  added once; take it out again and it stays out (see
+  [Movies in no set](libraries.md#movies-in-no-set)).
 - **The collection's set is one MetaMender leaves alone**, such as a set of
   your own that holds movies of several collections; the Details window of
   that set says why (see
   [A movie set was left alone](#a-movie-set-was-left-alone)). MetaMender
   does not create a second set beside it.
 - **TMDB did not answer**, or Kodi could mistake the set's name for another
-  set's. MetaMender tries again at the next scan.
+  set's. MetaMender tries again at the next scan. No set is created in a
+  scan in which TMDB did not answer for a movie that is in a set, in any
+  library, so a set that has to be created waits while TMDB is not
+  answering.
 - **You used Update now on the movie.** That does not add it to a set; the
   next scan does.
 

@@ -28,7 +28,7 @@ Logging:
         - sets.joined (INFO): a movie in no set added to its collection's
           set (movie, set, setid, created: whether the write made the set)
         - sets.join_skipped (DEBUG): a join not written this scan, with a
-          reason (name_collision, has_set, no_name)
+          reason (name_collision, has_set, no_name, member_unchecked)
         - sets.plot_restored (INFO): a move made Kodi overwrite the managed
           set's plot with the old set's, and it was put back
         - sets.left_alone (DEBUG): a set the pass does not scan, with the
@@ -493,10 +493,12 @@ def collection_is_stale(row: Optional[dict[str, str]], today: str) -> bool:
 def _member_collections(
     ctx: _ScanCtx, movies: list[dict[str, Any]], wanted: Callable[[dict[str, Any]], bool],
     libraries: LibraryConfig, today: str, stats: dict[str, Any],
-    stop: Callable[[], bool],
-) -> tuple[dict[str, str], bool]:
-    """The TMDB collection of every counted movie ``wanted`` accepts, keyed
-    on its TMDB id, and whether ``stop`` ended the lookups.
+    stop: Callable[[], bool], counted_only: bool = True,
+) -> tuple[dict[str, str], bool, bool]:
+    """The TMDB collection of every movie ``wanted`` accepts, keyed on its
+    TMDB id; whether ``stop`` ended the lookups; and whether TMDB left any
+    of them unanswered. Only counted movies are looked at unless
+    ``counted_only`` is False.
 
     A movie without a stored answer, or whose "none" is NONE_RECHECK_DAYS
     old, is asked (/movie/{id}, no append) and the answer kept; one TMDB did
@@ -508,10 +510,11 @@ def _member_collections(
     scan can ask about every movie in no set, so shutdown and Stop scan
     must be able to end it. The answers already received stay recorded."""
     collections: dict[str, str] = {}
+    unanswered = False
     for member in movies:
         if not wanted(member):
             continue
-        if libraries.included_for(str(member.get("file") or "")) is None:
+        if counted_only and libraries.included_for(str(member.get("file") or "")) is None:
             continue
         tmdb_id = extract_ids(member)[0]
         if not tmdb_id or tmdb_id in collections:
@@ -520,19 +523,20 @@ def _member_collections(
         stored = None if row is None else row["collection_id"]
         if collection_is_stale(row, today):
             if stop():
-                return collections, True
+                return collections, True, unanswered
             answer = _ask_tmdb(
                 ctx, _collection_lookup(tmdb_id, ctx.tmdb_api_key),
                 compute_identity(member, MOVIE),
             )
             if answer is TRANSIENT:
                 stats["transient"] = stats.get("transient", 0) + 1
+                unanswered = True
             else:
                 stored = str(answer or "")
                 ctx.tracker.set_movie_collection(tmdb_id, stored, today)
         if stored is not None:
             collections[tmdb_id] = stored
-    return collections, False
+    return collections, False, unanswered
 
 
 def _collection_lookup(tmdb_id: str, api_key: str) -> Callable[[], Any]:
@@ -578,15 +582,29 @@ def _lock_user_moves(
     tracker: Any, movies: list[dict[str, Any]], set_moves: dict[str, dict[str, Any]],
 ) -> None:
     """Lock, for good, the recorded move or join of every listed movie the
-    user has since put in another set or taken out of its set."""
+    user has since put in another set or taken out of its set. A movie in no
+    set that the set pass last saw in a managed set under the same movieid
+    was taken out by the user too, whoever put it there: its sighting is
+    locked, and its entry in ``set_moves`` reads as locked, so it never
+    joins a set again."""
     for movie in movies:
         identity = compute_identity(movie, MOVIE)
+        movieid = int(movie.get("movieid") or 0)
+        setid = int(movie.get("setid") or 0)
         move = set_moves.get(identity)
-        if move is None or move.get("locked"):
-            continue
-        if user_moved(move, int(movie.get("movieid") or 0), int(movie.get("setid") or 0)):
+        if move is not None and not move.get("locked") and user_moved(move, movieid, setid):
             tracker.lock_set_move(identity)
-            set_moves[identity] = dict(move, locked=1)
+            set_moves[identity] = move = dict(move, locked=1)
+        if setid or (move is not None and move.get("locked")):
+            continue
+        seen = tracker.get_set_seen(identity)
+        if seen is None:
+            continue
+        if not seen.get("locked"):
+            if int(seen.get("kodi_id") or 0) != movieid or not int(seen.get("setid") or 0):
+                continue
+            tracker.lock_set_seen(identity)
+        set_moves[identity] = dict(move or {}, locked=1)
 
 
 def _target_setid(plans: list[SetPlan], only_setid: Optional[int]) -> Optional[int]:
@@ -748,8 +766,11 @@ def _join_movies(
             if name is None:
                 continue
         else:
-            name = next(str(s.get("title") or "") for s in listed
-                        if int(s.get("setid") or 0) == target)
+            found = next((str(s.get("title") or "") for s in listed
+                          if int(s.get("setid") or 0) == target), None)
+            if found is None:
+                continue
+            name = found
         if name_collides(name, listed, target):
             log.debug("Movie not added to its collection's set", event="sets.join_skipped",
                       movie=join.title, set=name, reason="name_collision")
@@ -758,9 +779,11 @@ def _join_movies(
             return done, True
         ok = kodi.update_item(join.movieid, MOVIE, join.title, set=name)
         landed = kodi.get_movie_setid(join.movieid) if ok else None
-        if target in kodi_sets:
-            # A refused or misfiled join may still have run AddSet on the set.
-            kodi_sets[target]["plot"] = _restore_plot(kodi_sets[target])
+        # A refused or misfiled join may still have run AddSet on the set it
+        # was meant for and on the set it landed in.
+        for touched in dict.fromkeys((target, landed)):
+            if touched in kodi_sets:
+                kodi_sets[touched]["plot"] = _restore_plot(kodi_sets[touched])
         if target is not None:
             good = landed == target
         else:
@@ -773,6 +796,10 @@ def _join_movies(
                 movie=join.title, movieid=join.movieid, from_set="", to_set=name,
                 written=ok, setid=landed, cleared=bool(cleared),
             )
+            if target is None:
+                # The name files movies elsewhere: the collection's other
+                # movies wait for the next scan.
+                new_names[cid] = None
             continue
         created = target is None
         if created:
@@ -785,6 +812,19 @@ def _join_movies(
         log.info("Movie added to its collection's set", event="sets.joined",
                  movie=join.title, set=name, setid=landed, created=created)
     return done, False
+
+
+def _seen_in_managed_sets(
+    plans: list[SetPlan], members: list[dict[str, Any]], libraries: LibraryConfig,
+) -> list[tuple[str, int, int]]:
+    """(identity, movieid, setid) of every counted member of a managed set,
+    for the tracker's record of who the set pass saw where."""
+    managed = {plan.setid for plan in plans if plan.reason is None and plan.collection_id}
+    return [
+        (compute_identity(m, MOVIE), int(m.get("movieid") or 0), int(m.get("setid") or 0))
+        for m in members
+        if int(m.get("setid") or 0) in managed and _counted_library(m, libraries) is not None
+    ]
 
 
 def _stored_collections(tracker: Any, movies: list[dict[str, Any]]) -> dict[str, str]:
@@ -805,11 +845,10 @@ def _plan_set_joins(
     plans: list[SetPlan], libraries: LibraryConfig, collections: dict[str, str],
     names: dict[str, frozenset[str]], set_moves: dict[str, dict[str, Any]],
     only_collection: Optional[str], today: str, stats: dict[str, Any],
-    stop: Callable[[], bool],
+    stop: Callable[[], bool], members_unanswered: bool,
 ) -> tuple[list[Join], dict[str, str], bool]:
     """The joins to write, the collection map they were planned with, and
-    whether ``stop`` ended the candidates' lookups (then no join is
-    planned).
+    whether ``stop`` ended the lookups (then no join is planned).
 
     Candidates (movies in no set, counted, in a library with Movie sets
     ticked, not taken out by the user) are looked up as set members are
@@ -818,7 +857,14 @@ def _plan_set_joins(
     now asks TMDB nothing about other movies. Whether a collection already
     has a set is judged from the stored answers of every set member, in
     any library, so a set the user keeps outside the ticked libraries is
-    never duplicated; those members are not asked about."""
+    never duplicated.
+
+    A set made beside one of the user's cannot be taken back, so no set is
+    created while any set member's collection is unknown: when a creation
+    is planned, every set member with no stored answer (in any library) is
+    asked once and the joins planned again; when TMDB left a member
+    unanswered, here or before (``members_unanswered``), only joins into
+    existing sets are kept and creations wait for a later scan."""
     def candidate(movie: dict[str, Any]) -> bool:
         if int(movie.get("setid") or 0) != 0:
             return False
@@ -831,21 +877,53 @@ def _plan_set_joins(
     if only_collection is not None:
         found = _stored_collections(ctx.tracker, [m for m in movies if candidate(m)])
     else:
-        found, stopped = _member_collections(ctx, movies, candidate, libraries, today,
-                                             stats, stop)
+        found, stopped, _ = _member_collections(ctx, movies, candidate, libraries, today,
+                                                stats, stop)
         if stopped:
             return [], {}, True
     members = _set_members(movies)
     join_cols = {**_stored_collections(ctx.tracker, members), **collections, **found}
+    joins = _joins_for(ctx, movies, kodi_sets, members, plans, libraries, join_cols,
+                       names, set_moves)
+    if only_collection is not None:
+        return [j for j in joins if j.collection_id == only_collection], join_cols, False
+    if not members_unanswered and any(j.to_setid is None for j in joins):
+        def unasked(member: dict[str, Any]) -> bool:
+            tmdb_id = extract_ids(member)[0]
+            return bool(tmdb_id) and ctx.tracker.get_movie_collection_row(tmdb_id) is None
+
+        asked, stopped, members_unanswered = _member_collections(
+            ctx, members, unasked, libraries, today, stats, stop, counted_only=False)
+        if stopped:
+            return [], {}, True
+        if asked:
+            join_cols = {**asked, **join_cols}
+            joins = _joins_for(ctx, movies, kodi_sets, members, plans, libraries,
+                               join_cols, names, set_moves)
+    if members_unanswered:
+        for join in joins:
+            if join.to_setid is None:
+                log.debug("Set not created while a set member is unchecked",
+                          event="sets.join_skipped", movie=join.title,
+                          collection_id=join.collection_id, reason="member_unchecked")
+        joins = [j for j in joins if j.to_setid is not None]
+    return joins, join_cols, False
+
+
+def _joins_for(
+    ctx: _ScanCtx, movies: list[dict[str, Any]], kodi_sets: list[dict[str, Any]],
+    members: list[dict[str, Any]], plans: list[SetPlan], libraries: LibraryConfig,
+    join_cols: dict[str, str], names: dict[str, frozenset[str]],
+    set_moves: dict[str, dict[str, Any]],
+) -> list[Join]:
+    """plan_joins with ``names`` filled for every collection in ``join_cols``
+    and the collections that already have a set worked out from them."""
     for cid in {c for c in join_cols.values() if c}:
         identity = _set_identity(cid)
         if identity not in names:
             names[identity] = ctx.tracker.get_set_names(identity)
     with_sets = collections_with_sets(kodi_sets, members, join_cols, names)
-    joins = plan_joins(movies, plans, libraries, join_cols, set_moves, with_sets)
-    if only_collection is not None:
-        joins = [j for j in joins if j.collection_id == only_collection]
-    return joins, join_cols, False
+    return plan_joins(movies, plans, libraries, join_cols, set_moves, with_sets)
 
 
 def _tracker_facts(
@@ -950,7 +1028,7 @@ def prepare_sets(
     # tie, no counted member, Movie sets not ticked) costs no TMDB request.
     probe, _ = plan_sets(kodi_sets, members, libraries, {}, {}, {}, {})
     asking = {p.setid for p in probe if p.reason == LEFT_NO_COLLECTION}
-    collections, stopped = _member_collections(
+    collections, stopped, members_unanswered = _member_collections(
         ctx, members, lambda m: int(m.get("setid") or 0) in asking, libraries, today, stats,
         stop_now,
     )
@@ -980,7 +1058,7 @@ def prepare_sets(
     if not stopped and (only_setid is None or only_collection is not None):
         joins, join_cols, stopped = _plan_set_joins(
             ctx, movies, kodi_sets, plans, libraries, collections, names, set_moves,
-            only_collection, today, stats, stop_now,
+            only_collection, today, stats, stop_now, members_unanswered,
         )
         join_setids: dict[str, int] = {}
         if not stopped:
@@ -1004,6 +1082,7 @@ def prepare_sets(
     for plan in plans:
         if plan.reason is not None and plan.setid in tracked:
             tracker.update_last_seen(SET.name, tracked[plan.setid], today)
+    tracker.record_set_seen(_seen_in_managed_sets(plans, members, libraries), today)
     tracker.commit()
     if stopped:
         return []
