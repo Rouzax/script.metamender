@@ -280,6 +280,9 @@ class _ScanCtx:
     # show pass fills it too. Only real answers are cached, as in tvdb_cache.
     # This and fanart_cache may be shared by every pass of a cycle (run_scan).
     show_cache: dict[str, Any] = field(default_factory=dict)
+    # Kodi's movie set information folder (kodi.movie_set_folder), read once
+    # per set pass; "" when unset, unreadable, or not a set pass.
+    set_folder: str = ""
 
 
 def _get_season_data(

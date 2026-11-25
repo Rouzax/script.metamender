@@ -331,6 +331,10 @@ def _make_stats() -> dict[str, Any]:
         "fanart_answered": False,
         # Movies the set pass moved out of a duplicate set (engine/sets.py).
         "moved": 0,
+        # Movies in no set the set pass added to their collection's set, and
+        # the sets it created for that.
+        "joined": 0,
+        "sets_created": 0,
     }
 
 
@@ -1479,6 +1483,7 @@ def run_scan(
         fanart_client_key=str(settings.get("fanart_client_key") or ""),
         fanart_cache={} if fanart_cache is None else fanart_cache,
         show_cache={} if show_cache is None else show_cache,
+        set_folder=kodi.movie_set_folder() if media_type is SET else "",
     )
     # Built on a library's first item, so a library the pass never meets
     # costs nothing (and logs no certification error).

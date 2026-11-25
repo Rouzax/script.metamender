@@ -404,8 +404,9 @@ def test_update_now_on_set_runs_set_pass_with_reset(set_patched):
     set_patched["release"].assert_called_once_with()
 
 
-def test_update_now_on_set_counts_moved_movies_as_updated(set_patched):
-    set_patched["run_scan"].return_value = {"updated": 0, "moved": 2}
+@pytest.mark.parametrize("stats", [{"updated": 0, "moved": 2}, {"updated": 0, "joined": 1}])
+def test_update_now_on_set_counts_moved_and_joined_movies_as_updated(set_patched, stats):
+    set_patched["run_scan"].return_value = stats
     actions.update_now("set", "40")
     assert set_patched["notify"].call_args[0][0] == "Updated: Heat Collection"
 

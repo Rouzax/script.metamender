@@ -540,6 +540,8 @@ def test_movie_in_a_library_without_movie_sets_is_skipped():
     held = [_movie(1, 7, SERIES, tmdb="11"), _movie(2, 7, SERIES, tmdb="12")]
     loose = _movie(3, 0, MOVIES, tmdb="13")
     cols = {"11": "5", "12": "5", "13": "5"}
+    plans, _ = plan_sets([M(7, "Saga")], held, libs, cols, {}, {}, {})
+    assert (plans[0].reason, plans[0].collection_id) == (None, "5")
     assert _joins([loose], sets=[M(7, "Saga")], set_members=held, libraries=libs,
                   collections=cols) == []
 
@@ -548,6 +550,8 @@ def test_movie_in_an_excluded_subfolder_is_skipped():
     held = [_movie(1, 7, MOVIES, tmdb="11"), _movie(2, 7, MOVIES, tmdb="12")]
     loose = _movie(3, 0, EXCLUDED, tmdb="13")
     cols = {"11": "5", "12": "5", "13": "5"}
+    plans, _ = plan_sets([M(7, "Saga")], held, _config(), cols, {}, {}, {})
+    assert (plans[0].reason, plans[0].collection_id) == (None, "5")
     assert _joins([loose], sets=[M(7, "Saga")], set_members=held, collections=cols) == []
 
 
