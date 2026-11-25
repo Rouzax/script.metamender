@@ -3,6 +3,16 @@ MetaMender Changelog
 
 v1.3.1 (unreleased)
 -------------------
+Improvements:
+  - A library's page says whether it is a movies or a TV shows library
+    and offers only the choices for that kind: no taglines, trailers or
+    movie sets for TV shows, no episode titles or thumbs for movies, and
+    Details and Other art name only what applies. MetaMender tells the
+    kind from what Kodi has scanned into the library; a library with
+    nothing in it yet, or with both kinds, shows every choice and says
+    why. A hidden choice keeps its tick; the library list and the summary
+    leave it out.
+
 Bug Fixes:
   - Background, Stop and Back in the Update now progress window now
     respond while a show or season is updated from the Videos window.

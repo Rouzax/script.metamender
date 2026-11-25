@@ -7,6 +7,7 @@ Logging:
     Key events:
         - sources.load (INFO): Source config loaded
         - sources.discover (INFO): Video sources discovered from Kodi
+        - sources.content (ERROR): a library's content type could not be read
 """
 from __future__ import annotations
 
@@ -252,6 +253,51 @@ def library_folders_in_use(libraries: LibraryConfig) -> list[str]:
                     and any(_path_matches(f, folder) for f in files)):
                 folders.append(folder)
     return folders
+
+
+# What a library holds, as library_content tells it.
+CONTENT_MOVIES = "movies"
+CONTENT_TVSHOWS = "tvshows"
+CONTENT_MIXED = "mixed"
+CONTENT_UNKNOWN = ""
+
+
+def _has_items_under(method: str, folder: str) -> bool | None:
+    """Whether ``method`` lists any item under ``folder``; None when the
+    query failed. Kodi's source and derived folders end in a separator,
+    so "startswith" stays on a folder boundary."""
+    query = {"jsonrpc": "2.0", "method": method, "id": 1, "params": {
+        "filter": {"field": "path", "operator": "startswith", "value": folder},
+        "limits": {"end": 1}}}
+    try:
+        data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
+        return int(data["result"]["limits"]["total"]) > 0
+    except Exception:
+        log.exception("Failed to read a library's content", event="sources.content",
+                      method=method)
+        return None
+
+
+def library_content(path: str) -> str:
+    """Whether the library at ``path`` holds movies, TV shows, both, or
+    nothing Kodi has scanned yet (CONTENT_UNKNOWN, also when a query
+    failed). Kodi keeps each source's content type in its video database
+    but offers it to add-ons through neither JSON-RPC nor Python, so the
+    items under the library's folders stand in for it."""
+    found = set()
+    for folder in source_paths(path):
+        if not folder:
+            continue
+        for method, content in (("VideoLibrary.GetMovies", CONTENT_MOVIES),
+                                ("VideoLibrary.GetTVShows", CONTENT_TVSHOWS)):
+            has = _has_items_under(method, folder)
+            if has is None:
+                return CONTENT_UNKNOWN
+            if has:
+                found.add(content)
+    if len(found) > 1:
+        return CONTENT_MIXED
+    return found.pop() if found else CONTENT_UNKNOWN
 
 
 def _path_matches(file_path: str, source_path: str) -> bool:

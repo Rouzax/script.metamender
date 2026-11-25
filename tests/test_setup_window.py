@@ -101,14 +101,20 @@ class Recorder:
         self.seen += 1
 
 
+# A content the window has no rules for: every toggle and no note, so the
+# tests that are not about content types see the page as it always was.
+_NO_CONTENT_RULES = "any"
+
+
 def _controller(mode="wizard", key="", dialogs=None, rec=None, first_run=True,
-                libraries=None, ui="nl-NL", save=None):
+                libraries=None, ui="nl-NL", save=None, content=_NO_CONTENT_RULES):
     state = initial_state({"tmdb_api_key": key}, libraries, _DISCOVERED, ui)
     rec = rec or Recorder()
     c = SetupController(
         mode, state, ui, "/x/sources.json", first_run, dialogs=dialogs or FakeDialogs(),
         key_checker=rec.check, save=save or rec.save, settings_writer=rec.write,
         name=lambda code: code, libraries_seen=rec.libraries_seen,
+        content_of=content if callable(content) else (lambda _path: content),
     )
     return c, rec
 

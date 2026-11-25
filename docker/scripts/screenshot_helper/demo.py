@@ -14,6 +14,7 @@ from dataclasses import replace
 
 from resources.lib.data.libraries import TITLE_ORIGINAL, Library, LibraryConfig, new_library
 from resources.lib.data.media_types import EPISODE, MOVIE, SET, MediaType
+from resources.lib.data.sources import CONTENT_MOVIES, CONTENT_TVSHOWS, CONTENT_UNKNOWN
 from resources.lib.engine.protect import fingerprint
 from resources.lib.ui.setup_model import SetupState, initial_state
 
@@ -227,6 +228,19 @@ def demo_libraries() -> list[Library]:
         replace(new_library("smb://nas/media/TV Shows/", "TV Shows", "en-US"), included=True),
         new_library("smb://nas/media/Sport/", "Sport Videos", "en-US"),
     ]
+
+
+# What each demo library holds; the test Kodi's library has nothing under
+# these paths, so asking it would leave every page without a kind.
+_DEMO_CONTENT = {"Movies": CONTENT_MOVIES, "Kids Movies": CONTENT_MOVIES,
+                 "TV Shows": CONTENT_TVSHOWS}
+
+
+def demo_content(path: str) -> str:
+    """The content type of the demo library at ``path``; unknown for the
+    one Kodi has scanned nothing into."""
+    label = next((lib.label for lib in demo_libraries() if lib.path == path), "")
+    return _DEMO_CONTENT.get(label, CONTENT_UNKNOWN)
 
 
 def setup_state(scene: dict[str, Any]) -> SetupState:

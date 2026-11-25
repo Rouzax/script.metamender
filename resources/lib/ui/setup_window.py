@@ -46,7 +46,14 @@ from resources.lib.data.libraries import (
     resolve_country,
     save_libraries,
 )
-from resources.lib.data.sources import discover_folders, kodi_ui_language
+from resources.lib.data.sources import (
+    CONTENT_MIXED,
+    CONTENT_MOVIES,
+    CONTENT_TVSHOWS,
+    discover_folders,
+    kodi_ui_language,
+    library_content,
+)
 from resources.lib.providers.languages import TMDB_PRIMARY_TRANSLATIONS
 from resources.lib.providers.tmdb import (
     KEY_OK,
@@ -74,7 +81,9 @@ from resources.lib.ui.setup_model import (
     libraries_to_write,
     mask_key,
     page_groups,
+    page_toggles,
     settings_to_write,
+    shown_toggles,
 )
 from resources.lib.ui.theme import publish_theme
 from resources.lib.utils import (
@@ -118,6 +127,17 @@ _FEATURE_TEXT = {
     "movie_sets": (32748, 32749),
     "details": (32448, 32449),
 }
+# The explanation a toggle gets in a library of one kind, where the
+# general one names fields that kind lacks.
+_CONTENT_DETAIL = {
+    ("details", CONTENT_MOVIES): 32781, ("details", CONTENT_TVSHOWS): 32782,
+    ("other_art", CONTENT_MOVIES): 32783, ("other_art", CONTENT_TVSHOWS): 32784,
+}
+# A library page's heading names what the library holds.
+_CONTENT_HEADING = {CONTENT_MOVIES: 32777, CONTENT_TVSHOWS: 32778}
+# Why a page lists every toggle.
+_CONTENT_NOTE = {"": 32779, CONTENT_MIXED: 32780}
+
 # The short form a toggle takes in a library's one-line summary.
 _FIELD_WORD = {
     "ratings": 32676, "plots": 32677, "episode_titles": 32678, "main_titles": 32679,
@@ -233,6 +253,7 @@ class SetupController:
         settings_writer: Callable[[dict[str, Any]], None] = write_settings,
         name: Callable[[str], str] = language_name,
         libraries_seen: Optional[Callable[[], None]] = None,
+        content_of: Callable[[str], str] = library_content,
     ) -> None:
         self.mode = mode
         self.state = state
@@ -247,6 +268,10 @@ class SetupController:
         self._write = settings_writer
         self._name = name
         self._libraries_seen = libraries_seen
+        self._content_of = content_of
+        # What each library holds, asked once per window: a library Kodi
+        # scans into while the window is open shows the change next time.
+        self._content: dict[str, str] = {}
         # What the libraries were when the window opened, to tell whether
         # leaving would lose changes.
         self._loaded = list(state.libraries.libraries)
@@ -272,7 +297,8 @@ class SetupController:
     def heading(self) -> str:
         lib = self._library()
         if lib is not None:
-            return self._label(lib)
+            heading = _CONTENT_HEADING.get(self._content_for(lib))
+            return lang(heading).format(self._label(lib)) if heading else self._label(lib)
         if self.step == "summary":
             return lang(32455)
         return lang(_STEP_TEXT[self.step][0])
@@ -280,9 +306,13 @@ class SetupController:
     def explanation(self) -> str:
         lib = self._library()
         if lib is not None:
-            if not lib.toggles:
-                return lang(32666) + "\n" + lang(32667)
-            return lang(32666)
+            lines = [lang(32666)]
+            note = _CONTENT_NOTE.get(self._content_for(lib))
+            if note:
+                lines.append(lang(note))
+            if not self._shown(lib):
+                lines.append(lang(32667))
+            return "\n".join(lines)
         if self.step == "summary":
             text = lang(32456 if self._first_run else 32457)
             if changes_nothing(self.state.libraries):
@@ -324,7 +354,7 @@ class SetupController:
         lib = self._library()
         assert lib is not None
         rows: list[Row] = []
-        for group in page_groups(lib):
+        for group in page_groups(lib, self._content_for(lib)):
             rows.append(_header(lang(_GROUP_HEADING[group])))
             rows.extend(getattr(self, "_group_" + group)(lib))
         return rows
@@ -338,9 +368,11 @@ class SetupController:
         ]
 
     def _group_fields(self, lib: Library) -> list[Row]:
-        return [Row(lang(_FEATURE_TEXT[t][0]), lang(_FEATURE_TEXT[t][1]), t in lib.toggles,
-                    "check", "toggle:" + t)
-                for t in TOGGLES]
+        content = self._content_for(lib)
+        return [Row(lang(_FEATURE_TEXT[t][0]),
+                    lang(_CONTENT_DETAIL.get((t, content), _FEATURE_TEXT[t][1])),
+                    t in lib.toggles, "check", "toggle:" + t)
+                for t in page_toggles(content)]
 
     def _group_rating(self, lib: Library) -> list[Row]:
         return [Row(lang(32630), self._rating_label(lib), key="rating")]
@@ -383,16 +415,17 @@ class SetupController:
             rows.append(_header(self._label(lib)))
             rows.append(Row(lang(32422), self._pair(lib.language, lib.fallback_language)))
             rows.append(Row(lang(32462), ", ".join(self._field_words(lib)) or lang(32463)))
-            if "ratings" in lib.toggles:
+            on = self._shown(lib)
+            if "ratings" in on:
                 rows.append(Row(lang(32648), self._rating_label(lib)))
-            if any(t in lib.toggles for t in TEXT_TOGGLES):
+            if any(t in on for t in TEXT_TOGGLES):
                 rows.append(Row(lang(32649), self._text_label(lib)))
-            if "main_titles" in lib.toggles:
+            if "main_titles" in on:
                 rows.append(Row(lang(32672), _option_label(_TITLE_TEXT, _TITLE_MODES,
                                                            lib.title_mode)))
-            if any(t in lib.toggles for t in ART_TOGGLES):
+            if any(t in on for t in ART_TOGGLES):
                 rows.append(Row(lang(32734), self._art_label(lib)))
-            if "certifications" in lib.toggles:
+            if "certifications" in on:
                 rows.append(Row(lang(32450), self._country_label(lib, lib.cert_country)))
                 rows.append(Row(lang(32645),
                                 lang(32646 if lib.cert_replace_foreign else 32647)))
@@ -620,10 +653,21 @@ class SetupController:
     def _label(lib: Library) -> str:
         return lib.label or display_path(lib.path)
 
+    def _content_for(self, lib: Library) -> str:
+        if lib.path not in self._content:
+            self._content[lib.path] = self._content_of(lib.path)
+        return self._content[lib.path]
+
+    def _shown(self, lib: Library) -> frozenset[str]:
+        """The ticks that apply to what the library holds; the others stay
+        stored but are neither shown nor named."""
+        return shown_toggles(lib, self._content_for(lib))
+
     def _field_words(self, lib: Library) -> list[str]:
         words = []
+        on = self._shown(lib)
         for toggle in _WORD_ORDER:
-            if toggle not in lib.toggles:
+            if toggle not in on:
                 continue
             if toggle == "main_titles" and lib.title_mode == TITLE_ORIGINAL:
                 words.append(lang(32680))
@@ -637,7 +681,7 @@ class SetupController:
     def _library_line(self, lib: Library) -> str:
         if not lib.included:
             return lang(32661)
-        if not lib.toggles:
+        if not self._shown(lib):
             return lang(32660)
         return lang(32662).format(self._name(lib.language), ", ".join(self._field_words(lib)))
 

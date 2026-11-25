@@ -118,7 +118,7 @@ def setup(scene: dict) -> None:
     controller = sw.SetupController(
         "wizard", state, demo.DEMO_UI_LANGUAGE, "", first_run=True,
         save=lambda path, config: True, settings_writer=lambda values: None,
-        key_checker=lambda key: KEY_OK,
+        key_checker=lambda key: KEY_OK, content_of=demo.demo_content,
     )
     controller.flow.current = scene["step"]
     window = _FocusedSetup(sw._XML, TARGET.getAddonInfo("path"), "Default", "1080i")
