@@ -1702,3 +1702,11 @@ msgstr ""
 msgctxt "#32774"
 msgid "MetaMender leaves this set alone; Details says why"
 msgstr ""
+
+msgctxt "#32775"
+msgid "video file"
+msgstr ""
+
+msgctxt "#32776"
+msgid "Kodi shows the length of the video file itself, so MetaMender leaves the runtime alone."
+msgstr ""

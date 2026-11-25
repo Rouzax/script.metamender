@@ -694,3 +694,31 @@ def test_movie_ids_row_shows_its_move():
     ids = build_rows(MOVIE, dict(item, set_move=dict(move, user=True, set="Favourites")),
                      None, {}, {}, TODAY)[0]
     assert ("", "Left in the set Favourites: you moved it there") in ids.lines
+
+
+def test_runtime_kodi_takes_from_the_file():
+    # Kodi shows the file's 57 minutes over the 45 MetaMender wrote: the row
+    # says what Kodi shows and that MetaMender leaves it.
+    runtime = _by_key(_rows(item={"file_runtime": 3424}))["runtime"]
+    assert runtime.group == "left"
+    assert runtime.hint == "video file"
+    lines = dict(runtime.lines)
+    assert lines[""] == "57 min"
+    assert lines["Why"] == (
+        "Kodi shows the length of the video file itself, so MetaMender leaves the runtime alone.")
+    assert "Next check" not in lines and "From" not in lines
+    assert runtime.action == ""
+
+
+def test_runtime_from_file_reason_without_a_file_length():
+    # Recorded by a scan, but the file is not read now (moved, not probed
+    # again): the reason still explains why nothing was written.
+    runtime = _by_key(_rows(item={"runtime": 3360}, fs_map={
+        "runtime": _fs("from_file", source="tmdb", next_retry="2026-11-19")}))["runtime"]
+    assert runtime.group == "left"
+    assert dict(runtime.lines)["Why"].startswith("Kodi shows the length of the video file")
+
+
+def test_runtime_without_a_file_length_is_an_ordinary_row():
+    runtime = _by_key(_rows(item={"file_runtime": None}))["runtime"]
+    assert runtime.group == "updated" and runtime.hint == "TMDB"

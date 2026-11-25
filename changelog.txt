@@ -1,6 +1,14 @@
 MetaMender Changelog
 ====================
 
+v1.3.1 (unreleased)
+-------------------
+Bug Fixes:
+  - Runtime is no longer written to a movie or episode whose video file
+    Kodi has read: Kodi shows the file's own length there, so the write
+    was never seen and only reloaded the list. Details says "video file"
+    for such a runtime.
+
 v1.3.0 (2026-11-24)
 -------------------
 New Features:

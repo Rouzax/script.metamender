@@ -59,6 +59,7 @@ Select a field to see on the right:
 | The sites MetaMender asks have nothing for this field yet. | TMDB and TheTVDB have no value; MetaMender checks again later. For an old item that is settled: "had nothing for this field". |
 | The sites could not be reached at the last check, so MetaMender tries again. | A temporary problem; the next scan tries again. |
 | You locked this field, so MetaMender leaves it alone. | See [Restore original and the lock](#restore-original-and-the-lock). |
+| Kodi shows the length of the video file itself, so MetaMender leaves the runtime alone. | Once Kodi has read a file's own length, it shows that as the runtime, whatever the library says. A runtime written there would never be seen, so MetaMender writes none. The hint says *video file*. |
 | Changed since MetaMender's update (your edit or a re-scrape). | Someone or something changed the value after MetaMender wrote it. |
 | Kodi lost MetaMender's value (a refresh or a re-scrape), so the next scan fills it again. | The field was emptied, for example by refreshing the item in Kodi. |
 | Local image file, left as it is | Art that is an image file, for example one Artwork Dump saved. MetaMender never replaces one that exists; a deleted one is filled (see [If you delete your local art files](libraries.md#if-you-delete-your-local-art-files)). |
