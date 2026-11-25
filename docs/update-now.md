@@ -62,6 +62,13 @@ updated, unchanged, or could not be checked.
 - **Stop** stops after the episode in progress. Episodes already done keep
   their updates.
 
+In the Videos window every change makes Kodi reload the list behind the
+window, and while it reloads Kodi does not respond to the remote. So while you
+are pressing keys Update now pauses its changes and carries on two seconds
+after your last press. On a slow device or a large list your first press can
+still be missed; press again and it is answered. The same pause keeps the list
+still while you browse after choosing Background.
+
 ![The progress bar in the corner](screenshots/update-now/update-now-corner-bar.png)
 
 When it ends, a notification sums it up, for example "Updated: The Night

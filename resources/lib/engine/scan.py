@@ -93,6 +93,7 @@ from resources.lib.constants import (
     KODI_HOME_WINDOW_ID,
     LOCAL_ART_RECHECK_DAYS,
     STOP_SCAN_PROPERTY,
+    UPDATE_NOW_IDLE_SECONDS,
     VIDEO_NAV_WINDOW,
     parse_refetch_schedule,
 )
@@ -968,23 +969,28 @@ def _stop_requested() -> bool:
     return xbmcgui.Window(KODI_HOME_WINDOW_ID).getProperty(STOP_SCAN_PROPERTY) == "1"
 
 
-def _browsing() -> bool:
-    return (xbmcgui.getCurrentWindowId() == VIDEO_NAV_WINDOW
-            and xbmc.getGlobalIdleTime() < BROWSE_IDLE_SECONDS)
+def _browsing(idle_seconds: int) -> bool:
+    # The idle time comes first: it is lock-free, while getCurrentWindowId
+    # takes Kodi's graphics lock and so waits out a list reload.
+    return (xbmc.getGlobalIdleTime() < idle_seconds
+            and xbmcgui.getCurrentWindowId() == VIDEO_NAV_WINDOW)
 
 
-def _hold_while_browsing(media_type: MediaType, monitor: Any) -> None:
+def _hold_while_browsing(media_type: MediaType, monitor: Any,
+                         idle_seconds: int = BROWSE_IDLE_SECONDS) -> None:
     """Hold the next Kodi write while the user is browsing the video library.
 
     Kodi reloads the active window's list after every JSON-RPC library write,
     so writing while the Videos window is in use keeps the list the user is
     looking at reloading. The hold ends when the user has been idle for
-    BROWSE_IDLE_SECONDS, leaves the Videos window, or Kodi quits.
+    ``idle_seconds``, leaves the Videos window, or Kodi quits. A background
+    scan waits BROWSE_IDLE_SECONDS; Update now only UPDATE_NOW_IDLE_SECONDS,
+    long enough for the next key press to reach its progress window.
     """
-    if monitor is None or not _browsing():
+    if monitor is None or not _browsing(idle_seconds):
         return
     started = time.monotonic()
-    while (_browsing() and not monitor.abortRequested()
+    while (_browsing(idle_seconds) and not monitor.abortRequested()
            and not _stop_requested()):
         if monitor.waitForAbort(2):
             break
@@ -1002,12 +1008,12 @@ def _before_set_move(
     False on shutdown or Stop scan (recorded in ``stats`` as the scan loop
     does), otherwise it holds while the user browses the video library. A
     move rewrites the library like any scan write. Update now (``reset``)
-    ignores Stop scan and writes straight away."""
+    ignores Stop scan and holds only while keys are pressed."""
     def check() -> bool:
         # The hold ends on shutdown and on Stop scan too, so both are
         # checked after it.
-        if not reset:
-            _hold_while_browsing(SET, monitor)
+        _hold_while_browsing(
+            SET, monitor, UPDATE_NOW_IDLE_SECONDS if reset else BROWSE_IDLE_SECONDS)
         if monitor is not None and monitor.abortRequested():
             log.info("Scan interrupted by shutdown", event="scan.abort",
                      media_type=SET.name, processed=0)
@@ -1991,9 +1997,12 @@ def run_scan(
             if new_ratings is not None:
                 fields_to_write["ratings"] = new_ratings
 
-        # Update now is the user's own request, so it writes straight away.
-        if fields_to_write and not reset:
-            _hold_while_browsing(media_type, monitor)
+        # Update now is the user's own request, so it only holds while keys
+        # are being pressed.
+        if fields_to_write:
+            _hold_while_browsing(
+                media_type, monitor,
+                UPDATE_NOW_IDLE_SECONDS if reset else BROWSE_IDLE_SECONDS)
         written = _write_fields(
             ctx, kodi_id, title, identity, fields_to_write, stats,
         )

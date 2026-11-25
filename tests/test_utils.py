@@ -1,7 +1,7 @@
 """Smoke tests for utility infrastructure."""
 from __future__ import annotations
 
-from resources.lib.utils import get_logger
+from resources.lib.utils import get_logger, remove_suffix
 
 
 def test_get_logger_returns_logger(kodi_stubs):
@@ -110,3 +110,11 @@ def test_client_key_is_redacted_in_query_and_dict_text():
     assert "failed" in out
     for text in ("{'client_key': 'PERSONALKEY123'}", '{"clientkey": "PERSONALKEY123"}'):
         assert "PERSONALKEY123" not in _redact(text)
+
+
+def test_remove_suffix():
+    assert remove_suffix("image://x/", "/") == "image://x"
+    assert remove_suffix("image://x", "/") == "image://x"
+    assert remove_suffix("tmdb-en-textless", "-textless") == "tmdb-en"
+    assert remove_suffix("abc", "") == "abc"
+    assert remove_suffix("", "/") == ""

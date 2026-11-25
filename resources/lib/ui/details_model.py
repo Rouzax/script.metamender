@@ -70,7 +70,7 @@ from resources.lib.engine.sets import (
     LEFT_TIE_LIBRARY,
 )
 from resources.lib.service.details import can_restore
-from resources.lib.utils import is_empty, lang
+from resources.lib.utils import is_empty, lang, remove_suffix
 
 GROUP_UPDATED = "updated"
 GROUP_LEFT = "left"
@@ -224,7 +224,7 @@ def _parse(iso: str | None) -> date | None:
 def _source_name(source: str | None) -> str:
     if not source:
         return ""
-    source = source.removesuffix(TEXTLESS_SOURCE_SUFFIX).removesuffix(ENGLISH_SOURCE_SUFFIX)
+    source = remove_suffix(remove_suffix(source, TEXTLESS_SOURCE_SUFFIX), ENGLISH_SOURCE_SUFFIX)
     if source == _SCRAPER_SOURCE:
         return lang(32534)
     if source.startswith("tmdb-"):

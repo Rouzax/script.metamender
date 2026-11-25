@@ -1,4 +1,5 @@
-"""A scan holds its Kodi writes while the user browses the video library.
+"""A scan holds its Kodi writes while the user browses the video library,
+and Update now holds them while the user is pressing keys.
 
 Every JSON-RPC library write makes Kodi reload the active window's list, so a
 scan writing while the Videos window is in use keeps that list reloading.
@@ -8,7 +9,11 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import MagicMock, patch
 
-from resources.lib.constants import BROWSE_IDLE_SECONDS, VIDEO_NAV_WINDOW
+from resources.lib.constants import (
+    BROWSE_IDLE_SECONDS,
+    UPDATE_NOW_IDLE_SECONDS,
+    VIDEO_NAV_WINDOW,
+)
 from resources.lib.data.media_types import MOVIE
 from resources.lib.engine import scan
 from resources.lib.engine.scan import _hold_while_browsing, run_scan
@@ -103,6 +108,37 @@ def test_no_hold_without_a_monitor():
     win.assert_not_called()
 
 
+def test_update_now_holds_until_the_remote_is_quiet():
+    monitor = _Monitor()
+    w, i = _kodi([VIDEO_NAV_WINDOW], [0, 1, UPDATE_NOW_IDLE_SECONDS])
+    with w, i:
+        _hold_while_browsing(MOVIE, monitor, UPDATE_NOW_IDLE_SECONDS)
+    # A press just now opens the hold; it waits once and ends when quiet.
+    assert monitor.waits == 1
+
+
+def test_update_now_does_not_hold_when_the_remote_is_quiet():
+    monitor = _Monitor()
+    w, i = _kodi([VIDEO_NAV_WINDOW], [UPDATE_NOW_IDLE_SECONDS])
+    with w, i:
+        _hold_while_browsing(MOVIE, monitor, UPDATE_NOW_IDLE_SECONDS)
+    assert monitor.waits == 0
+
+
+def test_no_window_lookup_while_the_remote_is_quiet():
+    # getCurrentWindowId takes Kodi's graphics lock, which waits out a list
+    # reload; the lock-free idle time is checked first.
+    monitor = _Monitor()
+    w, i = _kodi([VIDEO_NAV_WINDOW], [UPDATE_NOW_IDLE_SECONDS])
+    with w as win, i:
+        _hold_while_browsing(MOVIE, monitor, UPDATE_NOW_IDLE_SECONDS)
+    win.assert_not_called()
+
+
+def test_update_now_idle_window_is_short():
+    assert 0 < UPDATE_NOW_IDLE_SECONDS < BROWSE_IDLE_SECONDS
+
+
 def _scan(tmp_path, reset):
     from resources.lib.data.tracker import TrackerDB
     item = _make_movie_item(plot="Old plot")
@@ -122,10 +158,12 @@ def _scan(tmp_path, reset):
 def test_background_scan_holds_before_writing(tmp_path, kodi_stubs):
     hold, update = _scan(tmp_path, reset=False)
     assert hold.call_count == 1
+    assert hold.call_args.args[2] == BROWSE_IDLE_SECONDS
     assert update.call_count == 1
 
 
-def test_update_now_does_not_hold(tmp_path, kodi_stubs):
+def test_update_now_holds_only_while_keys_are_pressed(tmp_path, kodi_stubs):
     hold, update = _scan(tmp_path, reset=True)
-    hold.assert_not_called()
+    assert hold.call_count == 1
+    assert hold.call_args.args[2] == UPDATE_NOW_IDLE_SECONDS
     assert update.call_count == 1

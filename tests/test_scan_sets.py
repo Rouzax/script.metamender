@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from resources.lib.constants import UPDATE_NOW_IDLE_SECONDS
 from resources.lib.data import kodi
 from resources.lib.data.libraries import ART_SOURCE_FANART, Library, LibraryConfig
 from resources.lib.data.localart import EXISTS
@@ -638,14 +639,16 @@ def test_set_moves_held_while_browsing(tmp_path, kodi_stubs, fake, tmdb_api):
     tracker.close()
 
 
-def test_update_now_moves_without_hold(tmp_path, kodi_stubs, fake, tmdb_api):
+def test_update_now_moves_hold_only_while_keys_are_pressed(tmp_path, kodi_stubs, fake, tmdb_api):
     tracker = _make_tracker(tmp_path)
     _managed_then_duplicate(fake, tracker, tmdb_api)
     hold, _order = _record_order(fake)
     with patch("resources.lib.engine.scan._hold_while_browsing", hold), \
             patch("resources.lib.engine.scan._stop_requested", return_value=True):
         _scan(tracker, _library(), monitor=_Monitor(), reset=True, only_set=2)
-    hold.assert_not_called()
+    # Update now holds a move only while keys are pressed.
+    assert hold.call_args_list
+    assert all(c.args[2] == UPDATE_NOW_IDLE_SECONDS for c in hold.call_args_list)
     assert _movie_moves(fake) == [(3, NL_NAME)]
     tracker.close()
 
