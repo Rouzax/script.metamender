@@ -89,6 +89,14 @@ DEFAULT_REFETCH_SCHEDULE: tuple[int, ...] = (7, 30, 90)
 VIDEO_NAV_WINDOW = 10025
 BROWSE_IDLE_SECONDS = 60
 
+# Update now holds its writes the same way, but only while keys are being
+# pressed. While the list reloads, Kodi's modal busy dialog takes every key
+# press, so on a slow box back-to-back writes left the progress window's
+# buttons unanswered. Kodi resets its idle timer on every key press, including
+# one the busy dialog swallows, so the first press stops the writes and the
+# next one reaches the window; when nothing is pressed nothing waits.
+UPDATE_NOW_IDLE_SECONDS = 2
+
 # Home window property the "Stop scan" context-menu action sets; a background
 # scan checks it before each item and the service clears it per cycle.
 STOP_SCAN_PROPERTY = "metamender_stop_scan"
