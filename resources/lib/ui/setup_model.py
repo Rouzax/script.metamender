@@ -21,10 +21,18 @@ from resources.lib.data.libraries import (
     add_new_libraries,
     resolve_country,
 )
+from resources.lib.data.sources import CONTENT_MOVIES, CONTENT_TVSHOWS, CONTENT_UNKNOWN
 from resources.lib.providers.tmdb import KEY_OK, KEY_UNCHECKED
 
 # The field toggles in the order the library page lists them.
 TOGGLES: tuple[str, ...] = tuple(FIELD_TOGGLES)
+
+# Toggles that mean something in one kind of library only: the page of a
+# library that holds the other kind hides them, and their ticks stay as
+# they are. A library Kodi has scanned nothing into, or one holding both
+# kinds, shows every toggle.
+MOVIE_TOGGLES: frozenset[str] = frozenset({"trailers", "taglines", "movie_sets"})
+TV_TOGGLES: frozenset[str] = frozenset({"episode_titles", "episode_thumbs"})
 
 # rating_source values in the order the rating picker lists them, the
 # default first.
@@ -75,19 +83,36 @@ def initial_state(
     return SetupState(api_key=key, key_status=KEY_OK if key else "", libraries=config)
 
 
-def page_groups(lib: Library) -> list[str]:
+def page_toggles(content: str) -> tuple[str, ...]:
+    """The toggles a library page lists for a library holding ``content``
+    (data/sources.library_content), in TOGGLES order."""
+    hidden: frozenset[str] = frozenset()
+    if content == CONTENT_MOVIES:
+        hidden = TV_TOGGLES
+    elif content == CONTENT_TVSHOWS:
+        hidden = MOVIE_TOGGLES
+    return tuple(t for t in TOGGLES if t not in hidden)
+
+
+def shown_toggles(lib: Library, content: str) -> frozenset[str]:
+    """The library's ticks that apply to what it holds."""
+    return lib.toggles & frozenset(page_toggles(content))
+
+
+def page_groups(lib: Library, content: str = CONTENT_UNKNOWN) -> list[str]:
     """The groups the library's page shows, in order: a group whose
-    toggles are all off is hidden."""
+    toggles are all off, or all hidden, is hidden."""
+    on = shown_toggles(lib, content)
     groups = ["language", "fields"]
-    if "ratings" in lib.toggles:
+    if "ratings" in on:
         groups.append("rating")
-    if any(t in lib.toggles for t in TEXT_TOGGLES):
+    if any(t in on for t in TEXT_TOGGLES):
         groups.append("text")
-    if "main_titles" in lib.toggles:
+    if "main_titles" in on:
         groups.append("titles")
-    if any(t in lib.toggles for t in ART_TOGGLES):
+    if any(t in on for t in ART_TOGGLES):
         groups.append("art")
-    if "certifications" in lib.toggles:
+    if "certifications" in on:
         groups.append("age_ratings")
     return groups
 

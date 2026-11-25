@@ -1702,3 +1702,35 @@ msgstr ""
 msgctxt "#32774"
 msgid "MetaMender leaves this set alone; Details says why"
 msgstr ""
+
+msgctxt "#32777"
+msgid "{} (movies library)"
+msgstr ""
+
+msgctxt "#32778"
+msgid "{} (TV shows library)"
+msgstr ""
+
+msgctxt "#32779"
+msgid "Kodi has nothing from this folder in its library yet, so the options for movies and for TV shows are all shown."
+msgstr ""
+
+msgctxt "#32780"
+msgid "This folder holds both movies and TV shows, so the options for both are shown."
+msgstr ""
+
+msgctxt "#32781"
+msgid "Genre, studio, country and runtime."
+msgstr ""
+
+msgctxt "#32782"
+msgid "Genre, runtime and first aired date."
+msgstr ""
+
+msgctxt "#32783"
+msgid "Fills clear logos, key art, landscape, banner, disc art and clear art."
+msgstr ""
+
+msgctxt "#32784"
+msgid "Fills clear logos, key art, landscape, banner, clear art and character art."
+msgstr ""

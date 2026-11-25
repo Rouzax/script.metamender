@@ -71,6 +71,20 @@ The page holds every choice for one library, in groups. The first two groups,
 while a field they are about is ticked, so a library that only fills plots
 has a short page. **Done** (or Back) returns to the list.
 
+The heading says whether the library holds movies or TV shows, and the page
+offers only the choices for that kind. MetaMender tells the kind from what
+Kodi has scanned into the library's folders, because Kodi does not share
+the content type you set on a source with add-ons. Two cases show every
+choice, with a line saying why:
+
+- **Kodi has nothing from the folder yet**, for example a source you just
+  added. Once Kodi has scanned it, the next time you open the page shows only
+  the choices for what it holds.
+- **The folder holds both movies and TV shows.**
+
+A choice the page hides keeps its tick, but it does nothing in that library,
+and the list and the summary leave it out.
+
 ### Language
 
 **Language**
@@ -114,6 +128,11 @@ never changed, whatever you tick here.
 | Episode thumbs | Replaces an episode thumb Kodi grabbed from the video, and a broken or empty one, with the official episode still |
 | Movie sets | Gives movie sets their name and plot in the library's language, and their art together with Posters, Fanart and Other art; merges the duplicate sets a renamed set leaves behind; see [Movie sets](#movie-sets) |
 | Details | Genre, studio, country, runtime and first aired date |
+
+A movies library has no **Episode titles** or **Episode thumbs**, and a TV
+shows library has no **Trailers**, **Taglines** or **Movie sets**. **Details**
+and **Other art** name only what applies: studio, country and disc art for
+movies; first aired date and character art for TV shows.
 
 Unticking a field stops MetaMender changing it from then on; the values it
 already wrote stay.
