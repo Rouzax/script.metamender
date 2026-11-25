@@ -6,6 +6,8 @@ from __future__ import annotations
 from typing import Any
 
 from resources.lib.data.libraries import Library, LibraryConfig
+from resources.lib.data.identity import compute_identity
+from resources.lib.data.media_types import MOVIE, SET
 from resources.lib.engine.sets import (
     LEFT_DUPLICATE,
     LEFT_NO_COLLECTION,
@@ -17,7 +19,11 @@ from resources.lib.engine.sets import (
     NONE_RECHECK_DAYS,
     Move,
     collection_is_stale,
+    collections_with_sets,
     describe_set,
+    like_matches,
+    name_collides,
+    plan_joins,
     plan_sets,
     user_moved,
 )
@@ -462,3 +468,149 @@ def test_collection_answer_never_stale():
     row = {"collection_id": "10", "checked_on": "2020-01-01"}
     assert not collection_is_stale(row, "2026-11-25")
     assert not collection_is_stale({"collection_id": "10", "checked_on": ""}, "2026-11-25")
+
+
+# ---------------------------------------------------------------------------
+# Which movies join a set
+# ---------------------------------------------------------------------------
+
+
+def _joins(movies, sets=None, set_members=None, libraries=None, collections=None,
+           names=None, set_moves=None):
+    """plan_joins the way the pass calls it: plans and with_sets from the same
+    Kodi state."""
+    libs = libraries or _config()
+    sets = sets or []
+    set_members = set_members or []
+    cols = collections or {}
+    plans, _ = plan_sets(sets, set_members, libs, cols, {}, names or {}, {})
+    with_sets = collections_with_sets(sets, set_members, cols, names or {})
+    return plan_joins(movies + set_members, plans, libs, cols, set_moves or {}, with_sets)
+
+
+def test_joins_the_managed_set():
+    held = [_movie(1, 7, MOVIES, tmdb="11"), _movie(2, 7, MOVIES, tmdb="12")]
+    loose = _movie(3, 0, MOVIES, tmdb="13")
+    cols = {"11": "5", "12": "5", "13": "5"}
+    joins = _joins([loose], sets=[M(7, "Saga")], set_members=held, collections=cols)
+    assert len(joins) == 1
+    join = joins[0]
+    assert (join.movieid, join.collection_id, join.to_setid) == (3, "5", 7)
+    assert join.identity == compute_identity(loose, MOVIE)
+    assert join.title == "Film 3" and join.file == loose["file"]
+
+
+def test_creates_the_set_when_the_collection_has_none():
+    loose = [_movie(4, 0, MOVIES, tmdb="14"), _movie(3, 0, MOVIES, tmdb="13")]
+    joins = _joins(loose, collections={"13": "5", "14": "5"})
+    assert [(j.movieid, j.to_setid) for j in joins] == [(3, None), (4, None)]
+
+
+def test_a_single_owned_movie_still_creates():
+    joins = _joins([_movie(3, 0, MOVIES, tmdb="13")], collections={"13": "5"})
+    assert [(j.movieid, j.to_setid) for j in joins] == [(3, None)]
+
+
+def test_shared_sets_only_never_receive_or_duplicate():
+    # "Favourites" holds one movie of collection 5 and two of other collections.
+    held = [_movie(1, 9, MOVIES, tmdb="11"), _movie(2, 9, MOVIES, tmdb="12"),
+            _movie(5, 9, MOVIES, tmdb="15")]
+    cols = {"11": "5", "12": "6", "15": "7", "13": "5"}
+    loose = _movie(3, 0, MOVIES, tmdb="13")
+    plans, _ = plan_sets([M(9, "Favourites")], held, _config(), cols, {}, {}, {})
+    assert plans[0].reason is not None
+    assert _joins([loose], sets=[M(9, "Favourites")], set_members=held,
+                  collections=cols) == []
+
+
+def test_set_with_a_known_name_counts_without_members():
+    names = {compute_identity({"collection_id": "5"}, SET): frozenset({"saga"})}
+    assert collections_with_sets([M(7, " Saga ")], [], {"99": "5"}, names) == frozenset({"5"})
+    assert collections_with_sets([M(7, "Other")], [], {"99": "5"}, names) == frozenset()
+
+
+def test_set_counts_for_a_collection_through_a_member_in_any_library():
+    member = _movie(1, 7, ELSEWHERE, tmdb="11")
+    assert collections_with_sets([M(7, "Mine")], [member], {"11": "5"}, {}) == frozenset({"5"})
+
+
+def test_movie_in_a_library_without_movie_sets_is_skipped():
+    # The managed set is in Series (ticked); the loose movie is in Movies (not).
+    libs = _config(movies_toggles=frozenset({"plots"}))
+    held = [_movie(1, 7, SERIES, tmdb="11"), _movie(2, 7, SERIES, tmdb="12")]
+    loose = _movie(3, 0, MOVIES, tmdb="13")
+    cols = {"11": "5", "12": "5", "13": "5"}
+    assert _joins([loose], sets=[M(7, "Saga")], set_members=held, libraries=libs,
+                  collections=cols) == []
+
+
+def test_movie_in_an_excluded_subfolder_is_skipped():
+    held = [_movie(1, 7, MOVIES, tmdb="11"), _movie(2, 7, MOVIES, tmdb="12")]
+    loose = _movie(3, 0, EXCLUDED, tmdb="13")
+    cols = {"11": "5", "12": "5", "13": "5"}
+    assert _joins([loose], sets=[M(7, "Saga")], set_members=held, collections=cols) == []
+
+
+def test_a_locked_or_user_moved_movie_is_skipped():
+    loose = _movie(3, 0, MOVIES, tmdb="13")
+    identity = compute_identity(loose, MOVIE)
+    cols = {"13": "5"}
+    locked = {identity: {"kodi_id": 99, "to_setid": 7, "locked": True}}
+    taken_out = {identity: {"kodi_id": 3, "to_setid": 7, "locked": False}}
+    assert _joins([loose], collections=cols, set_moves=locked) == []
+    assert _joins([loose], collections=cols, set_moves=taken_out) == []
+
+
+def test_a_readded_movie_with_an_unlocked_old_move_still_joins():
+    loose = _movie(3, 0, MOVIES, tmdb="13")
+    stale = {compute_identity(loose, MOVIE): {"kodi_id": 99, "to_setid": 7, "locked": False}}
+    assert len(_joins([loose], collections={"13": "5"}, set_moves=stale)) == 1
+
+
+def test_no_collection_or_no_tmdb_id_is_skipped():
+    none_collection = _movie(3, 0, MOVIES, tmdb="13")
+    unknown = _movie(4, 0, MOVIES, tmdb="14")
+    no_id = {**_movie(5, 0, MOVIES), "uniqueid": {}}
+    assert _joins([none_collection, unknown, no_id], collections={"13": ""}) == []
+
+
+def test_a_movie_already_in_another_set_is_never_a_candidate():
+    held = [_movie(1, 7, MOVIES, tmdb="11"), _movie(2, 7, MOVIES, tmdb="12")]
+    elsewhere = _movie(3, 8, MOVIES, tmdb="13")
+    cols = {"11": "5", "12": "5", "13": "5"}
+    assert _joins([], sets=[M(7, "Saga"), M(8, "Mine")],
+                  set_members=held + [elsewhere], collections=cols) == []
+
+
+def test_joins_are_ordered_by_collection_then_movie():
+    loose = [_movie(9, 0, MOVIES, tmdb="19"), _movie(4, 0, MOVIES, tmdb="14"),
+             _movie(6, 0, MOVIES, tmdb="16")]
+    cols = {"19": "2", "14": "9", "16": "2"}
+    joins = _joins(loose, collections=cols)
+    assert [(j.collection_id, j.movieid) for j in joins] == [("2", 6), ("2", 9), ("9", 4)]
+
+
+# ---------------------------------------------------------------------------
+# Name collisions as Kodi's LIKE sees them
+# ---------------------------------------------------------------------------
+
+
+def test_like_is_case_insensitive_and_wildcards():
+    assert like_matches("Alien", "alien")
+    assert like_matches("100% Wolf Collection", "100x Wolf Collection")
+    assert like_matches("Wolf_", "Wolfs")
+    assert not like_matches("Alien", "Aliens")
+    assert not like_matches("Wolf_", "Wolf")
+
+
+def test_like_treats_regex_metacharacters_literally():
+    assert like_matches("Saga (1+2).", "saga (1+2).")
+    assert not like_matches("a.c", "abc")
+
+
+def test_name_collides_ignores_the_target_set():
+    sets = [M(1, "Alien Collection"), M(2, "Other")]
+    assert not name_collides("Alien Collection", sets, 1)
+    assert name_collides("Alien Collection", sets, None)
+    assert name_collides("alien collection", sets, 2)
+    assert not name_collides("Predator", sets, None)

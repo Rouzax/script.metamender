@@ -28,6 +28,7 @@ Logging:
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import date
@@ -290,6 +291,98 @@ def plan_sets(
                 final[plan.setid] = replace(plan, reason=LEFT_SHARED)
     plans = [final.get(plan.setid, plan) for plan, _ in first]
     return plans, moves
+
+
+@dataclass(frozen=True)
+class Join:
+    movieid: int
+    identity: str
+    title: str
+    collection_id: str
+    # The managed set it joins; None when the collection's set is created.
+    to_setid: Optional[int]
+    # The movie's file: the new set's library and folder settings read from it.
+    file: str
+
+
+def collections_with_sets(
+    sets: list[dict[str, Any]], members: list[dict[str, Any]],
+    collections: dict[str, str], names: dict[str, frozenset[str]],
+) -> frozenset[str]:
+    """Every collection some Kodi set stands for, whatever its plan reason:
+    a set with a member (in any library, counted or not) of that stored
+    collection, or titled with a known name of it. Such a collection never
+    gets a second set made beside the one the user left out. Only the
+    collections in ``collections`` are considered: no other has a movie."""
+    set_ids = {int(s.get("setid") or 0) for s in sets}
+    found = {
+        cid for member in members if int(member.get("setid") or 0) in set_ids
+        for cid in [_member_collection(member, collections)] if cid
+    }
+    titles = {_name_key(str(s.get("title") or "")) for s in sets}
+    for cid in {c for c in collections.values() if c} - found:
+        if names.get(_set_identity(cid), frozenset()) & titles:
+            found.add(cid)
+    return frozenset(found)
+
+
+def plan_joins(
+    movies: list[dict[str, Any]], plans: list[SetPlan], libraries: LibraryConfig,
+    collections: dict[str, str], set_moves: dict[str, dict[str, Any]],
+    with_sets: frozenset[str],
+) -> list[Join]:
+    """The movies in no set that join their collection's set, by collection
+    id then movieid. ``movies`` is the whole listing; only those with setid 0
+    are candidates. A candidate is in an included library and folder with
+    Movie sets ticked, has a stored non-empty collection and was not taken
+    out of its set by the user. It joins the collection's managed plan; the
+    set is created when the collection has no Kodi set at all (``with_sets``,
+    see collections_with_sets); otherwise it waits, so a set the user made or
+    left out is never a target or duplicated."""
+    managed = {plan.collection_id: plan.setid for plan in reversed(plans)
+               if plan.reason is None and plan.collection_id}
+    joins: list[Join] = []
+    for movie in movies:
+        if int(movie.get("setid") or 0) != 0:
+            continue
+        lib = _counted_library(movie, libraries)
+        if lib is None or _SETS_TOGGLE not in lib.toggles:
+            continue
+        cid = _member_collection(movie, collections)
+        if not cid:
+            continue
+        movieid = int(movie.get("movieid") or 0)
+        identity = compute_identity(movie, MOVIE)
+        if user_moved(set_moves.get(identity), movieid, 0):
+            continue
+        if cid in managed:
+            target: Optional[int] = managed[cid]
+        elif cid in with_sets:
+            continue
+        else:
+            target = None
+        joins.append(Join(
+            movieid=movieid, identity=identity, title=str(movie.get("title") or ""),
+            collection_id=cid, to_setid=target, file=str(movie.get("file") or ""),
+        ))
+    return sorted(joins, key=lambda j: (j.collection_id, j.movieid))
+
+
+def like_matches(pattern: str, name: str) -> bool:
+    """Whether ``name`` matches the SQL LIKE ``pattern`` as Kodi's default
+    database (SQLite) evaluates it: ``%`` any run, ``_`` one character, the
+    whole string, case-insensitive. SQLite folds ASCII letters only; this
+    folds all Unicode ones, which only over-reports a collision."""
+    regex = "".join(".*" if c == "%" else "." if c == "_" else re.escape(c)
+                    for c in pattern)
+    return re.fullmatch("(?is)" + regex, name) is not None
+
+
+def name_collides(name: str, sets: list[dict[str, Any]], target_setid: Optional[int]) -> bool:
+    """Whether Kodi's name match for ``name`` (AddSet uses LIKE) would find a
+    set other than ``target_setid``, so a write would misfile the movie."""
+    return any(like_matches(name, str(s.get("title") or ""))
+               for s in sets if int(s.get("setid") or 0) != target_setid)
 
 
 # ---------------------------------------------------------------------------
