@@ -479,6 +479,11 @@ until you tick it, also in a library set up before MetaMender handled sets.
 
 Sets are checked right after the movies.
 
+MetaMender never deletes a set. It takes a movie out of a set only to merge
+a duplicate set (see [Duplicate sets](#duplicate-sets)), or to undo an
+addition Kodi filed in the wrong set (see
+[Movies in no set](#movies-in-no-set)).
+
 MetaMender does not read Kodi's **Show movie sets** or **Include sets
 containing a single movie** settings. They only decide whether Kodi's movie
 list groups a set's movies under the set; Kodi keeps the sets either way,
@@ -595,8 +600,9 @@ Where the movie goes:
   movies, as your scraper does.
 - **The collection has a set MetaMender leaves alone**, such as a set you
   called "Favourites" that holds one of its movies, or a set that follows a
-  library without **Movie sets** ticked: the movie stays in no set. MetaMender never adds a movie to a set it does not
-  look after, and never creates a second set beside one you already have.
+  library without **Movie sets** ticked: the movie stays in no set.
+  MetaMender never adds a movie to a set it does not look after, and never
+  creates a second set beside one you already have.
 
 What stays as it is:
 
@@ -646,9 +652,6 @@ Subfolder names follow Kodi's rules: a character a file name cannot hold,
 such as `:`, becomes `_`, so "Star Wars: Saga" is looked up as
 "Star Wars_ Saga". A folder MetaMender cannot read, such as a network share
 that is not mounted, counts as having no subfolders.
-
-Apart from merging duplicates and adding movies in no set, MetaMender never
-creates a set, never deletes one and never takes a movie out of a set.
 
 ## When your changes apply
 
