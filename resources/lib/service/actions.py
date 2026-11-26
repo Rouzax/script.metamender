@@ -291,8 +291,9 @@ def _report(
     # TMDB answered, so the key works: a rejected-key problem is over.
     if stats.get("tmdb_answered"):
         attention.update(tracker, lambda a: a.clear(attention.KEY_REJECTED))
-    # A movie moved into a set changed the set as much as a field write.
-    updated = stats.get("updated", 0) + stats.get("moved", 0)
+    # A movie moved or added into a set changed the set as much as a field
+    # write.
+    updated = stats.get("updated", 0) + stats.get("moved", 0) + stats.get("joined", 0)
     log.info(
         "Update now complete",
         event="actions.update_now",

@@ -49,6 +49,7 @@ REASON_LOCKED = "locked"        # the user locked the field
 REASON_LOCAL_ART = "local_art"  # the art is a local file, never replaced
 REASON_OTHER_ART = "other_art"  # the art came from a scraper or the user, not MetaMender
 REASON_CHANGED_OUTSIDE = "changed_outside"  # the art changed outside MetaMender; locked
+REASON_SET_FOLDER = "set_folder"  # a movie set information folder holds the set's name; kept
 REASON_FROM_FILE = "from_file"  # Kodi shows the video file's own length as the runtime
 
 _SCHEMA_SQL = """\
@@ -176,6 +177,18 @@ CREATE TABLE IF NOT EXISTS set_moves (
     locked INTEGER DEFAULT 0
 );
 
+-- The managed set each movie (keyed on its identity) was last seen in by
+-- the set pass, with its Kodi movieid then. A movie seen in a set and
+-- later in no set under the same movieid was taken out by the user: locked
+-- marks that, so the movie never joins a set again.
+CREATE TABLE IF NOT EXISTS set_seen (
+    identity TEXT PRIMARY KEY,
+    kodi_id INTEGER,
+    setid INTEGER,
+    seen_on TEXT,
+    locked INTEGER DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS scan_state (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -203,7 +216,7 @@ _IDENTITY_TABLES = ("field_keep", "art_seen", "art_checks")
 
 # Tables keyed on the identity alone, which belong to one media type: pruned
 # with that type's items.
-_TYPE_TABLES = {"set": "set_names", "movie": "set_moves"}
+_TYPE_TABLES = {"set": ("set_names",), "movie": ("set_moves", "set_seen")}
 
 
 class TrackerDB:
@@ -551,7 +564,7 @@ class TrackerDB:
 
         Items with a NULL last_seen are kept (never confirmed present yet).
         Associated field_status, field_keep, art_seen and art_checks rows are
-        deleted too, and a set's names or a movie's set move.
+        deleted too, and a set's names or a movie's set move and set sighting.
         `cutoff` is an ISO date string (callers pass today minus the
         retention window). Returns the number of items removed.
         """
@@ -569,9 +582,9 @@ class TrackerDB:
                     "DELETE FROM {} WHERE media_type = ? AND identity = ?".format(table),
                     [(media_type, r["identity"]) for r in doomed],
                 )
-            if media_type in _TYPE_TABLES:
+            for table in _TYPE_TABLES.get(media_type, ()):
                 self._conn.executemany(
-                    "DELETE FROM {} WHERE identity = ?".format(_TYPE_TABLES[media_type]),
+                    "DELETE FROM {} WHERE identity = ?".format(table),
                     [(r["identity"],) for r in doomed],
                 )
             placeholders = ", ".join(["?"] * len(ids))
@@ -611,10 +624,9 @@ class TrackerDB:
                 "WHERE media_type = ? AND identity = ?".format(table),
                 (new, media_type, old),
             )
-        if media_type in _TYPE_TABLES:
+        for table in _TYPE_TABLES.get(media_type, ()):
             self._conn.execute(
-                "UPDATE OR REPLACE {} SET identity = ? WHERE identity = ?".format(
-                    _TYPE_TABLES[media_type]),
+                "UPDATE OR REPLACE {} SET identity = ? WHERE identity = ?".format(table),
                 (new, old),
             )
 
@@ -1068,6 +1080,19 @@ class TrackerDB:
         ).fetchone()
         return None if row is None else row["collection_id"]
 
+    def get_movie_collection_row(self, tmdb_id: str) -> dict[str, str] | None:
+        """The stored collection answer of a movie with the date it was
+        asked (``collection_id`` "" for none, ``checked_on`` "" when never
+        dated), or None when TMDB has not been asked yet."""
+        row = self._conn.execute(
+            "SELECT collection_id, checked_on FROM movie_collections WHERE tmdb_id = ?",
+            (tmdb_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {"collection_id": row["collection_id"] or "",
+                "checked_on": row["checked_on"] or ""}
+
     def set_movie_collection(self, tmdb_id: str, collection_id: str, checked_on: str) -> None:
         """Record a movie's TMDB collection, "" for none (no commit)."""
         try:
@@ -1133,6 +1158,40 @@ class TrackerDB:
             )
         except sqlite3.Error:
             log.exception("Failed to lock a set move", event="tracker.error",
+                          identity=identity)
+
+    def get_set_seen(self, identity: str) -> dict[str, Any] | None:
+        """The managed set a movie was last seen in, or None."""
+        row = self._conn.execute(
+            "SELECT kodi_id, setid, seen_on, locked FROM set_seen WHERE identity = ?",
+            (identity,),
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def record_set_seen(self, rows: Iterable[tuple[str, int, int]], seen_on: str) -> None:
+        """Record each (identity, kodi_id, setid) as seen in that managed set,
+        replacing an unlocked earlier sighting (no commit). A locked row
+        stays as it is."""
+        try:
+            self._conn.executemany(
+                "INSERT INTO set_seen (identity, kodi_id, setid, seen_on, locked) "
+                "VALUES (?, ?, ?, ?, 0) ON CONFLICT(identity) DO UPDATE SET "
+                "kodi_id = excluded.kodi_id, setid = excluded.setid, "
+                "seen_on = excluded.seen_on WHERE set_seen.locked = 0",
+                [(identity, kodi_id, setid, seen_on) for identity, kodi_id, setid in rows],
+            )
+        except sqlite3.Error:
+            log.exception("Failed to record set members seen", event="tracker.error")
+
+    def lock_set_seen(self, identity: str) -> None:
+        """Mark a movie as taken out of its set by the user, for good (no
+        commit)."""
+        try:
+            self._conn.execute(
+                "UPDATE set_seen SET locked = 1 WHERE identity = ?", (identity,),
+            )
+        except sqlite3.Error:
+            log.exception("Failed to lock a set sighting", event="tracker.error",
                           identity=identity)
 
     def moves_into(self, to_setid: int) -> list[dict[str, Any]]:

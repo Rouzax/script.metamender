@@ -4,6 +4,14 @@ MetaMender Changelog
 v1.3.1 (unreleased)
 -------------------
 Improvements:
+  - With Movie sets ticked, a movie in no set now joins its collection's
+    set, and a collection with no set gets one, also for a single movie.
+    A movie you take out of a set after this version has looked at the
+    set stays out, also after a refresh; one you took out before that is
+    added back once, and taking it out again keeps it out. No set is
+    created while TMDB has not answered for a movie that is in a set. A
+    set whose name has a folder in Kodi's movie set information folder
+    keeps that name.
   - A library's page says whether it is a movies or a TV shows library
     and offers only the choices for that kind: no taglines, trailers or
     movie sets for TV shows, no episode titles or thumbs for movies, and

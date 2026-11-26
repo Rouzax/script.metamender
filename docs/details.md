@@ -127,7 +127,11 @@ When MetaMender moved a movie out of a duplicate set (see
 [Duplicate sets](libraries.md#duplicate-sets)), the movie's **Ids** entry says
 so: "Moved by MetaMender from the set *old name* on *date*", or, once you have
 put the movie in another set yourself, "Left in the set *name*: you moved it
-there". MetaMender then never moves it again.
+there". MetaMender then never moves it again. For a movie MetaMender added to
+its collection's set while it was in no set (see
+[Movies in no set](libraries.md#movies-in-no-set)), the entry says "Added to
+this set by MetaMender on *date*"; once you take it out of the set, the line
+goes and MetaMender never adds it again.
 
 When an episode's number points at a different episode on TMDB or TheTVDB (the
 title and the date both disagree), MetaMender uses nothing from that site and
@@ -205,8 +209,15 @@ checked again, and the lock.
 
 The set's **Ids** entry shows its **TMDB collection** and, one line per
 movie, each movie MetaMender moved into the set from a duplicate: "*movie*:
-moved here from *old set name* on *date*". A move has no Restore; to undo
-one, move the movie back in Kodi, and MetaMender leaves it there.
+moved here from *old set name* on *date*", and each movie it added while the
+movie was in no set: "*movie*: added here on *date*". A move or addition has
+no Restore; to undo one, move the movie back in Kodi or use Kodi's **Remove
+from set**, and MetaMender leaves it there.
+
+When the set's name has a folder in Kodi's movie set information folder,
+its **Title** says "Named after your movie set information folder": the
+name is kept so Kodi still finds the folder (see
+[Movie set information folder](libraries.md#movie-set-information-folder)).
 
 ### A set MetaMender leaves alone
 

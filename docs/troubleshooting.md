@@ -76,7 +76,9 @@ write the same items.
 Per field, with **Restore original** in the Details window. There is no
 "undo everything": switching a field off stops further changes but leaves the
 values MetaMender already wrote, and **Reset tracker** only makes MetaMender
-check everything again.
+check everything again. A movie MetaMender moved or added to a set has no
+Restore: take it out with Kodi's **Remove from set**, or put it in another
+set, and MetaMender leaves it there.
 
 ### How do I remove MetaMender?
 
@@ -254,6 +256,34 @@ A set keeps its name, plot and art when:
   Kodi's video settings or menu) so Kodi drops it.
 - **It is settled.** Like other fields, a set is checked while its newest
   movie is new and then left alone. **Update now** checks it once more.
+
+### A movie was not added to its set
+
+MetaMender adds a movie in no set to its collection's set at the next scan
+(see [Movies in no set](libraries.md#movies-in-no-set)). It stays out when:
+
+- **Movie sets is not ticked** for the movie's library or folder, or the
+  library or folder is left out.
+- **TMDB lists it in no collection.** MetaMender asks again once that answer
+  is 180 days old.
+- **You took it out of the set**, or put it in another set, after
+  MetaMender saw it in a set it looks after, or added or moved it.
+  MetaMender respects that for good, also after you refresh the movie in
+  Kodi. A movie you took out before MetaMender first saw it in the set is
+  added once; take it out again and it stays out (see
+  [Movies in no set](libraries.md#movies-in-no-set)).
+- **The collection's set is one MetaMender leaves alone**, such as a set of
+  your own that holds movies of several collections; the Details window of
+  that set says why (see
+  [A movie set was left alone](#a-movie-set-was-left-alone)). MetaMender
+  does not create a second set beside it.
+- **TMDB did not answer**, or Kodi could mistake the set's name for another
+  set's. MetaMender tries again at the next scan. No set is created in a
+  scan in which TMDB did not answer for a movie that is in a set, in any
+  library, so a set that has to be created waits while TMDB is not
+  answering.
+- **You used Update now on the movie.** That does not add it to a set; the
+  next scan does.
 
 ### MetaMender changed something I wanted to keep
 

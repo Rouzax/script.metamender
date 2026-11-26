@@ -3,6 +3,7 @@ merges, and the set's name, plot and art (engine/sets.py prepare_sets and
 run_scan on SET). Kodi and the providers are faked."""
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -10,12 +11,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from resources.lib.constants import UPDATE_NOW_IDLE_SECONDS
-from resources.lib.data import kodi
+from resources.lib.data import kodi, setfolder
 from resources.lib.data.libraries import ART_SOURCE_FANART, Library, LibraryConfig
 from resources.lib.data.localart import EXISTS
 from resources.lib.data.media_types import MOVIE, SET
 from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
-from resources.lib.data.tracker import REASON_CHANGED_OUTSIDE
+from resources.lib.data.tracker import REASON_CHANGED_OUTSIDE, REASON_SET_FOLDER
 from resources.lib.engine import sets
 from resources.lib.engine.art import Poster
 from resources.lib.engine.scan import run_scan
@@ -49,26 +50,36 @@ def _library(toggles=("movie_sets",), language="nl-NL", fallback="", **kw: Any) 
     )])
 
 
+def _like(pattern: str, name: str) -> bool:
+    """SQL LIKE as Kodi's SQLite evaluates it, case-insensitive."""
+    regex = "".join(".*" if c == "%" else "." if c == "_" else re.escape(c) for c in pattern)
+    return re.fullmatch("(?is)" + regex, name) is not None
+
+
 class FakeKodi:
     """Kodi's sets and movies, with SetMovieDetails' set rules: a movie
-    filed under a name joins the set of that name (case-insensitive, as
-    AddSet's LIKE) or a new one, and AddSet overwrites that set's plot with
-    the moved movie's old set overview."""
+    filed under a name joins the first set whose title LIKE-matches it (as
+    AddSet does) or a new set with a new setid, ``set=""`` takes it out of
+    its set, and AddSet overwrites the set's plot with the movie's old set
+    overview. ``file_into`` misfiles every movie write into that setid."""
 
     def __init__(self) -> None:
         self.sets: dict[int, dict[str, Any]] = {}
         self.movies: dict[int, dict[str, Any]] = {}
         self.land_in: int | None = None
+        self.file_into: int | None = None
+        self.set_folder = ""
         self.update = MagicMock(side_effect=self._update)
 
     def add_set(self, setid: int, title: str, plot: str = "", art=None) -> None:
         self.sets[setid] = {"setid": setid, "title": title, "plot": plot,
                             "art": dict(art or {})}
 
-    def add_movie(self, movieid: int, setid: int, tmdb: str, premiered=RECENT) -> None:
+    def add_movie(self, movieid: int, setid: int, tmdb: str, premiered=RECENT,
+                  lib: str = LIB) -> None:
         self.movies[movieid] = {
             "movieid": movieid, "title": "Film {}".format(movieid), "set": "",
-            "setid": setid, "file": "{}film{}/film.mkv".format(LIB, movieid),
+            "setid": setid, "file": "{}film{}/film.mkv".format(lib, movieid),
             "uniqueid": {"tmdb": tmdb}, "premiered": premiered,
         }
 
@@ -77,7 +88,7 @@ class FakeKodi:
         return [kodi.flatten_art(dict(s, art=dict(s["art"])), SET) for s in self.sets.values()]
 
     def members(self):
-        return [dict(m) for m in self.movies.values() if m["setid"] > 0]
+        return [dict(m) for m in self.movies.values()]
 
     def movie_setid(self, movieid):
         if self.land_in is not None:
@@ -94,8 +105,13 @@ class FakeKodi:
             movie = self.movies[item_id]
             old = self.sets.get(movie["setid"]) or {}
             name = fields["set"]
-            target = next((s for s in self.sets.values()
-                           if s["title"].lower() == name.lower()), None)
+            if not name:
+                movie["setid"] = 0
+                return True
+            if self.file_into is not None:
+                target = self.sets[self.file_into]
+            else:
+                target = next((s for s in self.sets.values() if _like(name, s["title"])), None)
             if target is None:
                 setid = max(self.sets, default=0) + 1
                 self.add_set(setid, name)
@@ -120,10 +136,12 @@ class FakeKodi:
 def fake():
     fk = FakeKodi()
     with patch("resources.lib.data.kodi.get_all_items", side_effect=fk.list_items), \
-            patch("resources.lib.data.kodi.get_set_members", side_effect=fk.members), \
+            patch("resources.lib.data.kodi.get_movies_for_sets", side_effect=fk.members), \
             patch("resources.lib.data.kodi.get_movie_setid", side_effect=fk.movie_setid), \
             patch("resources.lib.data.kodi.get_item_by_id", side_effect=fk.details), \
             patch("resources.lib.data.kodi.update_item", fk.update), \
+            patch("resources.lib.data.kodi.movie_set_folder",
+                  side_effect=lambda: fk.set_folder), \
             patch("resources.lib.engine.sets.nfo_state", return_value=NO_NFO):
         yield fk
 
@@ -163,6 +181,7 @@ def _set_writes(fk: FakeKodi) -> list[dict[str, Any]]:
 
 
 def _movie_moves(fk: FakeKodi) -> list[tuple[int, str]]:
+    """Every movie write as (movieid, set name), in order."""
     return [(c.args[0], c.kwargs["set"]) for c in fk.update.call_args_list
             if c.args[1] is MOVIE]
 
@@ -227,6 +246,61 @@ def test_set_name_changed_outside_is_locked(tmp_path, kodi_stubs, fake, tmdb_api
     assert "title" not in _set_write(fake)
     assert "title" in tracker.locked_fields("set", IDENTITY)
     assert _fs(tracker)["title"]["last_reason"] == REASON_CHANGED_OUTSIDE
+    tracker.close()
+
+
+def _folders(tmp_path, monkeypatch, kodi_stubs, fake, *names):
+    monkeypatch.setattr(setfolder, "xbmcvfs", kodi_stubs["xbmcvfs"])
+    root = tmp_path / "MovieSets"
+    root.mkdir()
+    for name in names:
+        (root / name).mkdir()
+    fake.set_folder = str(root)
+
+
+def test_set_keeps_the_name_its_information_folder_has(
+        tmp_path, kodi_stubs, fake, tmdb_api, monkeypatch):
+    _folders(tmp_path, monkeypatch, kodi_stubs, fake, EN_NAME)
+    _one_set(fake)
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    write = _set_write(fake)
+    assert "title" not in write
+    assert write["plot"] == NL_PLOT
+    assert fake.sets[1]["title"] == EN_NAME
+    assert _fs(tracker)["title"]["last_reason"] == REASON_SET_FOLDER
+    assert "title" not in tracker.locked_fields("set", IDENTITY)
+    _make_due(tracker)
+    fake.update.reset_mock()
+    _scan(tracker, _library())
+    assert "title" not in _set_write(fake)
+    assert _fs(tracker)["title"]["last_reason"] == REASON_SET_FOLDER
+    tracker.close()
+
+
+def test_set_takes_the_tmdb_name_its_information_folder_has(
+        tmp_path, kodi_stubs, fake, tmdb_api, monkeypatch):
+    _folders(tmp_path, monkeypatch, kodi_stubs, fake, "Alien - Filmreihe")
+    _one_set(fake, title="Alien Collection")
+    tmdb_api["collection"].return_value = _collection(
+        names={"en": "Alien Collection", "nl-NL": NL_NAME, "nl": NL_NAME,
+               "de": "Alien - Filmreihe"})
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert _set_write(fake)["title"] == "Alien - Filmreihe"
+    tracker.close()
+
+
+@pytest.mark.parametrize("folder_state", ["unset", "error"])
+def test_set_renamed_when_no_folder_applies(
+        tmp_path, kodi_stubs, fake, tmdb_api, monkeypatch, folder_state):
+    if folder_state == "error":
+        _folders(tmp_path, monkeypatch, kodi_stubs, fake, EN_NAME)
+        kodi_stubs["xbmcvfs"].exists = MagicMock(side_effect=OSError("down"))
+    _one_set(fake)
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert _set_write(fake)["title"] == NL_NAME
     tracker.close()
 
 
@@ -415,6 +489,20 @@ def test_member_collection_fetched_once(tmp_path, kodi_stubs, fake, tmdb_api):
     _scan(tracker, _library())
     tmdb_api["member"].assert_not_called()
     assert tracker.get_movie_collection("93456") == "86066"
+    tracker.close()
+
+
+def test_stale_none_is_asked_again(tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    tmdb_api["member"].return_value = "10"
+    tracker = _make_tracker(tmp_path)
+    old = (date.today() - timedelta(days=200)).isoformat()
+    tracker.set_movie_collection("20352", "", old)
+    tracker.set_movie_collection("93456", "", date.today().isoformat())
+    _scan(tracker, _library())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == ["20352"]
+    assert tracker.get_movie_collection("20352") == "10"
+    assert tracker.get_movie_collection("93456") == ""
     tracker.close()
 
 
@@ -680,4 +768,481 @@ def test_left_alone_managed_set_stays_present(tmp_path, kodi_stubs, fake, tmdb_a
     assert tracker.get_item("set", IDENTITY) is not None
     assert tracker.get_keep("set", IDENTITY)["title"]["original"] == EN_NAME
     assert EN_NAME.lower() in tracker.get_set_names(IDENTITY)
+    tracker.close()
+
+
+# ---------------------------------------------------------------------------
+# Movies in no set join their collection's set
+# ---------------------------------------------------------------------------
+
+
+def _events(log: MagicMock, level: str) -> list[dict[str, Any]]:
+    return [c.kwargs for c in getattr(log, level).call_args_list]
+
+
+def test_loose_movie_joins_the_managed_set(tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_movie(3, 0, "211672")
+    tracker = _make_tracker(tmp_path)
+    log = MagicMock()
+    with patch.object(sets, "log", log):
+        stats = _scan(tracker, _library())
+    # Joined under the set's name at the time; the set pass renames it after.
+    assert _movie_moves(fake) == [(3, EN_NAME)]
+    assert fake.movies[3]["setid"] == 1
+    assert (stats["joined"], stats["sets_created"], stats["moved"]) == (1, 0, 0)
+    move = tracker.get_set_move("tmdb:211672")
+    assert (move["kodi_id"], move["from_name"], move["to_setid"], move["locked"]) == (
+        3, "", 1, 0)
+    assert {"event": "sets.joined", "movie": "Film 3", "set": EN_NAME, "setid": 1,
+            "created": False} in _events(log, "info")
+    # The set the movie joined is scanned in the same pass, with it counted.
+    assert tracker.get_item("set", IDENTITY)["kodi_id"] == 1
+    assert fake.sets[1]["title"] == NL_NAME
+    tracker.close()
+
+
+def test_collection_without_a_set_gets_one_and_later_movies_join_it(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_movie(1, 0, "20352")
+    fake.add_movie(2, 0, "93456")
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library())
+    # Named for the library language; the second movie joins the new set.
+    assert _movie_moves(fake) == [(1, NL_NAME), (2, NL_NAME)]
+    assert list(fake.sets) == [1]
+    assert fake.sets[1]["title"] == NL_NAME
+    assert fake.movies[1]["setid"] == fake.movies[2]["setid"] == 1
+    assert (stats["joined"], stats["sets_created"]) == (2, 1)
+    assert tracker.get_set_move("tmdb:20352")["to_setid"] == 1
+    assert tracker.get_set_move("tmdb:93456")["to_setid"] == 1
+    assert {EN_NAME.lower(), NL_NAME.lower()} <= tracker.get_set_names(IDENTITY)
+    # The created set comes back to the pass and is scanned at once.
+    assert stats["processed"] == 1
+    assert tracker.get_item("set", IDENTITY)["kodi_id"] == 1
+    assert _set_write(fake)["plot"] == NL_PLOT
+    tracker.close()
+
+
+def test_created_set_takes_the_name_of_its_set_information_folder(
+        tmp_path, kodi_stubs, fake, tmdb_api, monkeypatch):
+    monkeypatch.setattr(setfolder, "xbmcvfs", kodi_stubs["xbmcvfs"])
+    folder = tmp_path / "MovieSets"
+    (folder / "Despicable Me Collection").mkdir(parents=True)
+    fake.set_folder = str(folder)
+    fake.add_movie(1, 0, "20352")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == [(1, EN_NAME)]
+    tracker.close()
+
+
+def test_stop_during_joins_keeps_the_written_join_only(tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_movie(1, 0, "20352")
+    fake.add_movie(2, 0, "93456")
+    tracker = _make_tracker(tmp_path)
+    # Stored answers: no lookup runs, so the stop checks are the writes'.
+    for tmdb_id in ("20352", "93456"):
+        tracker.set_movie_collection(tmdb_id, "86066", date.today().isoformat())
+    # Not stopped at the start of the pass nor before the first join.
+    stops = iter([False, False])
+    with patch("resources.lib.engine.scan._stop_requested",
+               side_effect=lambda: next(stops, True)):
+        stats = _scan(tracker, _library(), monitor=_Monitor())
+    assert _movie_moves(fake) == [(1, NL_NAME)]
+    assert tracker.get_set_move("tmdb:20352")["to_setid"] == 1
+    assert tracker.get_set_move("tmdb:93456") is None
+    assert fake.movies[2]["setid"] == 0
+    assert stats["stopped"] and stats["processed"] == 0
+    assert stats["joined"] == 1
+    tracker.close()
+
+
+def test_stop_during_lookups_asks_no_further_and_joins_nothing(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_movie(1, 0, "20352")
+    fake.add_movie(2, 0, "93456")
+    tracker = _make_tracker(tmp_path)
+    # Not stopped at the start of the pass nor before the first lookup.
+    stops = iter([False, False])
+    with patch("resources.lib.engine.scan._stop_requested",
+               side_effect=lambda: next(stops, True)):
+        stats = _scan(tracker, _library(), monitor=_Monitor())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == ["20352"]
+    # The answer received is real and stays recorded.
+    assert tracker.get_movie_collection("20352") == "86066"
+    assert tracker.get_movie_collection("93456") is None
+    assert _movie_moves(fake) == []
+    tmdb_api["collection"].assert_not_called()
+    assert stats["stopped"] and stats["aborted"]
+    assert stats["joined"] == 0 and stats["processed"] == 0
+    tracker.close()
+
+
+def test_shutdown_during_lookups_ends_the_set_pass(tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_movie(1, 0, "20352")
+    monitor = MagicMock()
+    monitor.abortRequested.return_value = True
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library(), monitor=monitor)
+    tmdb_api["member"].assert_not_called()
+    assert _movie_moves(fake) == []
+    assert stats["aborted"] and not stats["stopped"]
+    tracker.close()
+
+
+def test_transient_candidate_lookup_joins_nothing(tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_movie(1, 0, "20352")
+    tmdb_api["member"].side_effect = TransientProviderError("down")
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert stats["transient"] == 1
+    assert tracker.get_movie_collection("20352") is None
+    assert tracker.get_set_move("tmdb:20352") is None
+    tmdb_api["collection"].assert_not_called()
+    tracker.close()
+
+
+def test_transient_answer_for_a_stale_none_keeps_it(tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_movie(1, 0, "20352")
+    old = (date.today() - timedelta(days=200)).isoformat()
+    tracker = _make_tracker(tmp_path)
+    tracker.set_movie_collection("20352", "", old)
+    tmdb_api["member"].side_effect = TransientProviderError("down")
+    stats = _scan(tracker, _library())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == ["20352"]
+    assert tracker.get_movie_collection_row("20352") == {"collection_id": "", "checked_on": old}
+    assert stats["transient"] == 1
+    assert _movie_moves(fake) == []
+    tracker.close()
+
+
+def test_misfiled_join_is_taken_back_out(tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_set(5, "Other")
+    fake.add_movie(3, 0, "211672")
+    fake.file_into = 5
+    tracker = _make_tracker(tmp_path)
+    log = MagicMock()
+    with patch.object(sets, "log", log):
+        stats = _scan(tracker, _library())
+    assert _movie_moves(fake) == [(3, EN_NAME), (3, "")]
+    assert fake.movies[3]["setid"] == 0
+    assert tracker.get_set_move("tmdb:211672") is None
+    assert stats["joined"] == 0
+    failed = [e for e in _events(log, "warning") if e["event"] == "sets.move_failed"]
+    assert len(failed) == 1 and failed[0]["setid"] == 5
+    tracker.close()
+
+
+def test_creation_skipped_when_the_name_would_match_another_set(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """AddSet matches by LIKE: "100% Wolf Collection" would file the movie
+    into "100x Wolf Collection"."""
+    tmdb_api["collection"].return_value = _collection(
+        names={"en": "100% Wolf Collection"}, plots={})
+    fake.add_set(9, "100x Wolf Collection")
+    fake.add_movie(1, 0, "20352")
+    tracker = _make_tracker(tmp_path)
+    log = MagicMock()
+    with patch.object(sets, "log", log):
+        stats = _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert stats["joined"] == 0
+    assert tracker.get_set_move("tmdb:20352") is None
+    skipped = [e for e in _events(log, "debug") if e.get("event") == "sets.join_skipped"]
+    assert [e["reason"] for e in skipped] == ["name_collision"]
+    tracker.close()
+
+
+def test_set_carrying_a_fetched_name_is_not_duplicated(tmp_path, kodi_stubs, fake, tmdb_api):
+    """A set Kodi has under one of the collection's TMDB names, that nothing
+    told the planning about yet: no second set is made beside it."""
+    fake.add_set(9, NL_NAME)
+    fake.add_movie(1, 0, "20352")
+    tracker = _make_tracker(tmp_path)
+    log = MagicMock()
+    with patch.object(sets, "log", log):
+        _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert list(fake.sets) == [9]
+    assert NL_NAME.lower() in tracker.get_set_names(IDENTITY)
+    skipped = [e for e in _events(log, "debug") if e.get("event") == "sets.join_skipped"]
+    assert [e["reason"] for e in skipped] == ["has_set"]
+    tracker.close()
+
+
+def test_set_in_an_excluded_library_counts_through_its_stored_member(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555", lib="smb://nas/Other/")
+    fake.add_movie(1, 0, "20352")
+    tracker = _make_tracker(tmp_path)
+    tracker.set_movie_collection("555", "86066", date.today().isoformat())
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert list(fake.sets) == [9]
+    # The member outside the ticked libraries is not asked about.
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == ["20352"]
+    tmdb_api["collection"].assert_not_called()
+    tracker.close()
+
+
+def test_movie_the_user_took_out_stays_out(tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_movie(3, 0, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert fake.movies[3]["setid"] == 1
+    # The user takes the movie out of the set again.
+    fake.movies[3]["setid"] = 0
+    _make_due(tracker)
+    fake.update.reset_mock()
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert tracker.get_set_move("tmdb:211672")["locked"] == 1
+    # Kodi refreshes it (new movieid): the locked record still holds.
+    del fake.movies[3]
+    fake.add_movie(30, 0, "211672")
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert tracker.get_set_move("tmdb:211672")["locked"] == 1
+    tracker.close()
+
+
+def test_update_now_on_a_set_joins_only_its_collection(tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_movie(3, 0, "211672")
+    fake.add_movie(4, 0, "444")
+    today = date.today().isoformat()
+    tracker = _make_tracker(tmp_path)
+    for tmdb_id in ("20352", "93456", "211672"):
+        tracker.set_movie_collection(tmdb_id, "86066", today)
+    tracker.set_movie_collection("444", "10", today)
+    stats = _scan(tracker, _library(), reset=True, only_set=1)
+    assert _movie_moves(fake) == [(3, EN_NAME)]
+    assert stats["joined"] == 1 and stats["sets_created"] == 0
+    assert stats["processed"] == 1
+    tracker.close()
+
+
+def _member_answers(timeouts: set[str], answer: str = "86066"):
+    """A movie collection lookup that times out for ``timeouts`` and names
+    ``answer`` for every other movie."""
+    def lookup(tmdb_id, _key):
+        if tmdb_id in timeouts:
+            raise TransientProviderError("timeout")
+        return answer
+    return lookup
+
+
+def test_no_set_is_created_while_a_set_member_lookup_timed_out(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """The member of the user's set "Mine" may be of the collection: a set
+    made beside it could not be taken back."""
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555")
+    fake.add_movie(1, 0, "20352")
+    tmdb_api["member"].side_effect = _member_answers({"555"})
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == ["555", "20352"]
+    assert _movie_moves(fake) == []
+    assert list(fake.sets) == [9]
+    assert stats["sets_created"] == 0 and stats["transient"] == 1
+    assert tracker.get_set_move("tmdb:20352") is None
+    tracker.close()
+
+
+def test_joins_into_a_managed_set_run_while_a_set_member_lookup_timed_out(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555")
+    fake.add_movie(3, 0, "211672")
+    tmdb_api["member"].side_effect = _member_answers({"555"})
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library())
+    assert _movie_moves(fake) == [(3, EN_NAME)]
+    assert stats["joined"] == 1 and stats["sets_created"] == 0
+    tracker.close()
+
+
+def _ticked_and_unticked() -> LibraryConfig:
+    return LibraryConfig([
+        Library(path=LIB, label="Kids", included=True, language="nl-NL",
+                fallback_language="", toggles=frozenset({"movie_sets"})),
+        Library(path=OTHER, label="Mine", included=True, language="nl-NL",
+                fallback_language="", toggles=frozenset()),
+    ])
+
+
+OTHER = "smb://nas/Other/"
+
+
+def test_set_member_without_an_answer_is_asked_before_a_set_is_created(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """A set the user keeps in a library without Movie sets ticked: its
+    member was never asked about, so it is asked before a set is made."""
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555", premiered="2001-01-01", lib=OTHER)
+    fake.add_movie(1, 0, "20352")
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _ticked_and_unticked())
+    assert sorted(c.args[0] for c in tmdb_api["member"].call_args_list) == ["20352", "555"]
+    assert tracker.get_movie_collection("555") == "86066"
+    assert _movie_moves(fake) == []
+    assert list(fake.sets) == [9]
+    assert stats["sets_created"] == 0
+    tmdb_api["collection"].assert_not_called()
+    tracker.close()
+
+
+def test_set_member_asked_before_a_creation_is_asked_once(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """A member of no collection is stored for good: the next scan does not
+    ask about it again and the set is made."""
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555", lib=OTHER)
+    fake.add_movie(1, 0, "20352")
+    tmdb_api["member"].side_effect = lambda tmdb_id, _key: "" if tmdb_id == "555" else "86066"
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _ticked_and_unticked())
+    assert tracker.get_movie_collection("555") == ""
+    assert _movie_moves(fake) == [(1, NL_NAME)]
+    tmdb_api["member"].reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _ticked_and_unticked())
+    assert [c.args[0] for c in tmdb_api["member"].call_args_list] == []
+    tracker.close()
+
+
+def test_creation_waits_when_the_asked_set_member_times_out(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_set(9, "Mine")
+    fake.add_movie(5, 9, "555", lib=OTHER)
+    fake.add_movie(1, 0, "20352")
+    tmdb_api["member"].side_effect = _member_answers({"555"})
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _ticked_and_unticked())
+    assert _movie_moves(fake) == []
+    assert stats["transient"] == 1
+    assert tracker.get_movie_collection("555") is None
+    tracker.close()
+
+
+def test_movie_taken_out_of_a_set_seen_before_stays_out(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """The user put the movie in the set and MetaMender never moved it:
+    seen in the managed set, then in no set, it was taken out by the user."""
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    fake.movies[3]["setid"] = 0
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert fake.movies[3]["setid"] == 0
+    assert tracker.get_set_seen("tmdb:211672")["locked"] == 1
+    # Kodi re-adding it (a new movieid) does not undo the user's choice.
+    del fake.movies[3]
+    fake.add_movie(30, 0, "211672")
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    tracker.close()
+
+
+def test_movie_readded_by_kodi_out_of_a_seen_set_may_join(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    # A refresh: Kodi deletes the movie and adds it again in no set.
+    del fake.movies[3]
+    fake.add_movie(30, 0, "211672")
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == [(30, NL_NAME)]
+    assert fake.movies[30]["setid"] == 1
+    tracker.close()
+
+
+def test_movie_never_seen_in_a_set_joins(tmp_path, kodi_stubs, fake, tmdb_api):
+    """A removal made before any scan recorded the set cannot be known."""
+    _one_set(fake)
+    fake.add_movie(3, 0, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == [(3, EN_NAME)]
+    tracker.close()
+
+
+def test_misfiled_join_puts_back_the_plot_of_the_set_it_landed_in(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    _one_set(fake)
+    fake.add_set(5, "Other", "Other plot")
+    fake.add_movie(3, 0, "211672")
+    fake.file_into = 5
+    real = fake.update.side_effect
+
+    def overwrite_plot(item_id, media_type, log_title="", **fields):
+        done = real(item_id, media_type, log_title, **fields)
+        if media_type is MOVIE and fields.get("set"):
+            fake.sets[5]["plot"] = ""
+        return done
+    fake.update.side_effect = overwrite_plot
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert fake.sets[5]["plot"] == "Other plot"
+    assert _set_write(fake, 5) == {"plot": "Other plot"}
+    tracker.close()
+
+
+def test_misfiled_creation_writes_no_further_movie_of_the_collection(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    fake.add_set(5, "Other")
+    fake.add_movie(1, 0, "20352")
+    fake.add_movie(2, 0, "93456")
+    fake.file_into = 5
+    tracker = _make_tracker(tmp_path)
+    stats = _scan(tracker, _library())
+    assert _movie_moves(fake) == [(1, NL_NAME), (1, "")]
+    assert fake.movies[2]["setid"] == 0
+    assert stats["joined"] == 0
+    tracker.close()
+
+
+def test_join_into_a_set_kodi_no_longer_lists_is_skipped(tmp_path, kodi_stubs, fake):
+    tracker = _make_tracker(tmp_path)
+    ctx = MagicMock(tracker=tracker)
+    join = sets.Join(movieid=3, identity="tmdb:3", title="Film 3", collection_id="86066",
+                     to_setid=42, file=LIB + "film3/film.mkv")
+    done, stopped = sets._join_movies(ctx, [join], {}, {}, _library(), "2026-11-26", {},
+                                      lambda: True)
+    assert (done, stopped) == ({}, False)
+    fake.update.assert_not_called()
+    tracker.close()
+
+
+def test_movies_of_a_set_the_user_removed_stay_out(tmp_path, kodi_stubs, fake, tmdb_api):
+    """Removing a set in Kodi leaves its movies in no set, as the same
+    entries: each was taken out by the user."""
+    _one_set(fake)
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    del fake.sets[1]
+    for movie in fake.movies.values():
+        movie["setid"] = 0
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert fake.sets == {}
     tracker.close()

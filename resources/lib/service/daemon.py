@@ -921,6 +921,8 @@ def run() -> None:
                             movies_updated=movie_stats.get("updated", 0),
                             sets_updated=set_stats.get("updated", 0),
                             movies_moved=set_stats.get("moved", 0),
+                            movies_joined=set_stats.get("joined", 0),
+                            sets_created=set_stats.get("sets_created", 0),
                             tvshows_updated=tvshow_stats.get("updated", 0),
                             seasons_updated=season_stats.get("updated", 0),
                             episodes_updated=episode_stats.get("updated", 0),

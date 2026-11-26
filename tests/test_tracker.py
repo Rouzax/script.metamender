@@ -1388,6 +1388,9 @@ def test_movie_collection_round_trip(tmp_path):
     db.set_movie_collection("603", "9999", "2026-11-08")
     db.commit()
     assert db.get_movie_collection("603") == "9999"
+    assert db.get_movie_collection_row("603") == {
+        "collection_id": "9999", "checked_on": "2026-11-08"}
+    assert db.get_movie_collection_row("1") is None
     db.close()
 
 
@@ -1438,6 +1441,7 @@ def test_prune_removes_set_names_and_moves(tmp_path):
     db.add_set_names("collection:2", ["Here"])
     db.record_set_move("tmdb:1", 1, "Gone", 3, "2026-11-01")
     db.record_set_move("tmdb:2", 2, "Here", 3, "2026-11-01")
+    db.record_set_seen([("tmdb:1", 1, 3), ("tmdb:2", 2, 3)], "2026-11-01")
     db.set_movie_collection("1", "86066", "2020-01-01")
     db.commit()
     assert db.prune_orphans("set", "2025-01-01") == 1
@@ -1447,6 +1451,8 @@ def test_prune_removes_set_names_and_moves(tmp_path):
     assert db.prune_orphans("movie", "2025-01-01") == 1
     assert db.get_set_move("tmdb:1") is None
     assert db.get_set_move("tmdb:2") is not None
+    assert db.get_set_seen("tmdb:1") is None
+    assert db.get_set_seen("tmdb:2") is not None
     # Member collections are never pruned.
     assert db.get_movie_collection("1") == "86066"
     db.close()
@@ -1459,7 +1465,7 @@ def test_set_tables_created_on_existing_db(tmp_path):
     db = TrackerDB(path)
     db.upsert_item("movie", "tmdb:1", title="Kept", kodi_id=1)
     db.commit()
-    for table in ("movie_collections", "set_names", "set_moves"):
+    for table in ("movie_collections", "set_names", "set_moves", "set_seen"):
         db._conn.execute("DROP TABLE {}".format(table))
     db.commit()
     db.close()
@@ -1468,6 +1474,21 @@ def test_set_tables_created_on_existing_db(tmp_path):
     db.set_movie_collection("603", "2344", "2026-11-01")
     db.add_set_names("collection:2344", ["The Matrix Collection"])
     db.record_set_move("tmdb:1", 1, "Matrix", 4, "2026-11-01")
+    db.record_set_seen([("tmdb:1", 1, 4)], "2026-11-01")
     db.commit()
     assert db.get_movie_collection("603") == "2344"
+    assert db.get_set_seen("tmdb:1")["setid"] == 4
+    db.close()
+
+
+def test_set_seen_is_replaced_until_locked(tmp_path):
+    db = TrackerDB(str(tmp_path / "backfill.db"))
+    db.record_set_seen([("tmdb:1", 70, 4)], "2026-11-01")
+    db.record_set_seen([("tmdb:1", 71, 6)], "2026-11-02")
+    assert db.get_set_seen("tmdb:1") == {
+        "kodi_id": 71, "setid": 6, "seen_on": "2026-11-02", "locked": 0}
+    db.lock_set_seen("tmdb:1")
+    db.record_set_seen([("tmdb:1", 72, 8)], "2026-11-03")
+    assert db.get_set_seen("tmdb:1") == {
+        "kodi_id": 71, "setid": 6, "seen_on": "2026-11-02", "locked": 1}
     db.close()

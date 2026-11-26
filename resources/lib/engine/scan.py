@@ -111,6 +111,7 @@ from resources.lib.data.localart import EXISTS, MISSING, local_art_state
 from resources.lib.data.media_types import SEASON, SET, MediaType
 from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
 from resources.lib.data.presets import load_preset
+from resources.lib.data.setfolder import folder_for
 from resources.lib.data.sources import kodi_ui_language
 from resources.lib.data.tracker import (
     REASON_CHANGED_OUTSIDE,
@@ -121,6 +122,7 @@ from resources.lib.data.tracker import (
     REASON_NFO,
     REASON_NOTHING,
     REASON_OTHER_ART,
+    REASON_SET_FOLDER,
     REASON_UNCHANGED,
     REASON_UNCHECKED,
     REASON_UPDATED,
@@ -331,6 +333,10 @@ def _make_stats() -> dict[str, Any]:
         "fanart_answered": False,
         # Movies the set pass moved out of a duplicate set (engine/sets.py).
         "moved": 0,
+        # Movies in no set the set pass added to their collection's set, and
+        # the sets it created for that.
+        "joined": 0,
+        "sets_created": 0,
     }
 
 
@@ -751,6 +757,7 @@ def _gate_art(
     fs_map: dict[str, dict[str, Any]],
     decisions: dict[str, str],
     missing: set[str],
+    set_folder: str = "",
 ) -> None:
     """Take the art fields MetaMender may not touch out of ``decisions``
     (art.art_gate) before anything is fetched, and record why. A field in
@@ -772,7 +779,7 @@ def _gate_art(
         return
     keep = tracker.get_keep(media_type, identity)
     if name:
-        _gate_set_name(tracker, identity, item, fs_map, decisions, keep)
+        _gate_set_name(tracker, identity, item, fs_map, decisions, keep, set_folder)
     for f in gated:
         current = kodi_form(item.get(f) or "")
         current_fp = fingerprint(current)
@@ -804,9 +811,12 @@ def _gate_set_name(
     fs_map: dict[str, dict[str, Any]],
     decisions: dict[str, str],
     keep: dict[str, dict[str, Any]],
+    set_folder: str = "",
 ) -> None:
     """_gate_art's rule for a movie set's name: a name changed outside
-    MetaMender since its first look is the user's, locked for good."""
+    MetaMender since its first look is the user's, locked for good. A name
+    that has a subfolder in the movie set information folder is kept too,
+    but not locked: the set follows TMDB again once the folder is gone."""
     current = kodi_form(item.get("title") or "")
     current_fp = fingerprint(current)
     first_fp = tracker.get_first_fp(SET.name, identity, "title")
@@ -816,6 +826,11 @@ def _gate_set_name(
     written_fp = ((keep.get("title") or {}).get("written_fp")
                   or (fs_map.get("title") or {}).get("written_value"))
     if name_gate(current_fp, first_fp, written_fp) is None:
+        if current and folder_for(set_folder, [current]) == current:
+            del decisions["title"]
+            _art_reason(tracker, SET.name, identity, "title", fs_map, REASON_SET_FOLDER)
+            log.debug("Set name left as it is", event="scan.art_gated",
+                      identity=identity, field="title", verdict=REASON_SET_FOLDER)
         return
     del decisions["title"]
     tracker.set_locked(SET.name, identity, "title", True)
@@ -1001,31 +1016,45 @@ def _hold_while_browsing(media_type: MediaType, monitor: Any,
     )
 
 
-def _before_set_move(
+def _set_pass_stop(
     monitor: Any, reset: bool, stats: dict[str, Any],
 ) -> Callable[[], bool]:
-    """The check sets.prepare_sets runs before moving a movie between sets:
-    False on shutdown or Stop scan (recorded in ``stats`` as the scan loop
-    does), otherwise it holds while the user browses the video library. A
-    move rewrites the library like any scan write. Update now (``reset``)
-    ignores Stop scan and holds only while keys are pressed."""
-    def check() -> bool:
-        # The hold ends on shutdown and on Stop scan too, so both are
-        # checked after it.
-        _hold_while_browsing(
-            SET, monitor, UPDATE_NOW_IDLE_SECONDS if reset else BROWSE_IDLE_SECONDS)
+    """The check sets.prepare_sets runs between TMDB lookups: True on
+    shutdown or Stop scan (recorded in ``stats`` as the scan loop does).
+    Update now (``reset``) ignores Stop scan. A lookup writes nothing to the
+    library, so it does not hold while the user browses."""
+    def stop() -> bool:
         if monitor is not None and monitor.abortRequested():
             log.info("Scan interrupted by shutdown", event="scan.abort",
                      media_type=SET.name, processed=0)
             stats["aborted"] = True
-            return False
+            return True
         if not reset and _stop_requested():
             log.info("Scan stopped by the user", event="scan.stopped",
                      media_type=SET.name, processed=0)
             stats["stopped"] = True
             stats["aborted"] = True
-            return False
-        return True
+            return True
+        return False
+    return stop
+
+
+def _before_set_move(
+    monitor: Any, reset: bool, stats: dict[str, Any],
+) -> Callable[[], bool]:
+    """The check sets.prepare_sets runs before moving a movie between sets
+    or into one: False on shutdown or Stop scan (_set_pass_stop), otherwise
+    it holds while the user browses the video library. A move rewrites the
+    library like any scan write. Update now (``reset``) holds only while
+    keys are pressed."""
+    stop = _set_pass_stop(monitor, reset, stats)
+
+    def check() -> bool:
+        # The hold ends on shutdown and on Stop scan too, so both are
+        # checked after it.
+        _hold_while_browsing(
+            SET, monitor, UPDATE_NOW_IDLE_SECONDS if reset else BROWSE_IDLE_SECONDS)
+        return not stop()
     return check
 
 
@@ -1479,6 +1508,7 @@ def run_scan(
         fanart_client_key=str(settings.get("fanart_client_key") or ""),
         fanart_cache={} if fanart_cache is None else fanart_cache,
         show_cache={} if show_cache is None else show_cache,
+        set_folder=kodi.movie_set_folder() if media_type is SET else "",
     )
     # Built on a library's first item, so a library the pass never meets
     # costs nothing (and logs no certification error).
@@ -1509,7 +1539,8 @@ def run_scan(
         items = _season_items(tracker, shared.show_id_map, new_only)
     elif items is None and media_type is SET:
         items = prepare_sets(shared, libraries, new_only, only_set, stats,
-                             _before_set_move(monitor, reset, stats))
+                             _before_set_move(monitor, reset, stats),
+                             _set_pass_stop(monitor, reset, stats))
     elif items is None:
         art = manages_art(media_type, libraries)
         items = (
@@ -1803,7 +1834,8 @@ def run_scan(
                 stats["transient"] += 1
                 _art_reason(tracker, media_type.name, identity, f, fs_map, REASON_UNCHECKED)
 
-        _gate_art(tracker, media_type.name, identity, item, fs_map, decisions, missing)
+        _gate_art(tracker, media_type.name, identity, item, fs_map, decisions, missing,
+                  ctx.set_folder)
         _drop_protected_art(tracker, media_type.name, identity, item, fs_map, decisions,
                             fill_only, REASON_FILL_ONLY, missing)
         due = any(d == FETCH_NOW for d in decisions.values())

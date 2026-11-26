@@ -897,7 +897,7 @@ def _with_sets(opened, monkeypatch, *, collection="1001", members=None, setid_of
     monkeypatch.setattr(details.kodi, "get_all_items",
                         lambda mt, **kw: [dict(s) for s in SETS.values()])
     members = [dict(HEAT_MEMBER, setid=setid_of_heat)] if members is None else members
-    monkeypatch.setattr(details.kodi, "get_set_members", lambda: [dict(m) for m in members])
+    monkeypatch.setattr(details.kodi, "get_movies_for_sets", lambda: [dict(m) for m in members])
     monkeypatch.setattr(details.kodi, "get_movie_setid", lambda movieid: setid_of_heat)
 
 

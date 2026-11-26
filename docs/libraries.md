@@ -126,7 +126,7 @@ never changed, whatever you tick here.
 | Fanart | Fills the main background image (fanart) of movies and shows, and refreshes it from TMDB or fanart.tv while a title is new, preferring one without text; only the main fanart, never the extra fanart (`fanart1`, `fanart2` and so on); see [Art](#art) |
 | Other art | Fills and refreshes the other art types: clear logo, key art, landscape, banner, disc art (movies only) and clear art, and character art (shows only); see [Art](#art) |
 | Episode thumbs | Replaces an episode thumb Kodi grabbed from the video, and a broken or empty one, with the official episode still |
-| Movie sets | Gives movie sets their name and plot in the library's language, and their art together with Posters, Fanart and Other art; merges the duplicate sets a renamed set leaves behind; see [Movie sets](#movie-sets) |
+| Movie sets | Gives movie sets their name and plot in the library's language, and their art together with Posters, Fanart and Other art; adds movies in no set to their collection's set, creating the set when it is missing; merges the duplicate sets a renamed set leaves behind; see [Movie sets](#movie-sets) |
 | Details | Genre, studio, country, runtime and first aired date |
 
 A movies library has no **Episode titles** or **Episode thumbs**, and a TV
@@ -472,10 +472,24 @@ films. Your scraper names it after TMDB's collection, in the scraper's
 language, so a Dutch library's set keeps an English name ("Despicable Me
 Collection") and plot while its movies are in Dutch. With **Movie sets**
 ticked, MetaMender gives the set TMDB's name and plot in the library's
-language, and its art with the art ticks. **Movie sets** is off until you
-tick it, also in a library set up before MetaMender handled sets.
+language, and its art with the art ticks. It also puts a movie that is in
+no set into its collection's set, and creates that set when the collection
+has none (see [Movies in no set](#movies-in-no-set)). **Movie sets** is off
+until you tick it, also in a library set up before MetaMender handled sets.
 
 Sets are checked right after the movies.
+
+MetaMender never deletes a set. It takes a movie out of a set only to merge
+a duplicate set (see [Duplicate sets](#duplicate-sets)), or to undo an
+addition Kodi filed in the wrong set (see
+[Movies in no set](#movies-in-no-set)).
+
+MetaMender does not read Kodi's **Show movie sets** or **Include sets
+containing a single movie** settings. They only decide whether Kodi's movie
+list groups a set's movies under the set; Kodi keeps the sets either way,
+and shows them under Sets and on a movie's information screen. To keep
+MetaMender away from your sets, leave **Movie sets** unticked for the
+library.
 
 ### Which library a set follows
 
@@ -511,6 +525,8 @@ by **Title to show**.
   and the Details window can unlock it.
 - **While the set is new**, MetaMender follows TMDB when it renames the
   collection. A set's age is that of its newest movie.
+- **A name that has a folder** in Kodi's movie set information folder is
+  kept; see [Movie set information folder](#movie-set-information-folder).
 
 ### Plot
 
@@ -557,8 +573,98 @@ moves a movie between sets.
   next time you clean the library (**Clean library** in Kodi's video
   settings or menu).
 
-Apart from merging duplicates, MetaMender never creates a set, never
-deletes one and never takes a movie out of a set.
+### Movies in no set
+
+Your scraper puts a movie into its TMDB collection's set, but not always: a
+movie scraped with an NFO file that names no set, or scraped before the
+collection existed on TMDB, sits in no set. With **Movie sets** ticked,
+MetaMender adds such a movie to its collection's set at the next scan.
+
+A movie is added when:
+
+- it is in no set;
+- it is in an included library and folder with **Movie sets** ticked;
+- TMDB lists it in a collection. MetaMender asks TMDB once per movie and
+  keeps the answer. When TMDB said the movie is in no collection,
+  MetaMender asks again once that answer is 180 days old, so a movie that
+  gets a collection later, for example when a sequel comes out, still
+  joins it.
+
+Where the movie goes:
+
+- **The collection has a set MetaMender looks after**: the movie joins it.
+- **The collection has no set yet**: MetaMender creates it by adding the
+  movie, named as under [Name](#name) for the movie's library, and gives it
+  its plot and art in the same scan. Other movies of that collection join
+  the same set. A collection gets a set even when you have only one of its
+  movies, as your scraper does. Before it creates a set, MetaMender asks
+  TMDB once about every movie in a set that it has no answer for, in any
+  library, also one you left out, so it never creates a set beside one you
+  keep there. If TMDB does not answer for a movie in a set, no set is
+  created in that scan; movies still join sets that already exist, and
+  the set is created at a later scan.
+- **The collection has a set MetaMender leaves alone**, such as a set you
+  called "Favourites" that holds one of its movies, or a set that follows a
+  library without **Movie sets** ticked: the movie stays in no set.
+  MetaMender never adds a movie to a set it does not look after, and never
+  creates a second set beside one you already have.
+
+What stays as it is:
+
+- **A movie in another set** stays there, also when that is a set you made,
+  such as "Favourites".
+- **A movie in no TMDB collection** stays in no set.
+- **A movie you take out of its set stays out.** At every scan MetaMender
+  notes which movies are in the sets it looks after. A movie it saw in such
+  a set and later finds in no set was taken out by you, so MetaMender never
+  adds it to a set again, also after you refresh it in Kodi. This holds
+  whoever put the movie in the set, and also when you remove a whole set:
+  each of its movies stays in no set. To undo an addition, use Kodi's
+  **Remove from set** on the movie, or put it in another set. There is no
+  **Restore original** for the set a movie is in.
+- **A movie MetaMender never saw in a set it looks after** looks the same
+  as one the scraper never put in a set, so MetaMender adds it once. That
+  is a movie you took out of its set before this version of MetaMender
+  first scanned the set, before you ticked **Movie sets**, or out of a set
+  MetaMender leaves alone. Take it out again and it stays out.
+- **A movie Kodi drops from its set when you refresh it**, for example
+  because its NFO file names no set, is a new entry to Kodi that you did
+  not take out, so MetaMender adds it again.
+
+When Kodi could mistake the set's name for the name of another set (Kodi
+matches set names without regard to upper and lower case), MetaMender does
+not add the movie, and tries again at the next scan. If Kodi still puts the
+movie in the wrong set, MetaMender takes it out again straight away.
+
+**Update now** on a set adds the movies of its collection that MetaMender
+already knows belong to it, without asking TMDB about other movies.
+**Update now** on a movie does not add it to a set; the next scan does.
+
+The [Details window](details.md#movie-sets) lists the movies MetaMender
+added to a set, and a movie's **Ids** entry says when it was added.
+
+### Movie set information folder
+
+Kodi's **Movie set information folder** setting names a folder with one
+subfolder per set, named after the set, for the set's own art. Kodi's set
+art picker (**Local art**) and **Export library** look the subfolder up by
+the set's current name, so a renamed set would lose it. When the setting is
+filled in, MetaMender:
+
+- **keeps the name of a set that has a subfolder there.** The plot and art
+  are still handled, and duplicate sets are still merged. The Details window
+  shows the name with "Named after your movie set information folder". The
+  name is not locked: once the subfolder is gone, the set follows TMDB's
+  name again.
+- **prefers a name that has a subfolder** when it names a set or creates
+  one: if a subfolder exists for any of TMDB's names of the collection, in
+  any language, the set gets that name instead of the one picked for the
+  library's language.
+
+Subfolder names follow Kodi's rules: a character a file name cannot hold,
+such as `:`, becomes `_`, so "Star Wars: Saga" is looked up as
+"Star Wars_ Saga". A folder MetaMender cannot read, such as a network share
+that is not mounted, counts as having no subfolders.
 
 ## When your changes apply
 
