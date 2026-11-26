@@ -137,3 +137,4 @@ feat/7d-provider-replacement.
 - [x] v1.2.0 (2026-11-22): settings per library, keep the original title, automatic upgrade from 1.1, MetaMender's own setup dialogs
 - [x] v1.2.1 (2026-11-22): scans hold their writes while you browse the library; Stop scan in the context menu
 - [x] v1.3.0 (2026-11-24): posters, fanart, other art and episode thumbs per library; movie sets named in the library's language, with duplicate sets merged; deleted local art filled
+- [x] v1.3.1 (2026-11-26): movies in no set join their collection's set and missing sets are created; library pages per kind; the video file's runtime is left alone; Update now responds on slow devices
