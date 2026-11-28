@@ -5479,10 +5479,11 @@ class TestNewOnlyScan:
 
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")
+    @patch("resources.lib.engine.scan.lookup_item")
     @patch("resources.lib.engine.scan.get_item_by_id")
     @patch("resources.lib.data.kodi.get_all_items")
     def test_targeted_scan_processes_a_row_marked_processed(
-        self, mock_all, mock_by_id, mock_tmdb, mock_update, tmp_path, kodi_stubs
+        self, mock_all, mock_by_id, mock_lookup, mock_tmdb, mock_update, tmp_path, kodi_stubs
     ):
         """A movie removed and added again gets a new Kodi id; its row may
         already be processed in the open full cycle, and the library event
@@ -5492,6 +5493,8 @@ class TestNewOnlyScan:
         identity = compute_identity(readded, MOVIE)
         mock_all.return_value = [{"movieid": 7}]
         mock_by_id.side_effect = lambda mt, i, art=True: {7: readded}.get(i)
+        # Kodi no longer has id 3, the one the row records: a re-add.
+        mock_lookup.side_effect = _kodi_answers({7: readded})
         mock_tmdb.return_value = _tmdb_movie_response()
         tracker = _make_tracker(tmp_path)
         tracker.upsert_item("movie", identity, kodi_id=3)
