@@ -41,7 +41,7 @@ def _enrich_imdb_id(
     """Write a discovered IMDB ID back to Kodi and the tracker. The item's
     own uniqueid is left as Kodi listed it: the scan computed its tracker
     identity from it, and the next scan adopts the new identity
-    (_tracker_identity)."""
+    (_resolve_identity)."""
     uid = dict(item.get("uniqueid") or {})
     uid["imdb"] = new_imdb
     kodi.update_item(kodi_id, ctx.media_type, title, uniqueid=uid)

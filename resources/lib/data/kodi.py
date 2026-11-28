@@ -115,7 +115,7 @@ def get_all_items(
         ids_only: Ask for the file only: each item carries its Kodi id,
             label and file, which keeps a listing of a large library cheap
             and still tells which library an item is in. Kodi has no file
-            on a season, so a season listing asks for nothing.
+            on a season or a movie set, so their listings ask for nothing.
         art: Ask for the art map and expose the managed art slots as
             ``poster`` / ``thumb``. Without it the items carry no art field
             at all, so nothing can read an unrequested slot as empty.
@@ -288,6 +288,26 @@ def get_seasons_for_scan(
     return seasons
 
 
+# lookup_item's answers. Kodi answers a details call for an id it does not
+# have with JSON-RPC error -32602 (invalid params); any other error, or no
+# answer at all, says nothing about whether the item exists.
+ITEM_FOUND = "found"
+ITEM_GONE = "gone"
+ITEM_FAILED = "failed"
+_INVALID_PARAMS = -32602
+
+
+def lookup_item(
+    media_type: MediaType, kodi_id: int, art: bool = False,
+) -> tuple[str, dict[str, Any] | None]:
+    """Ask Kodi for one library item, telling "no such id" from "the query
+    failed": (ITEM_FOUND, item), (ITEM_GONE, None) when Kodi answers that
+    the id does not exist or returns no details, (ITEM_FAILED, None) on any
+    other error. A gone id is an expected answer here and is logged at
+    DEBUG; ``art`` is as for get_all_items."""
+    return _lookup(media_type, kodi_id, art, gone_is_expected=True)
+
+
 def get_item_by_id(
     media_type: MediaType,
     item_id: int,
@@ -298,7 +318,8 @@ def get_item_by_id(
     Uses GetXDetails with the same property set as get_all_items, so the
     returned item has every field the scan engine expects. Returns None if
     the item does not exist or the query fails (the caller decides how to
-    surface that to the user).
+    surface that to the user); both are logged at WARNING, as the caller
+    expects the id to exist. lookup_item tells the two apart.
 
     Args:
         media_type: The media type to query (MOVIE, TVSHOW, SEASON or
@@ -309,22 +330,26 @@ def get_item_by_id(
     Returns:
         The item dict, or None when not found / on error.
     """
-    properties = _build_properties(media_type, art)
-    params: dict[str, Any] = {
-        media_type.kodi_id_field: item_id,
-        "properties": properties,
-    }
+    return _lookup(media_type, item_id, art, gone_is_expected=False)[1]
 
+
+def _lookup(
+    media_type: MediaType, item_id: int, art: bool, gone_is_expected: bool,
+) -> tuple[str, dict[str, Any] | None]:
+    """lookup_item, with Kodi's "no such id" answer logged at DEBUG when the
+    caller expects it and at WARNING otherwise."""
     query = {
         "jsonrpc": "2.0",
         "method": media_type.kodi_get_method,
-        "params": params,
+        "params": {
+            media_type.kodi_id_field: item_id,
+            "properties": _build_properties(media_type, art),
+        },
         "id": 1,
     }
 
     try:
-        raw = xbmc.executeJSONRPC(json.dumps(query))
-        data = json.loads(raw)
+        data = json.loads(xbmc.executeJSONRPC(json.dumps(query)))
     except Exception:
         log.exception(
             "Failed to query item by id",
@@ -332,22 +357,25 @@ def get_item_by_id(
             media_type=media_type.name,
             item_id=item_id,
         )
-        return None
+        return ITEM_FAILED, None
 
-    if "error" in data or "result" not in data:
-        log.warning(
+    error = data.get("error")
+    if error is not None or "result" not in data:
+        gone = isinstance(error, dict) and error.get("code") == _INVALID_PARAMS
+        report = log.debug if gone and gone_is_expected else log.warning
+        report(
             "Item-by-id query returned an error",
             event="kodi.query",
             media_type=media_type.name,
             item_id=item_id,
-            error=str(data.get("error", "no result key")),
+            error=str(error if error is not None else "no result key"),
         )
-        return None
+        return (ITEM_GONE if gone else ITEM_FAILED), None
 
-    detail = data.get("result", {}).get(media_type.kodi_detail_key)
+    detail = (data.get("result") or {}).get(media_type.kodi_detail_key)
     if not detail:
-        return None
-    return flatten_art(detail, media_type) if art else detail
+        return ITEM_GONE, None
+    return ITEM_FOUND, flatten_art(detail, media_type) if art else detail
 
 
 def _details(method: str, id_field: str, item_id: int, key: str,

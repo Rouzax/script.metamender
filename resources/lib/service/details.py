@@ -284,7 +284,7 @@ def _read_identity(
     show_id_map: dict[int, str],
 ) -> tuple[str, str]:
     """(the key the item's rows are under now, the key the scan uses), found
-    the way scan._tracker_identity finds it but without its writes: opening
+    the way scan._resolve_identity finds it but without its writes: opening
     the window must change nothing, so a row the next scan would adopt is
     read under its current identity. The two differ only for such a row."""
     identity = compute_identity(item, media_type)

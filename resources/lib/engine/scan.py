@@ -99,7 +99,7 @@ from resources.lib.constants import (
 )
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
-from resources.lib.data.kodi import get_item_by_id
+from resources.lib.data.kodi import ITEM_FAILED, ITEM_FOUND, get_item_by_id, lookup_item
 from resources.lib.data.libraries import (
     TITLE_LANGUAGE,
     TITLE_ORIGINAL,
@@ -309,6 +309,8 @@ def _make_stats() -> dict[str, Any]:
         # is not included; and items whose file is in no library.
         "excluded": 0,
         "unmatched": 0,
+        # Second Kodi entries for a file whose other entry holds the row.
+        "duplicate": 0,
         # Fields left unchecked because a provider failed transiently, plus
         # items skipped while an id lookup had no answer: Update now tells
         # "could not check" from "nothing changed" by it.
@@ -1211,46 +1213,133 @@ def _needed_providers(media_type: MediaType, candidates: list[str]) -> list[str]
     return needed
 
 
-def _tracker_identity(
+@dataclass(frozen=True)
+class Resolved:
+    """The tracker row an item uses, and what the row's recorded Kodi id
+    said about it."""
+
+    identity: str
+    # The row's recorded Kodi id when Kodi re-added this item: that id is
+    # gone, or names another item, so this item took the row over.
+    readded_from: int | None = None
+    # Another Kodi entry for the same file keeps the row; this one is
+    # skipped without touching it.
+    duplicate_of: int | None = None
+
+
+def _twin_entries(
+    items: list[dict[str, Any]], media_type: MediaType,
+) -> dict[tuple[str, str], list[int]]:
+    """The Kodi ids of the listed entries that share an identity and a file
+    (Kodi holds the file twice), by (identity, file). A file listed once is
+    left out."""
+    by_key: dict[tuple[str, str], list[int]] = {}
+    for item in items:
+        file_path = item.get("file") or ""
+        identity = compute_identity(item, media_type) if file_path else ""
+        if identity:
+            by_key.setdefault((identity, file_path), []).append(
+                item.get(media_type.kodi_id_field, 0))
+    return {key: ids for key, ids in by_key.items() if len(ids) > 1}
+
+
+def _resolve_identity(
     tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: Any,
-    show_id_map: dict[int, str] | None = None,
-) -> str:
-    """The tracker key for this Kodi item: compute_identity's, unless another
-    Kodi item in the library holds that row.
+    show_id_map: dict[int, str], cache: dict[int, tuple[str, dict[str, Any] | None]],
+    twins: dict[tuple[str, str], list[int]] | None = None,
+) -> Resolved:
+    """The tracker row for this Kodi item: its ``<identity>|<file>`` row when
+    it has one, else compute_identity's.
 
     Two items can compute one identity, such as two files of a movie that
     both carry its tmdb id. Sharing a row would let the first mark it
     processed for the cycle and the second never be scanned, so the item
-    that does not hold the row gets ``<identity>|<file>``, and keeps it.
-    The holder is the item whose Kodi id the row records. Whether that item
-    still exists is asked from Kodi, and only when the ids differ: after a
-    file is replaced or the library rebuilt, the recorded id is gone or
-    names another item, and this item takes the row over. Kodi gives a
-    season no ids, so the holder season gets its show's TMDB id from
-    ``show_id_map``, as the listing did for this one.
+    that does not hold the plain row gets ``<identity>|<file>``, and keeps
+    it. The holder of either row is the item whose Kodi id the row records;
+    when that is not this item, Kodi is asked about it:
+
+    - It computes this identity for this same file: Kodi lists the file
+      twice. The recorded entry keeps the row and this one is a duplicate.
+      ``twins`` (the scan's listing, _twin_entries) answers that without a
+      call, and decides who takes over when the recorded id is gone: the
+      lowest listed id, whatever order the listing comes in.
+    - It computes this identity for another file: a second copy, which gets
+      ``<identity>|<file>`` (scan.duplicate_identity).
+    - It is gone, or names another item: Kodi re-added this item (a file
+      upgrade, a refresh, a rebuilt library). This item takes the row over
+      and the answer carries the recorded id as ``readded_from``.
+    - The query failed: nothing is known, so this item uses the row as it
+      did before and is not a re-add.
+
+    Answers are kept in ``cache`` by Kodi id for the scan, so a holder many
+    items point at is asked about once. Kodi gives a season no ids, so the
+    holder season gets its show's TMDB id from ``show_id_map``, as the
+    listing did for this one; it has no file either, so a season holder is
+    never taken for a second entry of the same file.
     """
     identity = compute_identity(item, media_type)
-    own = "{}|{}".format(identity, item.get("file", ""))
-    if tracker.get_item(media_type.name, own) is not None:
-        return own
-    # An id written back to Kodi (_enrich_imdb_id) changes the identity the
-    # item computes; keep its tracker row under the new one.
-    tracker.adopt_identity(media_type.name, identity, kodi_id)
-    row = tracker.get_item(media_type.name, identity)
-    holder = row.get("kodi_id") if row else None
-    if holder is None or holder == kodi_id:
-        return identity
-    other = get_item_by_id(media_type, holder)
-    if other and media_type is SEASON:
-        other["show_tmdb_id"] = (show_id_map or {}).get(int(other.get("tvshowid", -1)))
-    if other and compute_identity(other, media_type) == identity:
+    file_path = item.get("file", "")
+    own = "{}|{}".format(identity, file_path)
+    row_identity = own
+    row = tracker.get_item(media_type.name, own)
+    if row is None:
+        # An id written back to Kodi (_enrich_imdb_id) changes the identity
+        # the item computes; keep its tracker row under the new one.
+        tracker.adopt_identity(media_type.name, identity, kodi_id)
+        row_identity = identity
+        row = tracker.get_item(media_type.name, identity)
+    recorded = row.get("kodi_id") if row else None
+    if recorded is None or recorded == kodi_id:
+        return Resolved(row_identity)
+    listed_twins = (twins or {}).get((identity, file_path), [])
+    if recorded in listed_twins:
+        return Resolved(row_identity, duplicate_of=recorded)
+
+    status, other = _cached_lookup(media_type, recorded, show_id_map, cache)
+    if status == ITEM_FAILED:
+        return Resolved(row_identity)
+    other_identity = compute_identity(other, media_type) if other else ""
+    if status == ITEM_FOUND and not other_identity:
+        # A season whose show's TMDB id this scan does not have: nothing to
+        # compare, so the row is used as before.
+        return Resolved(row_identity)
+    if other is not None and other_identity == identity:
+        if other.get("file") == file_path:
+            return Resolved(row_identity, duplicate_of=recorded)
+        if row_identity == own:
+            # The recorded entry holds another file of this identity, or a
+            # file Kodi does not report (a season): this file's row is its own.
+            return _lowest_twin(Resolved(own), kodi_id, listed_twins)
         log.debug(
             "Duplicate identity, item tracked under its file",
             event="scan.duplicate_identity", identity=identity,
-            kodi_id=kodi_id, holder=holder,
+            kodi_id=kodi_id, holder=recorded,
         )
-        return own
-    return identity
+        return _lowest_twin(Resolved(own), kodi_id, listed_twins)
+    return _lowest_twin(Resolved(row_identity, readded_from=recorded), kodi_id, listed_twins)
+
+
+def _lowest_twin(resolved: Resolved, kodi_id: Any, listed_twins: list[int]) -> Resolved:
+    """``resolved`` for the lowest listed entry of a file Kodi holds twice;
+    for the others, a duplicate of that entry, which takes the row when the
+    scan reaches it."""
+    lowest = min(listed_twins, default=kodi_id)
+    if lowest != kodi_id:
+        return Resolved(resolved.identity, duplicate_of=lowest)
+    return resolved
+
+
+def _cached_lookup(
+    media_type: MediaType, kodi_id: int, show_id_map: dict[int, str],
+    cache: dict[int, tuple[str, dict[str, Any] | None]],
+) -> tuple[str, dict[str, Any] | None]:
+    """lookup_item's answer for ``kodi_id``, asked once per scan."""
+    if kodi_id not in cache:
+        status, other = lookup_item(media_type, kodi_id)
+        if other is not None and media_type is SEASON:
+            other["show_tmdb_id"] = show_id_map.get(int(other.get("tvshowid", -1)))
+        cache[kodi_id] = (status, other)
+    return cache[kodi_id]
 
 
 def _stamp_excluded(tracker: TrackerDB, media_type: MediaType, item: dict[str, Any]) -> None:
@@ -1317,9 +1406,10 @@ def _new_items(
     the details call is skipped.
 
     An item whose library or subfolder is not included is counted as
-    excluded in ``stats`` here, before its details call: it never gets a tracker row, so every library-event scan would
-    fetch it again. An item in no library is fetched and counted by the
-    item loop, as on a full scan."""
+    excluded in ``stats`` here, before its details call: it never gets a
+    tracker row, so every library-event scan would fetch it again. Items
+    dropped here get their last_seen from the next full scan. An item in no
+    library is fetched and counted by the item loop, as on a full scan."""
     known = tracker.known_kodi_ids(media_type.name)
     listed = kodi.get_all_items(media_type, ids_only=True)
     fresh: list[Any] = []
@@ -1579,6 +1669,9 @@ def run_scan(
             else kodi.get_all_items(media_type, art=art)
         )
     needed = _pass_providers(media_type, libraries, items, reset)
+    # Kodi's answers about the Kodi ids tracker rows record, for this pass.
+    holder_answers: dict[int, tuple[str, dict[str, Any] | None]] = {}
+    twins = _twin_entries(items, media_type) if media_type is not SET else {}
 
     for index, item in enumerate(items):
         # Check for Kodi shutdown
@@ -1670,11 +1763,26 @@ def run_scan(
 
         kodi_id = item.get(media_type.kodi_id_field, 0)
         # One managed set per collection: its row follows whichever Kodi
-        # set prepare_sets chose.
-        identity = (
-            compute_identity(item, media_type) if media_type is SET
-            else _tracker_identity(tracker, media_type, item, kodi_id, shared.show_id_map)
+        # set prepare_sets chose. ``resolved.readded_from`` stays on hand for
+        # the item's decisions below.
+        resolved = (
+            Resolved(compute_identity(item, media_type)) if media_type is SET
+            else _resolve_identity(tracker, media_type, item, kodi_id,
+                                   shared.show_id_map, holder_answers, twins)
         )
+        # MetaMender does not merge or remove a second Kodi entry for a file:
+        # that is the user's library. It is left alone and the row stays with
+        # the entry that holds it.
+        if resolved.duplicate_of is not None:
+            log.debug(
+                "Second Kodi entry for a tracked file, skipped",
+                event="scan.duplicate_file", identity=resolved.identity,
+                kodi_id=kodi_id, kept_kodi_id=resolved.duplicate_of,
+            )
+            stats["skipped"] += 1
+            stats["duplicate"] += 1
+            continue
+        identity = resolved.identity
         if media_type is SEASON and not item.get(media_type.date_field):
             # Kodi has no date on a season: its TMDB air date, once a fetch
             # found it, is kept as the row's premiered.
