@@ -3785,6 +3785,28 @@ class TestNfoProtection:
         assert not row["cycle_processed"]
         assert stats["unreachable"] == 1 and stats["skipped"] == 1
 
+    @patch("resources.lib.engine.scan.media_gone", return_value=True)
+    @patch("resources.lib.engine.scan.nfo_state", return_value=UNREACHABLE)
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    def test_scan_counts_gone_not_unreachable(
+        self, mock_fetch, mock_update, _mock_nfo, _mock_gone, tmp_path, kodi_stubs
+    ):
+        item = _make_movie_item()
+        mock_fetch.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            MOVIE, tracker, _libs(frozenset({"plot", "rating"})),
+            "k", _make_settings(), items=[item],
+        )
+        row = _row(tracker, MOVIE, item)
+        tracker.close()
+
+        assert not mock_fetch.called and not mock_update.called
+        assert not row["cycle_processed"]
+        assert stats["gone"] == 1 and stats["skipped"] == 1
+        assert stats["unreachable"] == 0
+
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")
     def test_nfo_detection_cached_per_scan(

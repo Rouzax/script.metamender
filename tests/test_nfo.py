@@ -196,3 +196,45 @@ def test_exists_failure_on_nfo_candidate_is_unreachable(vfs, kodi_stubs):
 
     kodi_stubs["xbmcvfs"].exists.side_effect = flaky
     assert nfo_state("movie", media) == UNREACHABLE
+
+
+def test_media_gone_when_parent_lists_others(vfs, tmp_path):
+    vfs("Movies", "Other.mkv")
+    missing = str(tmp_path / "Movies" / "Film.mkv")
+    assert nfo.media_gone(missing) is True
+
+
+def test_media_gone_for_show_folder_with_trailing_separator(vfs, tmp_path):
+    vfs("TV", "Other Show", "S01E01.mkv")
+    assert nfo.media_gone(str(tmp_path / "TV" / "Show") + "/") is True
+
+
+def test_media_gone_uses_first_part_of_a_stack(vfs, tmp_path):
+    vfs("Movies", "Other.mkv")
+    first = str(tmp_path / "Movies" / "Film cd1.mkv")
+    second = str(tmp_path / "Movies" / "Film cd2.mkv")
+    assert nfo.media_gone("stack://%s , %s" % (first, second)) is True
+
+
+def test_not_gone_when_media_exists(vfs):
+    media = vfs("Movies", "Film.mkv")
+    assert nfo.media_gone(media) is False
+
+
+def test_not_gone_when_parent_unreadable(vfs, tmp_path):
+    assert nfo.media_gone(str(tmp_path / "Offline" / "Film.mkv")) is False
+
+
+def test_not_gone_when_parent_is_an_empty_mount_point(vfs, tmp_path):
+    (tmp_path / "Mount").mkdir()
+    assert nfo.media_gone(str(tmp_path / "Mount" / "Film.mkv")) is False
+
+
+def test_not_gone_on_vfs_error(vfs, kodi_stubs, tmp_path):
+    vfs("Movies", "Other.mkv")
+    kodi_stubs["xbmcvfs"].exists.side_effect = OSError("share dropped")
+    assert nfo.media_gone(str(tmp_path / "Movies" / "Film.mkv")) is False
+
+
+def test_not_gone_without_a_path():
+    assert nfo.media_gone("") is False

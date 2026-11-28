@@ -10,6 +10,8 @@ Logging:
     Key events:
         - nfo.listdir_failed / nfo.exists_failed (ERROR): a VFS call failed;
           the item is reported UNREACHABLE
+        - nfo.gone_check_failed (ERROR): media_gone hit a VFS error and
+          answered False
 """
 from __future__ import annotations
 
@@ -189,6 +191,30 @@ def _first_media_path(file_path: str) -> str:
         rest = file_path[len("rar://"):]
         return unquote(rest.partition("/")[0])
     return file_path
+
+
+def media_gone(file_path: str) -> bool:
+    """The media (or show folder) is missing while its parent folder is
+    readable and holds other entries.
+
+    That is a deleted or moved item, not an offline share: an unmounted mount
+    point is an empty folder, and a dropped share fails the call. Any VFS
+    error answers False, so the caller keeps treating the item as
+    unreachable.
+    """
+    try:
+        media = _first_media_path(file_path) if file_path else ""
+        if not media or _exists(media):
+            return False
+        parent = _split(media)[0]
+        if not parent or not _exists(parent):
+            return False
+        dirs, files = xbmcvfs.listdir(parent)
+        return bool(dirs or files)
+    except Exception:
+        log.exception("Could not check for a gone folder", event="nfo.gone_check_failed",
+                      path=file_path)
+        return False
 
 
 def nfo_state(media_type_name: str, file_path: str) -> str:

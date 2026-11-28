@@ -24,6 +24,8 @@ Logging:
           reason="excluded": its library or subfolder is not included;
           reason="unmatched": its file is in no library; reason="unreachable":
           the media could not be found, so NFO state is unknown;
+          reason="gone": the media is missing from a folder that lists other
+          entries;
           reason="no_fields": its library has nothing switched on;
           reason="providers_down": every provider its library needs is
           disabled while another library's still work; scan.complete
@@ -109,7 +111,7 @@ from resources.lib.data.libraries import (
 )
 from resources.lib.data.localart import EXISTS, MISSING, local_art_state
 from resources.lib.data.media_types import SEASON, SET, MediaType
-from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
+from resources.lib.data.nfo import NFO, UNREACHABLE, media_gone, nfo_state
 from resources.lib.data.presets import load_preset
 from resources.lib.data.setfolder import folder_for
 from resources.lib.data.sources import kodi_ui_language
@@ -304,6 +306,8 @@ def _make_stats() -> dict[str, Any]:
         # Items skipped because their media could not be reached, and answered
         # field values not written because an NFO supplied the field.
         "unreachable": 0,
+        # Items skipped because their media is gone from a readable folder.
+        "gone": 0,
         "protected": 0,
         # Items skipped because their library, or the subfolder they are in,
         # is not included; and items whose file is in no library.
@@ -2084,6 +2088,18 @@ def run_scan(
             else:
                 nfo_kind = "tvshow" if media_type is SEASON else media_type.name
                 state = nfo_state(nfo_kind, item.get("file", ""))
+            if (state == UNREACHABLE and media_type is not SET
+                    and media_gone(item.get("file", ""))):
+                # The parent folder lists other entries, so this item was
+                # deleted or moved, not stranded behind an offline share.
+                log.debug(
+                    "Media folder gone, skipping item",
+                    event="scan.skip", reason="gone", title=title,
+                    identity=identity, media_type=media_type.name,
+                )
+                stats["skipped"] += 1
+                stats["gone"] += 1
+                continue
             if state == UNREACHABLE:
                 log.debug(
                     "Media unreachable, skipping item",
@@ -2432,6 +2448,7 @@ def run_scan(
         updated=stats["updated"],
         errors=stats["errors"],
         unreachable=stats["unreachable"],
+        gone=stats["gone"],
         protected=stats["protected"],
         excluded=stats["excluded"],
         unmatched=stats["unmatched"],
