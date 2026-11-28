@@ -14,7 +14,8 @@ Logging:
         - service.scan_error (ERROR): Scan failed
         - service.scan_apikey (ERROR): A provider rejected the API key; the
           scan stops and backs off
-        - service.skip_playback (DEBUG): Scan skipped because video is playing
+        - service.skip_playback (DEBUG): A due scan began waiting for playback to stop
+        - service.playback_wait_end (DEBUG): The wait ended (waited_s)
         - service.library_scan_finished (INFO): Library scan event received
         - service.orphans_pruned (INFO/DEBUG): Orphan prune result (INFO when >0)
         - service.prune_skip (DEBUG): Prune skipped (targeted scan or disabled)
@@ -657,6 +658,21 @@ def _record_cycle(
         record.clear(attention.UNMATCHED)
 
 
+def changed_total(all_stats: dict[str, dict[str, Any]]) -> int:
+    """Items a scan changed, for the "N items updated" notification: updated
+    movies, shows, seasons, episodes and sets, plus movies that joined or
+    moved between sets and sets created."""
+    def count(media: str, key: str) -> int:
+        return int(all_stats.get(media, {}).get(key, 0))
+
+    return (
+        count("movie", "updated") + count("tvshow", "updated")
+        + count("season", "updated") + count("episode", "updated")
+        + count("set", "updated") + count("set", "joined")
+        + count("set", "sets_created") + count("set", "moved")
+    )
+
+
 def updated_text(count: int) -> str:
     """"1 item updated" / "N items updated"."""
     return lang(32504) if count == 1 else lang(32349).format(count)
@@ -741,6 +757,8 @@ def run() -> None:
     setup_known: bool | None = None
     # Problems this service run showed (see _attention_tick).
     shown: set[tuple[str, str]] = set()
+    # When a due scan began waiting for playback to stop; None when it is not.
+    playback_wait_since: float | None = None
 
     try:
         tracker = TrackerDB(_get_db_path())
@@ -792,12 +810,23 @@ def run() -> None:
                     should_scan = False
 
                 # Guard: skip while video is playing
+                # The wait spans many ticks, so only its start and end are
+                # logged.
                 if should_scan and xbmc.getCondVisibility("Player.HasVideo"):
                     should_scan = False
+                    if playback_wait_since is None:
+                        playback_wait_since = time.monotonic()
+                        log.debug(
+                            "Skipping scan, video is playing",
+                            event="service.skip_playback",
+                        )
+                elif should_scan and playback_wait_since is not None:
                     log.debug(
-                        "Skipping scan, video is playing",
-                        event="service.skip_playback",
+                        "Playback stopped, scan can start",
+                        event="service.playback_wait_end",
+                        waited_s=int(time.monotonic() - playback_wait_since),
                     )
+                    playback_wait_since = None
 
                 settings: dict[str, Any] | None = None
                 if should_scan:
@@ -851,7 +880,12 @@ def run() -> None:
                             targeted=targeted,
                         )
 
-                        tracker.begin_cycle(settings["resume_interrupted"])
+                        # The cycle and the schedule belong to the full scan:
+                        # a library-event scan neither opens nor closes the
+                        # cycle, so an interrupted full cycle keeps its resume
+                        # point, and it does not put off the next full scan.
+                        if not targeted:
+                            tracker.begin_cycle(settings["resume_interrupted"])
                         # A Stop scan chosen while no scan ran must not end
                         # this one.
                         clear_stop()
@@ -929,7 +963,8 @@ def run() -> None:
                             duration_ms=duration_ms,
                         )
 
-                        last_scan = time.time()
+                        if not targeted:
+                            last_scan = time.time()
                         monitor.clear_scan_request()
 
                         # A pass that stopped early (shutdown, providers down)
@@ -941,16 +976,20 @@ def run() -> None:
                             s.get("aborted") for s in all_stats.values()
                         )
                         if cycle_aborted:
-                            log.info(
-                                "Scan cycle left open after early termination",
-                                event="service.cycle_incomplete",
-                            )
+                            # A targeted scan does not own the cycle, so it
+                            # leaves nothing open.
+                            if not targeted:
+                                log.info(
+                                    "Scan cycle left open after early termination",
+                                    event="service.cycle_incomplete",
+                                )
                         else:
-                            tracker.mark_cycle_complete()
-                            tracker.set_scan_state(
-                                "last_scan_completed",
-                                time.strftime("%Y-%m-%d %H:%M:%S"),
-                            )
+                            if not targeted:
+                                tracker.mark_cycle_complete()
+                                tracker.set_scan_state(
+                                    "last_scan_completed",
+                                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                                )
 
                             # Prune orphaned tracker rows. Guarded to run only
                             # after a FULL scan (not targeted); see
@@ -991,11 +1030,7 @@ def run() -> None:
                             now=time.time(), unmatched=unmatched,
                         ))
 
-                        total_updated = (
-                            movie_stats.get("updated", 0)
-                            + tvshow_stats.get("updated", 0)
-                            + episode_stats.get("updated", 0)
-                        )
+                        total_updated = changed_total(all_stats)
                         if (settings["show_notifications"] and total_updated
                                 and not _playing()):
                             notify(updated_text(total_updated))

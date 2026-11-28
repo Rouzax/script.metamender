@@ -302,6 +302,7 @@ def _report(
         updated=updated,
         unreachable=stats.get("unreachable", 0),
         transient=stats.get("transient", 0),
+        duplicate=stats.get("duplicate", 0),
         aborted=bool(stats.get("aborted")),
     )
     unchecked = (stats.get("unreachable") or stats.get("transient")
@@ -310,6 +311,10 @@ def _report(
         notify(lang(32350).format(title))  # Updated: {}
     elif unchecked:
         notify(lang(32353).format(title))  # Could not check now: {}
+    elif stats.get("duplicate"):
+        # The scan skipped this entry: Kodi lists its file twice and the
+        # other entry holds the item's row.
+        notify(lang(32788).format(title))  # Kodi lists {} twice
     elif left_alone():
         notify(lang(32774))  # MetaMender leaves this set alone; Details says why
     else:

@@ -1754,3 +1754,11 @@ msgstr ""
 msgctxt "#32787"
 msgid "Named after your movie set information folder"
 msgstr ""
+
+msgctxt "#32788"
+msgid "Kodi lists {} twice; MetaMender updates its other entry"
+msgstr ""
+
+msgctxt "#32789"
+msgid "Kodi lists this file twice. MetaMender manages its other entry, so nothing can be changed here."
+msgstr ""

@@ -275,6 +275,12 @@ def opened(tmp_path, monkeypatch):
         item = items.get(kodi_id)
         return dict(item) if item else None
 
+    def lookup_item(media_type, kodi_id, art=False):
+        # Answers from whatever get_item_by_id a test sets up; an item it
+        # does not have is gone.
+        item = details.kodi.get_item_by_id(media_type, kodi_id)
+        return (details.kodi.ITEM_FOUND, item) if item else (details.kodi.ITEM_GONE, None)
+
     def acquire():
         calls["acquire"] += 1
         return calls.get("lock_free", True)
@@ -287,6 +293,7 @@ def opened(tmp_path, monkeypatch):
     monkeypatch.setattr(details_model, "lang", lambda i: _PO_STRINGS.get(i, ""))
     monkeypatch.setattr(details, "notify", notes.append)
     monkeypatch.setattr(details.kodi, "get_item_by_id", get_item)
+    monkeypatch.setattr(details.kodi, "lookup_item", lookup_item)
     monkeypatch.setattr(details.kodi, "file_runtime",
                         lambda media_type, kodi_id: calls.get("file_runtime"))
     monkeypatch.setattr(details, "_get_db_path", lambda: db_path)
@@ -394,6 +401,94 @@ def test_duplicate_item_reads_its_own_row(opened, monkeypatch):
     details.open_details("movie", "8")
     session, _ = opened["shown"][0]
     assert session.identity == own
+
+
+def _second_entry(opened, monkeypatch, own_row_holder=None):
+    """Kodi lists Heat's file twice, as movie 7 (which holds the row, with a
+    restorable plot) and movie 8. With ``own_row_holder``, the plain row is
+    another file's and 7 holds Heat's ``<identity>|<file>`` row."""
+    identity = "tmdb:949"
+    tracker = TrackerDB(opened["db_path"])
+    if own_row_holder is not None:
+        tracker.upsert_item("movie", identity, "Heat", kodi_id=own_row_holder)
+        identity = "tmdb:949|/movies/Heat.mkv"
+    tracker.upsert_item("movie", identity, "Heat", kodi_id=7)
+    tracker.keep_original("movie", identity, "plot", "old plot")
+    tracker.set_written_fp("movie", identity, "plot", fingerprint("new plot"))
+    tracker.commit()
+    tracker.close()
+    entries = {7: MOVIE_ITEM, 8: dict(MOVIE_ITEM, movieid=8),
+               40: dict(MOVIE_ITEM, movieid=40, file="/movies/Heat (copy).mkv")}
+    monkeypatch.setattr(details.kodi, "get_item_by_id",
+                        lambda mt, i: dict(entries[i]) if i in entries else None)
+    return identity
+
+
+@pytest.mark.parametrize("own_row_holder", [None, 40], ids=["plain_row", "file_row"])
+def test_details_on_the_second_entry_of_a_file_is_read_only(
+        opened, monkeypatch, own_row_holder):
+    _second_entry(opened, monkeypatch, own_row_holder)
+
+    details.open_details("movie", "8")
+
+    session, view = opened["shown"][0]
+    assert [r.key for r in view.rows if r.action] == []
+    assert ("", _PO_STRINGS[32789]) in view.rows[0].lines
+    with patch.object(details.kodi, "update_item", return_value=True) as upd:
+        for row in view.rows:
+            session.run_action(row)
+    upd.assert_not_called()
+    assert opened["calls"]["acquire"] == 0
+
+
+@pytest.mark.parametrize("own_row_holder", [None, 40], ids=["plain_row", "file_row"])
+def test_details_on_the_entry_that_holds_the_row_is_unchanged(
+        opened, monkeypatch, own_row_holder):
+    identity = _second_entry(opened, monkeypatch, own_row_holder)
+
+    details.open_details("movie", "7")
+
+    session, view = opened["shown"][0]
+    assert session.identity == identity
+    assert next(r for r in view.rows if r.key == "plot").action == "restore"
+    assert ("", _PO_STRINGS[32789]) not in view.rows[0].lines
+
+
+def test_details_whose_row_holder_is_gone_reads_the_row_without_a_warning(
+        opened, monkeypatch):
+    """Kodi re-added the movie: the row's recorded entry is gone, an answer
+    Details expects, so it is not asked through the call that warns."""
+    tracker = TrackerDB(opened["db_path"])
+    tracker.upsert_item("movie", "tmdb:949", "Heat", kodi_id=6)
+    tracker.commit()
+    tracker.close()
+    asked = []
+    real = details.kodi.get_item_by_id
+    monkeypatch.setattr(details.kodi, "get_item_by_id",
+                        lambda mt, i: asked.append(i) or real(mt, i))
+    monkeypatch.setattr(details.kodi, "lookup_item",
+                        lambda mt, i, art=False: ((details.kodi.ITEM_GONE, None) if i == 6
+                                                  else (details.kodi.ITEM_FOUND, real(mt, i))))
+
+    details.open_details("movie", "7")
+
+    session, view = opened["shown"][0]
+    assert session.identity == "tmdb:949"
+    assert 6 not in asked
+    assert ("", _PO_STRINGS[32789]) not in view.rows[0].lines
+
+
+def test_details_when_kodi_does_not_answer_about_the_holder_shows_the_row(
+        opened, monkeypatch):
+    _second_entry(opened, monkeypatch)
+    monkeypatch.setattr(details.kodi, "lookup_item",
+                        lambda mt, i, art=False: (details.kodi.ITEM_FAILED, None))
+
+    details.open_details("movie", "8")
+
+    session, view = opened["shown"][0]
+    assert session.identity == "tmdb:949"
+    assert ("", _PO_STRINGS[32789]) not in view.rows[0].lines
 
 
 def _restorable(opened):

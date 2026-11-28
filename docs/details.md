@@ -99,11 +99,13 @@ from fanart.tv**, **Image from another website**, **Local image file**,
 field, as for text. It is not offered when the earlier art was a local file
 that no longer exists.
 
-Art that changed outside MetaMender, by your hand, another add-on or a
-refresh in Kodi that brings different art, is locked with a padlock and the reason **Changed outside
-MetaMender, left as it is**. **Let MetaMender update this again** unlocks it:
-at the next scan MetaMender treats the art Kodi holds as the one it first
-saw, and may then replace it with a better one. See
+Art that changed outside MetaMender, by your hand or another add-on, is
+locked with a padlock and the reason **Changed outside MetaMender, left as
+it is**. A refresh in Kodi does not lock art; see
+[After you refresh an item in Kodi](scans.md#after-you-refresh-an-item-in-kodi).
+**Let MetaMender update this again** unlocks it: at the next scan
+MetaMender treats the art Kodi holds as the one it first saw, and may then
+replace it with a better one. See
 [Art and episode thumbs](libraries.md#art-and-episode-thumbs) for
 what MetaMender changes and what it leaves alone.
 
@@ -122,6 +124,13 @@ found (for a season, its show's TMDB and TheTVDB ids):
   agreed" or "the titles agreed" says which.
 
 Ids MetaMender found stay in its own records; it does not add them to Kodi.
+
+When Kodi lists the item's video file twice, Details on the entry MetaMender
+does not update says "Kodi lists this file twice. MetaMender manages its
+other entry, so nothing can be changed here." The fields show what
+MetaMender knows of the item, without **Restore original**, **Keep this
+value** or **Let MetaMender update this again**: those belong to the other
+entry's Details.
 
 When MetaMender moved a movie out of a duplicate set (see
 [Duplicate sets](libraries.md#duplicate-sets)), the movie's **Ids** entry says
@@ -233,7 +242,7 @@ can still unlock it). Nothing in the set changes.
 | Left alone: TMDB has no collection for its movies | None of its movies belongs to a TMDB collection, as far as MetaMender knows. A movie MetaMender has not asked TMDB about yet counts for none; the next scan or **Update now** asks. |
 | Left alone: no TMDB collection holds more than half of its movies | The movies come from several collections, as in a set you made by hand. |
 | Merged into *set*: Kodi removes this set at its next library clean | A duplicate of the set MetaMender manages: its movies are moved into *set*. Kodi deletes the empty set when you clean the library. |
-| Left alone: the set *set* already follows this TMDB collection | The set has a name of its own (such as "Favourites") and shares a collection with *set*. MetaMender moves nothing into or out of it. |
+| Left alone: the set *set* already follows this TMDB collection | The set has a name of its own (such as "Favourites"), shares a collection with *set*, and holds a movie of another collection or one whose collection MetaMender does not know. MetaMender moves nothing into or out of it. |
 
 See [A movie set was left alone](troubleshooting.md#a-movie-set-was-left-alone)
 for what to do about each.

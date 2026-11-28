@@ -19,7 +19,7 @@ import time
 import traceback
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta
 from typing import Any, TextIO
 
 import xbmc
@@ -34,6 +34,7 @@ from resources.lib.constants import (
     LOG_ACTIVITY_ROTATED,
     LOG_DIR_NAME,
     LOG_FILE_PREFIX,
+    LOG_KEEP_DAYS,
     LOG_MAX_FILES,
     LOG_MAX_VALUE_LENGTH,
     LOG_TIMESTAMP_FORMAT,
@@ -217,7 +218,8 @@ class StructuredLogger:
     File lifecycle:
         ``start_scan_log()`` opens a new timestamped file for one scan (or
         one Update now) and ``stop_scan_log()`` closes it; files beyond
-        LOG_MAX_FILES are removed when a new one opens. Between them, lines
+        older than LOG_KEEP_DAYS or beyond the newest LOG_MAX_FILES are removed
+        when a new one opens. Between them, lines
         go to the activity log ``metamender.log``, which every process
         (service, wizard, context actions) appends to and which rotates at
         LOG_ACTIVITY_MAX_BYTES, keeping LOG_ACTIVITY_ROTATED older copies.
@@ -284,7 +286,7 @@ class StructuredLogger:
     def start_scan_log(cls) -> str | None:
         """Open a new timestamped log file for this scan.
 
-        Cleans up old files beyond LOG_MAX_FILES. Returns the file path
+        Cleans up files older than LOG_KEEP_DAYS or beyond LOG_MAX_FILES. Returns the file path
         or None if logging is disabled or the directory is unavailable.
         """
         with cls._lock:
@@ -329,8 +331,9 @@ class StructuredLogger:
 
     @classmethod
     def _cleanup_old_logs(cls) -> None:
-        """Delete scan log files beyond LOG_MAX_FILES; the activity log and
-        its rotations are not scan logs. Must hold lock."""
+        """Delete scan logs older than LOG_KEEP_DAYS or beyond the newest
+        LOG_MAX_FILES; the activity log and its rotations are not scan logs.
+        Must hold lock."""
         if cls._log_dir is None:
             return
         try:
@@ -340,7 +343,14 @@ class StructuredLogger:
                 ],
                 reverse=True,
             )
-            for old_file in files[LOG_MAX_FILES:]:
+            # The timestamp in the name sorts like the time, so a name below
+            # the cutoff name is older than the cutoff.
+            cutoff = "{}_{}.log".format(
+                LOG_FILE_PREFIX,
+                (dt.now() - timedelta(days=LOG_KEEP_DAYS)).strftime("%Y-%m-%d_%H%M%S"),
+            )
+            expired = [f for f in files if f < cutoff]
+            for old_file in set(files[LOG_MAX_FILES:]) | set(expired):
                 old_path = os.path.join(cls._log_dir, old_file)
                 try:
                     os.remove(old_path)

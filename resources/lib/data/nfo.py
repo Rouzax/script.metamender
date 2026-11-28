@@ -10,6 +10,8 @@ Logging:
     Key events:
         - nfo.listdir_failed / nfo.exists_failed (ERROR): a VFS call failed;
           the item is reported UNREACHABLE
+        - nfo.gone_check_failed (ERROR): media_gone hit a VFS error and
+          answered False
 """
 from __future__ import annotations
 
@@ -57,6 +59,13 @@ def _split(path: str) -> Tuple[str, str]:
     stripped = path.rstrip(sep) if path.endswith(sep) and len(path) > 1 else path
     head, _, tail = stripped.rpartition(sep)
     return head, tail
+
+
+def _as_folder(path: str) -> str:
+    """The folder form of a path: xbmcvfs.exists checks a path ending in a
+    separator as a folder and anything else as a file."""
+    sep = _sep(path)
+    return path if path.endswith(sep) else path + sep
 
 
 def _join(folder: str, name: str) -> str:
@@ -189,6 +198,47 @@ def _first_media_path(file_path: str) -> str:
         rest = file_path[len("rar://"):]
         return unquote(rest.partition("/")[0])
     return file_path
+
+
+# A bare host ("smb://server") or a drive root ("C:"): an offline share is
+# missing while its server or drive still answers, so these never prove that
+# the media was deleted.
+_HOST_OR_ROOT = re.compile(r"^(?:[a-z][a-z0-9+.-]*://[^/]*|[a-z]:)$", re.IGNORECASE)
+
+
+def _is_host_or_root(folder: str) -> bool:
+    return bool(_HOST_OR_ROOT.match(folder.rstrip("/\\")) or not folder.strip("/\\"))
+
+
+def media_gone(file_path: str) -> bool:
+    """The media (or show folder) is missing while a folder above it is
+    readable and holds other entries.
+
+    That is a deleted or moved item, not an offline share: an unmounted mount
+    point is an empty folder, and a dropped share fails the call. The folder
+    checked is the media's parent or, when that parent is gone too (a movie
+    whose whole folder was deleted), the parent's parent; no higher, and never
+    a share host or filesystem root. Any VFS error answers False, so the
+    caller keeps treating the item as unreachable.
+    """
+    try:
+        media = _first_media_path(file_path) if file_path else ""
+        if not media or _exists(media):
+            return False
+        parent = _split(media)[0]
+        if not parent:
+            return False
+        if not _exists(_as_folder(parent)):
+            parent = _split(parent)[0]
+            if (not parent or _is_host_or_root(parent)
+                    or not _exists(_as_folder(parent))):
+                return False
+        dirs, files = xbmcvfs.listdir(_as_folder(parent))
+        return bool(dirs or files)
+    except Exception:
+        log.exception("Could not check for a gone folder", event="nfo.gone_check_failed",
+                      path=file_path)
+        return False
 
 
 def nfo_state(media_type_name: str, file_path: str) -> str:

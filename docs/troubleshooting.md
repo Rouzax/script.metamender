@@ -24,6 +24,9 @@ Sometimes, on purpose, and never where you told it not to:
   value**. MetaMender then leaves it alone for good.
 - **When MetaMender replaced a value**, it kept the old one. **Restore
   original** in the Details window puts it back and locks the field.
+- **After you refresh an item in Kodi**, the next scan writes back the
+  values MetaMender had written that the scraper replaced. See
+  [After you refresh an item in Kodi](scans.md#after-you-refresh-an-item-in-kodi).
 
 NFO files, leaving a library out, or switching a field off for a library,
 protect values from the start.
@@ -102,6 +105,18 @@ library.
 - **Kodi was playing**: scans wait until playback stops.
 - **You were browsing the library**: a scan holds its changes until you have
   not pressed anything for a minute or leave the library.
+- **Kodi lists the item twice** for one video file: MetaMender updates the
+  entry it has been updating and leaves the other alone, so one of the two
+  keeps the scraper's values. On the other entry, Update now says that Kodi
+  lists the item twice, and Details shows the fields read-only with a line
+  saying MetaMender manages the other entry. MetaMender does not remove
+  Kodi's extra entry; that is up to you.
+- **Its file or folder is gone**: an item whose video file (or show folder)
+  no longer exists, while the folder it was in (or, for a movie whose whole
+  folder was deleted, the folder above that) still holds other files or
+  folders, is skipped until you clean the library (**Clean library** in
+  Kodi's video settings or menu). An item on a share that does not answer
+  is unreachable instead and is tried again at the next scan.
 
 ### A plot or title is in the wrong language
 
@@ -240,9 +255,12 @@ A set keeps its name, plot and art when:
   Kodi removes it, once empty, when you clean the library. See
   [Duplicate sets](libraries.md#duplicate-sets).
 - **It shares a collection with the set MetaMender manages** but has a name
-  of its own, such as "Favourites". MetaMender does not touch it or move
-  movies out of it. If no set of a collection carries a name of that
-  collection, none of them is managed.
+  of its own, such as "Favourites", and holds a movie of another collection
+  or one whose collection MetaMender does not know. MetaMender does not
+  touch it or move movies out of it. A set whose movies all belong to the
+  collection is merged instead; see
+  [Duplicate sets](libraries.md#duplicate-sets). If no set of a collection
+  carries a name of that collection, none of them is managed.
 - **Every one of its movies has an NFO file**: its name, plot and art are
   only filled when empty.
 - **Its name changed outside MetaMender**, so the name is locked. The

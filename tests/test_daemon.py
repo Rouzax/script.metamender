@@ -1357,3 +1357,200 @@ def test_conversion_skipped_when_already_converted(kodi_stubs, addon_data):
         assert daemon._convert_libraries(MagicMock(), path) == theirs
     conv.assert_not_called()
     assert not (addon_data / COPY_FILE_NAME).exists()
+
+
+# ---------------------------------------------------------------------------
+# Library-event (targeted) scans and the daily scan's schedule and cycle
+# ---------------------------------------------------------------------------
+
+_HOUR = 3600.0
+_T0 = 1_800_000_000.0
+
+
+class _ClockMonitor(_FakeMonitor):
+    """One tick per entry of ``hours`` (hours after _T0); a library update
+    is waiting on the ticks in ``events`` until a scan clears it."""
+
+    def __init__(self, hours, events=()):
+        super().__init__(len(hours))
+        self.hours = hours
+        self.events = set(events)
+        self.cleared_at = set()
+
+    def now(self):
+        return _T0 + self.hours[min(self.waits, len(self.hours) - 1)] * _HOUR
+
+    def has_pending_scan(self, _debounce):
+        return self.waits in self.events and self.waits not in self.cleared_at
+
+    def clear_scan_request(self):
+        self.cleared_at.add(self.waits)
+
+
+def _run_on_clock(db_path, hours, events=(), scan=None):
+    """Drive daemon.run() over a real tracker at ``db_path``, one tick per
+    entry of ``hours``. Returns the _run_scan mock."""
+    import time as _time
+    from types import SimpleNamespace
+
+    from resources.lib.data.tracker import TrackerDB
+
+    monitor = _ClockMonitor(hours, events)
+    scan = scan or MagicMock(return_value=_complete_stats())
+    clock = SimpleNamespace(time=monitor.now, perf_counter=_time.perf_counter,
+                            strftime=_time.strftime)
+    with patch.object(daemon, "MetaMendMonitor", return_value=monitor), \
+            patch.object(daemon, "TrackerDB", lambda _p: TrackerDB(db_path)), \
+            patch.object(daemon, "time", clock), \
+            patch.object(daemon, "_run_scan", scan), \
+            patch.object(daemon, "_load_settings",
+                         return_value={"tmdb_api_key": "k",
+                                       "resume_interrupted": True,
+                                       "show_notifications": False,
+                                       "orphan_retention_days": 30,
+                                       "ui_language": "en-US"}), \
+            patch.object(daemon, "_sync_libraries", return_value=LibraryConfig()), \
+            patch.object(daemon, "_check_folders", return_value={}), \
+            patch.object(daemon, "show_attention_window", return_value="later"), \
+            patch.object(daemon, "acquire_scan_lock", return_value=True), \
+            patch.object(daemon, "release_scan_lock"), \
+            patch.object(daemon, "get_int_setting", return_value=24), \
+            patch.object(daemon, "is_setup_complete", return_value=True), \
+            patch.object(daemon.xbmc, "getCondVisibility", return_value=False):
+        daemon.run()
+    return scan
+
+
+def _seed_cycle(db_path, complete, processed=("a", "b"), unprocessed=("c",)):
+    """A tracker that a full scan has seen, its cycle open or complete."""
+    from resources.lib.data.tracker import TrackerDB
+
+    tracker = TrackerDB(db_path)
+    for identity in (*processed, *unprocessed):
+        tracker.upsert_item("movie", identity, kodi_id=len(identity))
+    for identity in processed:
+        tracker.mark_cycle_processed("movie", identity)
+    tracker.set_scan_state("last_scan_completed", "2026-11-27 03:00:00")
+    tracker.set_scan_state("cycle_complete", "1" if complete else "0")
+    tracker.commit()
+    tracker.close()
+
+
+def _cycle_state(db_path):
+    from resources.lib.data.tracker import TrackerDB
+
+    tracker = TrackerDB(db_path)
+    try:
+        processed = sorted(
+            r[0] for r in tracker._conn.execute(
+                "SELECT identity FROM items WHERE cycle_processed = 1"))
+        return tracker.get_scan_state("cycle_complete"), processed
+    finally:
+        tracker.close()
+
+
+def _new_only_flags(scan):
+    return [c.kwargs.get("new_only", False) for c in scan.call_args_list]
+
+
+def test_targeted_scan_does_not_move_the_scheduled_scan(kodi_stubs, tmp_path):
+    """Full scan at T, a library update at T+10 h: the daily scan still
+    comes due at T+24 h, not at T+34 h."""
+    db = str(tmp_path / "t.db")
+    scan = _run_on_clock(db, hours=[0, 10, 23.9, 24], events={1})
+    assert _new_only_flags(scan) == [False, True, False]
+
+
+def test_targeted_scan_keeps_the_cycle_open(kodi_stubs, tmp_path):
+    """An interrupted full cycle keeps its resume point through a library
+    event scan: still open, its processed rows still processed."""
+    db = str(tmp_path / "t.db")
+    _seed_cycle(db, complete=False)
+    # The first tick is the startup scan, stopped early again, so the cycle
+    # stays open; the library update comes an hour later.
+    aborted = _complete_stats(aborted=True)
+    scan = MagicMock(side_effect=[aborted, _complete_stats()])
+    _run_on_clock(db, hours=[0, 1], events={1}, scan=scan)
+    assert _new_only_flags(scan) == [False, True]
+    assert _cycle_state(db) == ("0", ["a", "b"])
+
+
+def test_targeted_scan_does_not_complete_a_cycle(kodi_stubs, tmp_path):
+    """After a completed full cycle a library event scan neither opens a new
+    cycle (which clears every cycle_processed flag) nor closes one."""
+    db = str(tmp_path / "t.db")
+    _seed_cycle(db, complete=True)
+
+    def full_pass(tracker, *_args, **_kwargs):
+        # The startup scan is a full one: it processes every row, as a real
+        # full pass does, and completes the cycle.
+        for identity in ("a", "b", "c"):
+            tracker.mark_cycle_processed("movie", identity)
+        return _complete_stats()
+
+    passes = iter([full_pass, lambda *_a, **_kw: _complete_stats()])
+    scan = MagicMock(side_effect=lambda *a, **kw: next(passes)(*a, **kw))
+    _run_on_clock(db, hours=[0, 1], events={1}, scan=scan)
+    assert _new_only_flags(scan) == [False, True]
+    assert _cycle_state(db) == ("1", ["a", "b", "c"])
+
+
+def test_full_scan_still_resets_last_scan_and_completes_the_cycle(kodi_stubs, tmp_path):
+    db = str(tmp_path / "t.db")
+    _seed_cycle(db, complete=False)
+    scan = _run_on_clock(db, hours=[0, 23.9, 24], events=())
+    # Startup scan at T, nothing at T+23.9 h, the daily scan at T+24 h.
+    assert _new_only_flags(scan) == [False, False]
+    # The daily scan opened a fresh cycle and ran it to the end.
+    assert _cycle_state(db) == ("1", [])
+
+
+def _events(log_mock, level):
+    return [c.kwargs.get("event") for c in getattr(log_mock, level).call_args_list]
+
+
+def test_skip_playback_logged_once_per_wait(kodi_stubs):
+    """A due scan waiting on playback logs one line when it starts waiting and
+    one when it proceeds, not one per service tick."""
+    with patch.object(daemon, "log") as log:
+        _Service().run(ticks=6, playing=lambda s: s.monitor.waits < 4)
+    assert _events(log, "debug").count("service.skip_playback") == 1
+    ends = [c for c in log.debug.call_args_list
+            if c.kwargs.get("event") == "service.playback_wait_end"]
+    assert len(ends) == 1 and "waited_s" in ends[0].kwargs
+
+
+def test_no_playback_wait_end_when_nothing_waited(kodi_stubs):
+    with patch.object(daemon, "log") as log:
+        _Service().run(ticks=2)
+    assert "service.playback_wait_end" not in _events(log, "debug")
+
+
+def test_notification_counts_set_and_season_changes(kodi_stubs):
+    for key in ("joined", "sets_created", "moved"):
+        stats = _stats_updated(0)
+        stats["set"] = {key: 2}
+        svc = _Service().run(ticks=1, scan=MagicMock(return_value=stats),
+                             notifications=True)
+        assert svc.notified == ["s32349"], key
+    stats = _stats_updated(0)
+    stats.setdefault("season", {})["updated"] = 1
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=stats),
+                         notifications=True)
+    assert svc.notified == ["s32504"]
+
+
+def test_targeted_scan_stopped_early_does_not_log_an_open_cycle(kodi_stubs, tmp_path):
+    db = str(tmp_path / "t.db")
+    scan = MagicMock(side_effect=[_complete_stats(), _complete_stats(aborted=True)])
+    with patch.object(daemon, "log") as log:
+        _run_on_clock(db, hours=[0, 1], events={1}, scan=scan)
+    assert _new_only_flags(scan) == [False, True]
+    assert "service.cycle_incomplete" not in _events(log, "info")
+
+
+def test_full_scan_stopped_early_logs_an_open_cycle(kodi_stubs, tmp_path):
+    scan = MagicMock(return_value=_complete_stats(aborted=True))
+    with patch.object(daemon, "log") as log:
+        _run_on_clock(str(tmp_path / "t.db"), hours=[0], scan=scan)
+    assert _events(log, "info").count("service.cycle_incomplete") == 1

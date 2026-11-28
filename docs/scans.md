@@ -12,7 +12,8 @@ you see while it works.
 - **After a library update.** When Kodi finishes updating or cleaning the
   video library, MetaMender waits five minutes and then looks at the items
   that are new to it. A scheduled scan that is due at the same time covers
-  them anyway.
+  them anyway. This scan does not move the daily one: that still comes one
+  scan interval after the last daily scan.
 - **When you ask.** [Update now](update-now.md) refreshes one movie, show,
   season or episode right away.
 
@@ -29,10 +30,11 @@ you have not pressed anything for a minute or when you leave the library.
 
 While a scan runs, the MetaMender submenu in the context menu of any movie,
 show, season or episode has **Stop scan**. The scan stops after the item it is
-working on; nothing is undone. The next scan, on the usual schedule or after
-a library update, carries on from where this one stopped (unless **Resume
-interrupted scans** is off, then it starts from the beginning). Update now is
-not affected.
+working on; nothing is undone. The next full scan (the scheduled one, the one
+when Kodi starts, or a manual scan) carries on from where this one stopped
+(unless **Resume interrupted scans** is off, then it starts from the
+beginning). A scan after a library update looks only at the new items and
+leaves that point where it is. Update now is not affected.
 
 ## How often a field is checked
 
@@ -75,13 +77,52 @@ and **Refresh schedule (days)** (the week, month and three months; shown at the
 Advanced settings level). The [Details window](details.md)
 shows, per field, when it was last checked and when it is due next.
 
+### After you refresh an item in Kodi
+
+When you refresh a movie, show or episode in Kodi, or replace its video file
+with a new release, Kodi makes a new entry for it with your scraper's values.
+At the next scan MetaMender recognises the item and puts back what it had
+written there:
+
+- **Text, ratings and art MetaMender wrote** that the scraper replaced are
+  written again in that same scan, also for a field that was settled. This
+  does not count as a check: each field's next check stays where it was.
+- **The scraper's new art is not taken for your choice.** MetaMender treats
+  it as the art it first saw, so it is not locked as
+  [changed outside MetaMender](libraries.md#what-metamender-leaves-alone).
+- **What stays as it is**: a value from an NFO file (on an item with one,
+  MetaMender only fills empty fields), a field you locked, and a field
+  MetaMender never wrote, which is checked on its usual schedule. Art
+  follows the usual art rules, so the scraper's art stays when it is one
+  MetaMender always leaves alone: a local image file, art from a website
+  other than TMDB or fanart.tv, or an episode thumb that is already an
+  image on a website, such as the TMDB still your scraper chose. See
+  [What MetaMender leaves alone](libraries.md#what-metamender-leaves-alone).
+
+To keep the scraper's text or art instead, open the
+[Details window](details.md#restore-original) after that scan and choose
+**Restore original** on the field: the scraper's value comes back and the
+field is locked.
+
+If a site or the item's share cannot be reached during the scan that finds the
+re-added item, a field MetaMender still checks gets its value back when it is
+next due. A settled field, one MetaMender no longer checks, gets it back only
+through [Update now](update-now.md) on the item. MetaMender recognises a refresh
+by the new entry Kodi makes; when Kodi gives the item its old entry number
+back, which can happen for the item added last, it looks like an edit made
+outside MetaMender. Art locked as changed outside MetaMender by a refresh before
+version 1.3.2 stays locked; **Let MetaMender update this again** in the
+Details window unlocks it.
+
 ## What you see
 
 Nothing, most of the time. MetaMender is quiet on purpose:
 
 - **While anything plays**, video or music, MetaMender shows nothing at all.
 - **After a background scan that changed something**, a small notification
-  says how many items were updated. A scan that changed nothing shows nothing.
+  says how many items were updated: movies, shows, seasons, episodes and
+  movie sets, including movies added to or moved between sets and sets
+  created. A scan that changed nothing shows nothing.
   Switch these off with **Show notifications**.
 - **When something needs you**, a window says so, whatever the notification
   setting.

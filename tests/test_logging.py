@@ -76,8 +76,11 @@ def test_old_rotations_beyond_three_are_dropped(log_dir):
 
 
 def test_scan_log_cleanup_keeps_the_activity_log(log_dir):
-    for day in range(1, 13):
-        name = "metamender_2026-10-{:02d}_120000.log".format(day)
+    from datetime import datetime, timedelta
+
+    for hours in range(1, 13):
+        stamp = (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d_%H%M%S")
+        name = "metamender_{}.log".format(stamp)
         with open(os.path.join(log_dir, name), "w") as handle:
             handle.write("old")
     for name in ("metamender.log", "metamender.1.log"):
@@ -87,7 +90,7 @@ def test_scan_log_cleanup_keeps_the_activity_log(log_dir):
     StructuredLogger.stop_scan_log()
     names = os.listdir(log_dir)
     assert "metamender.log" in names and "metamender.1.log" in names
-    assert len([n for n in names if n.startswith("metamender_")]) == 10
+    assert len([n for n in names if n.startswith("metamender_")]) == 13
 
 
 def test_url_credentials_are_redacted():
@@ -100,3 +103,29 @@ def test_display_path_drops_credentials():
     assert utils.display_path("smb://kodi:s3cret@nas/Series/") == "smb://nas/Series/"
     assert utils.display_path("smb://user@nas/Series/") == "smb://nas/Series/"
     assert utils.display_path("/mnt/media/Series/") == "/mnt/media/Series/"
+
+
+def test_scan_logs_kept_seven_days_max_thirty(log_dir):
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+
+    def make(moment):
+        name = "metamender_{}.log".format(moment.strftime("%Y-%m-%d_%H%M%S"))
+        with open(os.path.join(log_dir, name), "w") as handle:
+            handle.write("x")
+        return name
+
+    old = make(now - timedelta(days=8))
+    recent = make(now - timedelta(days=6))
+    StructuredLogger.start_scan_log()
+    StructuredLogger.stop_scan_log()
+    names = os.listdir(log_dir)
+    assert old not in names and recent in names
+
+    for hours in range(1, 41):
+        make(now - timedelta(hours=hours, minutes=30))
+    StructuredLogger.start_scan_log()
+    StructuredLogger.stop_scan_log()
+    scan_logs = [n for n in os.listdir(log_dir) if n.startswith("metamender_")]
+    assert len(scan_logs) == 30

@@ -790,6 +790,22 @@ def test_season_without_show_tmdb_id_is_skipped(
     assert "scan.season_no_show_id" in events
 
 
+def test_excluded_season_is_counted_as_excluded_not_no_show_id(tmp_path, kodi_stubs):
+    """A season of a show in an excluded library has no show TMDB id when
+    the show was never resolved; it is reported as excluded."""
+    tracker = _make_tracker(tmp_path)
+    libs = one_library({"poster"}, included=False)
+    with patch("resources.lib.engine.scan.log") as log:
+        stats = _scan_seasons(tracker, [_season(show_tmdb_id=None)], libs=libs)
+    tracker.close()
+
+    assert stats["excluded"] == 1 and stats["skipped"] == 1
+    events = [c.kwargs for c in log.debug.call_args_list]
+    assert not any(e.get("event") == "scan.season_no_show_id" for e in events)
+    assert any(e.get("event") == "scan.skip" and e.get("reason") == "excluded"
+               for e in events)
+
+
 @patch("resources.lib.data.kodi.update_item", return_value=True)
 @patch("resources.lib.providers.tmdb.fetch_season_posters")
 @patch("resources.lib.providers.tmdb.fetch_tvshow")
@@ -986,6 +1002,36 @@ def test_show_and_season_passes_share_one_fanart_call(
 @patch("resources.lib.data.kodi.update_item", return_value=True)
 @patch("resources.lib.providers.tmdb.fetch_season_posters")
 @patch("resources.lib.providers.tmdb.fetch_tvshow")
+def test_season_of_a_show_listed_twice_for_one_folder_is_a_duplicate(
+    mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
+):
+    """Kodi gives a season no file, so the second entry is told from the
+    scan's listing (both seasons have their show's folder there), not from
+    a lookup of the recorded one."""
+    mock_show.return_value = dict(_tmdb_tvshow_response(), season_air_dates={})
+    mock_posters.return_value = [_tmdb(SEASON_POSTER, "en")]
+    first, second = _season(1), _season(1, seasonid=61, tvshowid=11)
+    tracker = _make_tracker(tmp_path)
+    tracker.upsert_item("season", "tmdb:55555/S01", kodi_id=61)
+    tracker.commit()
+
+    with patch("resources.lib.engine.scan.lookup_item") as lookup:
+        stats = run_scan(SEASON, tracker, _libs(frozenset({"poster"})), "k",
+                         _make_settings(), items=[dict(first), dict(second)],
+                         show_id_map={10: "55555", 11: "55555"})
+    rows = dict(tracker._conn.execute(
+        "SELECT identity, kodi_id FROM items WHERE media_type = 'season'"))
+    tracker.close()
+
+    assert not lookup.called
+    assert stats["duplicate"] == 1
+    assert rows == {"tmdb:55555/S01": 61}
+    assert [c.args[0] for c in mock_update.call_args_list] == [61]
+
+
+@patch("resources.lib.data.kodi.update_item", return_value=True)
+@patch("resources.lib.providers.tmdb.fetch_season_posters")
+@patch("resources.lib.providers.tmdb.fetch_tvshow")
 def test_seasons_of_two_copies_of_a_show_both_written(
     mock_show, mock_posters, mock_update, tmp_path, kodi_stubs
 ):
@@ -996,7 +1042,8 @@ def test_seasons_of_two_copies_of_a_show_both_written(
     holder = {k: first[k] for k in ("seasonid", "season", "showtitle", "tvshowid", "title")}
     tracker = _make_tracker(tmp_path)
 
-    with patch("resources.lib.engine.scan.get_item_by_id", return_value=dict(holder)):
+    with patch("resources.lib.engine.scan.lookup_item",
+               side_effect=lambda mt, i: (kodi.ITEM_FOUND, dict(holder))):
         for _ in range(2):  # the second cycle meets both rows again
             run_scan(SEASON, tracker, _libs(frozenset({"poster"})), "k", _make_settings(),
                      items=[dict(first), dict(second)],

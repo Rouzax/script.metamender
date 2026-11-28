@@ -136,5 +136,5 @@ system a library uses is chosen on that library's page; see
 
 **Enable debug logging** *(Advanced)*
 :   Writes a detailed log file for every scan to the add-on's data folder
-    (`addon_data/script.metamender/logs/`, the last 10 scans). Switch it on
-    when you report a problem. Default: off.
+    (`addon_data/script.metamender/logs/`, the last 7 days, at most 30
+    scans). Switch it on when you report a problem. Default: off.

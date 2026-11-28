@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -232,7 +232,7 @@ def test_build_properties_episode():
     assert "tagline" not in props
 
 
-def test_get_all_items_ids_only_asks_for_no_properties(kodi_stubs):
+def test_get_all_items_ids_only_asks_for_the_file_only(kodi_stubs):
     response = {
         "result": {
             "movies": [{"movieid": 1, "label": "Air"}],
@@ -244,6 +244,15 @@ def test_get_all_items_ids_only_asks_for_no_properties(kodi_stubs):
     )
     items = get_all_items(MOVIE, ids_only=True)
     assert items == [{"movieid": 1, "label": "Air"}]
+    payload = json.loads(kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0])
+    assert payload["params"]["properties"] == ["file"]
+
+
+def test_get_all_items_ids_only_season_asks_for_no_properties(kodi_stubs):
+    # Kodi has no file property on a season.
+    response = {"result": {"seasons": [], "limits": {"start": 0, "end": 0, "total": 0}}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps(response))
+    get_all_items(SEASON, tvshowid=1, ids_only=True)
     payload = json.loads(kodi_stubs["xbmc"].executeJSONRPC.call_args[0][0])
     assert payload["params"]["properties"] == []
 
@@ -558,3 +567,63 @@ def test_get_movie_setid(kodi_stubs):
     assert get_movie_setid(7) == 0
     kodi_stubs["xbmc"].executeJSONRPC = _answers({})
     assert get_movie_setid(7) is None
+
+
+def _lookup(kodi_stubs, response=None, raises=None):
+    from resources.lib.data.kodi import lookup_item
+    rpc = MagicMock(side_effect=raises) if raises else MagicMock(
+        return_value=json.dumps(response))
+    kodi_stubs["xbmc"].executeJSONRPC = rpc
+    with patch("resources.lib.data.kodi.log") as log:
+        answer = lookup_item(MOVIE, 405)
+    return answer, log
+
+
+def test_lookup_item_found(kodi_stubs):
+    from resources.lib.data.kodi import ITEM_FOUND
+    detail = {"movieid": 405, "title": "Coco", "file": "smb://server/coco.mkv"}
+    answer, _log = _lookup(kodi_stubs, {"result": {"moviedetails": detail}})
+    assert answer == (ITEM_FOUND, detail)
+
+
+def test_lookup_item_gone_on_invalid_params(kodi_stubs):
+    from resources.lib.data.kodi import ITEM_GONE
+    answer, log = _lookup(
+        kodi_stubs, {"error": {"code": -32602, "message": "Invalid params."}})
+    assert answer == (ITEM_GONE, None)
+    assert not log.warning.called and not log.exception.called
+    assert log.debug.called
+
+
+def test_lookup_item_gone_on_empty_details(kodi_stubs):
+    from resources.lib.data.kodi import ITEM_GONE
+    answer, log = _lookup(kodi_stubs, {"result": {"moviedetails": {}}})
+    assert answer == (ITEM_GONE, None)
+    assert not log.warning.called
+
+
+@pytest.mark.parametrize("response", [
+    {"error": {"code": -32603, "message": "Internal error."}},
+    {},
+])
+def test_lookup_item_failed_on_other_error(kodi_stubs, response):
+    from resources.lib.data.kodi import ITEM_FAILED
+    answer, log = _lookup(kodi_stubs, response)
+    assert answer == (ITEM_FAILED, None)
+    assert log.warning.call_args.kwargs["event"] == "kodi.query"
+
+
+def test_lookup_item_failed_on_exception(kodi_stubs):
+    from resources.lib.data.kodi import ITEM_FAILED
+    answer, log = _lookup(kodi_stubs, raises=RuntimeError("rpc down"))
+    assert answer == (ITEM_FAILED, None)
+    assert log.exception.called
+
+
+def test_get_item_by_id_still_warns_on_a_missing_id(kodi_stubs):
+    """Other callers of get_item_by_id ask for an id they expect to exist."""
+    response = {"error": {"code": -32602, "message": "Invalid params."}}
+    kodi_stubs["xbmc"].executeJSONRPC = MagicMock(return_value=json.dumps(response))
+    with patch("resources.lib.data.kodi.log") as log:
+        assert get_item_by_id(MOVIE, 405) is None
+    assert log.warning.call_args.kwargs["event"] == "kodi.query"

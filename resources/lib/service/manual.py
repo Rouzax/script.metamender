@@ -30,6 +30,7 @@ from resources.lib.service.daemon import (
     _load_settings,
     _prepare_imdb_ratings,
     _sync_libraries,
+    changed_total,
     fanart_auth_failed,
     fanart_auth_string,
     tvdb_auth_failed,
@@ -202,13 +203,7 @@ def run() -> None:
             tracker.mark_cycle_complete()
 
         # Notification
-        total_updated = (
-            movie_stats.get("updated", 0)
-            + tvshow_stats.get("updated", 0)
-            + season_stats.get("updated", 0)
-            + episode_stats.get("updated", 0)
-            + set_stats.get("updated", 0)
-        )
+        total_updated = changed_total(all_stats)
         parts = []
         if total_updated:
             parts.append(updated_text(total_updated))

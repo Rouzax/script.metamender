@@ -24,6 +24,8 @@ Logging:
           reason="excluded": its library or subfolder is not included;
           reason="unmatched": its file is in no library; reason="unreachable":
           the media could not be found, so NFO state is unknown;
+          reason="gone": the media is missing from a folder that lists other
+          entries;
           reason="no_fields": its library has nothing switched on;
           reason="providers_down": every provider its library needs is
           disabled while another library's still work; scan.complete
@@ -99,7 +101,7 @@ from resources.lib.constants import (
 )
 from resources.lib.data import kodi
 from resources.lib.data.identity import compute_identity
-from resources.lib.data.kodi import get_item_by_id
+from resources.lib.data.kodi import ITEM_FAILED, ITEM_FOUND, get_item_by_id, lookup_item
 from resources.lib.data.libraries import (
     TITLE_LANGUAGE,
     TITLE_ORIGINAL,
@@ -109,7 +111,7 @@ from resources.lib.data.libraries import (
 )
 from resources.lib.data.localart import EXISTS, MISSING, local_art_state
 from resources.lib.data.media_types import SEASON, SET, MediaType
-from resources.lib.data.nfo import NFO, UNREACHABLE, nfo_state
+from resources.lib.data.nfo import NFO, UNREACHABLE, media_gone, nfo_state
 from resources.lib.data.presets import load_preset
 from resources.lib.data.setfolder import folder_for
 from resources.lib.data.sources import kodi_ui_language
@@ -304,14 +306,19 @@ def _make_stats() -> dict[str, Any]:
         # Items skipped because their media could not be reached, and answered
         # field values not written because an NFO supplied the field.
         "unreachable": 0,
+        # Items skipped because their media is gone from a readable folder.
+        "gone": 0,
         "protected": 0,
         # Items skipped because their library, or the subfolder they are in,
         # is not included; and items whose file is in no library.
         "excluded": 0,
         "unmatched": 0,
+        # Second Kodi entries for a file whose other entry holds the row.
+        "duplicate": 0,
         # Fields left unchecked because a provider failed transiently, plus
-        # items skipped while an id lookup had no answer: Update now tells
-        # "could not check" from "nothing changed" by it.
+        # items skipped while an id lookup, or Kodi's answer about the item a
+        # tracker row records, was missing: Update now tells "could not
+        # check" from "nothing changed" by it.
         "transient": 0,
         "fields": {},
         # True when the pass stopped before reaching the end of the library
@@ -839,6 +846,58 @@ def _gate_set_name(
               field="title", verdict=GATE_CHANGED)
 
 
+def _rebaseline_art(
+    tracker: TrackerDB, media_type: str, identity: str, item: dict[str, Any],
+) -> None:
+    """Take the art Kodi holds now as first seen in every slot the user did
+    not lock. After a Kodi re-add the slots hold the scraper's art, which
+    _gate_art would otherwise take for a change made outside MetaMender and
+    lock for good. Only the slots the listing carries: without the art map
+    there is nothing to compare against."""
+    locked = tracker.locked_fields(media_type, identity)
+    for f in sorted((ART_FIELDS & item.keys()) - locked):
+        tracker.set_first_fp(media_type, identity, f, fingerprint(kodi_form(item.get(f) or "")))
+
+
+def _readd_due(
+    tracker: TrackerDB,
+    media_type: str,
+    identity: str,
+    item: dict[str, Any],
+    fs_map: dict[str, dict[str, Any]],
+    decisions: dict[str, str],
+) -> set[str]:
+    """The fields of a re-added item whose value MetaMender wrote and Kodi
+    no longer holds: its scraper put its own value there. MetaMender's own
+    is recognised by field_keep's written_fp first, which outlives Reset
+    tracker, else field_status's written_value. Rating and votes hold a map
+    of per-slot fingerprints: they are due when a slot MetaMender wrote
+    differs; a slot it never wrote does not count. A field MetaMender never
+    wrote, and one already due (its schedule, changed settings), is left to
+    its own decision. ``decisions`` holds only fields the user did not
+    lock."""
+    keep = tracker.get_keep(media_type, identity)
+    ratings = item.get("ratings") or {}
+    ratings_differ = any(
+        (slot_fingerprint(ratings[slot]) if isinstance(ratings.get(slot), dict) else None)
+        != fp for slot, fp in _owned_slots(fs_map, ratings).items()
+    )
+    due: set[str] = set()
+    for f, decision in decisions.items():
+        if decision == FETCH_NOW:
+            continue
+        fs = fs_map.get(f) or {}
+        if f in RATING_FIELDS:
+            differs = ratings_differ and bool(_parse_slots(fs.get("written_value")))
+        else:
+            written = (keep.get(f) or {}).get("written_fp") or fs.get("written_value")
+            current = kodi_form(item.get(f) or "") if f in ART_FIELDS else kodi_form(item.get(f))
+            differs = written is not None and fingerprint(current) != written
+        if differs:
+            due.add(f)
+    return due
+
+
 def _drop_protected_art(
     tracker: TrackerDB,
     media_type: str,
@@ -1211,46 +1270,150 @@ def _needed_providers(media_type: MediaType, candidates: list[str]) -> list[str]
     return needed
 
 
-def _tracker_identity(
+@dataclass(frozen=True)
+class Resolved:
+    """The tracker row an item uses, and what the row's recorded Kodi id
+    said about it."""
+
+    identity: str
+    # The row's recorded Kodi id when Kodi re-added this item: that id is
+    # gone, or names another item, so this item took the row over.
+    readded_from: int | None = None
+    # Another Kodi entry for the same file keeps the row; this one is
+    # skipped without touching it.
+    duplicate_of: int | None = None
+    # Kodi did not answer about the recorded id, so whether this is a re-add
+    # is unknown; the item waits for a scan that can tell.
+    unchecked: bool = False
+
+
+def _twin_entries(
+    items: list[dict[str, Any]], media_type: MediaType,
+) -> dict[tuple[str, str], list[int]]:
+    """The Kodi ids of the listed entries that share an identity and a file
+    (Kodi holds the file twice), by (identity, file). A file listed once is
+    left out."""
+    by_key: dict[tuple[str, str], list[int]] = {}
+    for item in items:
+        file_path = item.get("file") or ""
+        identity = compute_identity(item, media_type) if file_path else ""
+        if identity:
+            by_key.setdefault((identity, file_path), []).append(
+                item.get(media_type.kodi_id_field, 0))
+    return {key: ids for key, ids in by_key.items() if len(ids) > 1}
+
+
+def _resolve_identity(
     tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: Any,
-    show_id_map: dict[int, str] | None = None,
-) -> str:
-    """The tracker key for this Kodi item: compute_identity's, unless another
-    Kodi item in the library holds that row.
+    show_id_map: dict[int, str], cache: dict[int, tuple[str, dict[str, Any] | None]],
+    twins: dict[tuple[str, str], list[int]] | None = None,
+) -> Resolved:
+    """The tracker row for this Kodi item: its ``<identity>|<file>`` row when
+    it has one, else compute_identity's.
 
     Two items can compute one identity, such as two files of a movie that
     both carry its tmdb id. Sharing a row would let the first mark it
     processed for the cycle and the second never be scanned, so the item
-    that does not hold the row gets ``<identity>|<file>``, and keeps it.
-    The holder is the item whose Kodi id the row records. Whether that item
-    still exists is asked from Kodi, and only when the ids differ: after a
-    file is replaced or the library rebuilt, the recorded id is gone or
-    names another item, and this item takes the row over. Kodi gives a
-    season no ids, so the holder season gets its show's TMDB id from
-    ``show_id_map``, as the listing did for this one.
+    that does not hold the plain row gets ``<identity>|<file>``, and keeps
+    it. The holder of either row is the item whose Kodi id the row records;
+    when that is not this item, Kodi is asked about it:
+
+    - It computes this identity for this same file: Kodi lists the file
+      twice. The recorded entry keeps the row and this one is a duplicate.
+      ``twins`` (the scan's listing, _twin_entries) answers that without a
+      call, and decides who takes over when the recorded id is gone: the
+      lowest listed id, whatever order the listing comes in.
+    - It computes this identity for another file: a second copy, which gets
+      ``<identity>|<file>`` (scan.duplicate_identity).
+    - It is gone, or names another item: Kodi re-added this item (a file
+      upgrade, a refresh, a rebuilt library). This item takes the row over
+      and the answer carries the recorded id as ``readded_from``.
+    - The query failed: nothing is known, so the answer is ``unchecked``
+      and the scan leaves the item and the row alone until it can tell.
+
+    Answers are kept in ``cache`` by Kodi id for the scan, so a holder many
+    items point at is asked about once. Kodi gives a season no ids, so the
+    holder season gets its show's TMDB id from ``show_id_map``, as the
+    listing did for this one; it has no file either, so a season holder is
+    never taken for a second entry of the same file.
     """
     identity = compute_identity(item, media_type)
-    own = "{}|{}".format(identity, item.get("file", ""))
-    if tracker.get_item(media_type.name, own) is not None:
-        return own
-    # An id written back to Kodi (_enrich_imdb_id) changes the identity the
-    # item computes; keep its tracker row under the new one.
-    tracker.adopt_identity(media_type.name, identity, kodi_id)
-    row = tracker.get_item(media_type.name, identity)
-    holder = row.get("kodi_id") if row else None
-    if holder is None or holder == kodi_id:
-        return identity
-    other = get_item_by_id(media_type, holder)
-    if other and media_type is SEASON:
-        other["show_tmdb_id"] = (show_id_map or {}).get(int(other.get("tvshowid", -1)))
-    if other and compute_identity(other, media_type) == identity:
+    file_path = item.get("file", "")
+    own = "{}|{}".format(identity, file_path)
+    row_identity = own
+    row = tracker.get_item(media_type.name, own)
+    if row is None:
+        # An id written back to Kodi (_enrich_imdb_id) changes the identity
+        # the item computes; keep its tracker row under the new one.
+        tracker.adopt_identity(media_type.name, identity, kodi_id)
+        row_identity = identity
+        row = tracker.get_item(media_type.name, identity)
+    recorded = row.get("kodi_id") if row else None
+    if recorded is None or recorded == kodi_id:
+        return Resolved(row_identity)
+    listed_twins = (twins or {}).get((identity, file_path), [])
+    if recorded in listed_twins:
+        return Resolved(row_identity, duplicate_of=recorded)
+
+    status, other = _cached_lookup(media_type, recorded, show_id_map, cache)
+    if status == ITEM_FAILED:
+        return Resolved(row_identity, unchecked=True)
+    other_identity = compute_identity(other, media_type) if other else ""
+    if status == ITEM_FOUND and not other_identity:
+        # A season whose show's TMDB id this scan does not have: nothing to
+        # compare, so the row is used as before.
+        return Resolved(row_identity)
+    if other is not None and other_identity == identity:
+        if other.get("file") == file_path:
+            return Resolved(row_identity, duplicate_of=recorded)
+        if row_identity == own:
+            # The recorded entry holds another file of this identity, or a
+            # file Kodi does not report (a season): this file's row is its own.
+            return _lowest_twin(Resolved(own), kodi_id, listed_twins)
         log.debug(
             "Duplicate identity, item tracked under its file",
             event="scan.duplicate_identity", identity=identity,
-            kodi_id=kodi_id, holder=holder,
+            kodi_id=kodi_id, holder=recorded,
         )
-        return own
-    return identity
+        return _lowest_twin(Resolved(own), kodi_id, listed_twins)
+    return _lowest_twin(Resolved(row_identity, readded_from=recorded), kodi_id, listed_twins)
+
+
+def _lowest_twin(resolved: Resolved, kodi_id: Any, listed_twins: list[int]) -> Resolved:
+    """``resolved`` for the lowest listed entry of a file Kodi holds twice;
+    for the others, a duplicate of that entry, which takes the row when the
+    scan reaches it."""
+    lowest = min(listed_twins, default=kodi_id)
+    if lowest != kodi_id:
+        return Resolved(resolved.identity, duplicate_of=lowest)
+    return resolved
+
+
+def _cached_lookup(
+    media_type: MediaType, kodi_id: int, show_id_map: dict[int, str],
+    cache: dict[int, tuple[str, dict[str, Any] | None]],
+) -> tuple[str, dict[str, Any] | None]:
+    """lookup_item's answer for ``kodi_id``, asked once per scan."""
+    if kodi_id not in cache:
+        status, other = lookup_item(media_type, kodi_id)
+        if other is not None and media_type is SEASON:
+            other["show_tmdb_id"] = show_id_map.get(int(other.get("tvshowid", -1)))
+        cache[kodi_id] = (status, other)
+    return cache[kodi_id]
+
+
+def _stamp_excluded(tracker: TrackerDB, media_type: MediaType, item: dict[str, Any]) -> None:
+    """Stamp today's last_seen on the row of an item in an excluded library
+    without resolving its identity: its ``<identity>|<file>`` row when it has
+    one, else the identity it computes. A season of a show without a TMDB id
+    has no identity and no row."""
+    identity = compute_identity(item, media_type)
+    if not identity:
+        return
+    own = "{}|{}".format(identity, item.get("file", ""))
+    if tracker.get_item(media_type.name, own) is not None:
+        identity = own
+    tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
 
 
 def scans_seasons(libraries: LibraryConfig) -> bool:
@@ -1296,20 +1459,38 @@ def _season_items(
 
 def _new_items(
     tracker: TrackerDB, media_type: MediaType, art: bool,
+    libraries: LibraryConfig, stats: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """The library's items whose Kodi id the tracker does not know yet, with
     full details (the art map only with ``art``). An id listed but gone by
-    the details call is skipped."""
+    the details call is skipped.
+
+    An item whose library or subfolder is not included is counted as
+    excluded in ``stats`` here, before its details call: it never gets a
+    tracker row, so every library-event scan would fetch it again. Items
+    dropped here get their last_seen from the next full scan. An item in no
+    library is fetched and counted by the item loop, as on a full scan."""
     known = tracker.known_kodi_ids(media_type.name)
     listed = kodi.get_all_items(media_type, ids_only=True)
-    fresh = [
-        i[media_type.kodi_id_field] for i in listed
-        if i.get(media_type.kodi_id_field) not in known
-    ]
+    fresh: list[Any] = []
+    excluded = 0
+    for listed_item in listed:
+        kodi_id = listed_item.get(media_type.kodi_id_field)
+        if kodi_id in known:
+            continue
+        file_path = listed_item.get("file") or ""
+        if (libraries.for_file(file_path) is not None
+                and libraries.included_for(file_path) is None):
+            excluded += 1
+            continue
+        fresh.append(kodi_id)
+    stats["skipped"] += excluded
+    stats["excluded"] += excluded
     items = [d for d in (get_item_by_id(media_type, i, art=art) for i in fresh) if d]
     log.info(
         "New library items selected", event="scan.new_items",
         media_type=media_type.name, listed=len(listed), new=len(items),
+        excluded=excluded,
     )
     return items
 
@@ -1544,10 +1725,13 @@ def run_scan(
     elif items is None:
         art = manages_art(media_type, libraries)
         items = (
-            _new_items(tracker, media_type, art) if new_only
+            _new_items(tracker, media_type, art, libraries, stats) if new_only
             else kodi.get_all_items(media_type, art=art)
         )
     needed = _pass_providers(media_type, libraries, items, reset)
+    # Kodi's answers about the Kodi ids tracker rows record, for this pass.
+    holder_answers: dict[int, tuple[str, dict[str, Any] | None]] = {}
+    twins = _twin_entries(items, media_type) if media_type is not SET else {}
 
     for index, item in enumerate(items):
         # Check for Kodi shutdown
@@ -1608,6 +1792,24 @@ def run_scan(
             file_path, lib)
         fallback_lang = fallback_lang.strip()
 
+        # A library or subfolder that is not included is skipped, but its
+        # items count as present, so orphan pruning keeps their history for
+        # when it is included again. The gate comes before the season's
+        # show-id check and before the identity is resolved, which can ask
+        # Kodi about another item holding the row; an excluded item costs no
+        # Kodi call. Update now bypasses the gate: whether it may run there
+        # is the caller's call.
+        if not reset and not (lib.included and included_here):
+            log.debug(
+                "Skipping item outside the included libraries",
+                event="scan.skip", reason="excluded", title=title,
+                media_type=media_type.name, library=lib.path,
+            )
+            _stamp_excluded(tracker, media_type, item)
+            stats["skipped"] += 1
+            stats["excluded"] += 1
+            continue
+
         # A season is keyed on its show's TMDB id, so without one it has no
         # identity; it is picked up once its show is resolved.
         if media_type is SEASON and not compute_identity(item, media_type):
@@ -1621,36 +1823,49 @@ def run_scan(
 
         kodi_id = item.get(media_type.kodi_id_field, 0)
         # One managed set per collection: its row follows whichever Kodi
-        # set prepare_sets chose.
-        identity = (
-            compute_identity(item, media_type) if media_type is SET
-            else _tracker_identity(tracker, media_type, item, kodi_id, shared.show_id_map)
+        # set prepare_sets chose. ``resolved.readded_from`` stays on hand for
+        # the item's decisions below.
+        resolved = (
+            Resolved(compute_identity(item, media_type)) if media_type is SET
+            else _resolve_identity(tracker, media_type, item, kodi_id,
+                                   shared.show_id_map, holder_answers, twins)
         )
+        # MetaMender does not merge or remove a second Kodi entry for a file:
+        # that is the user's library. It is left alone and the row stays with
+        # the entry that holds it.
+        if resolved.duplicate_of is not None:
+            log.debug(
+                "Second Kodi entry for a tracked file, skipped",
+                event="scan.duplicate_file", identity=resolved.identity,
+                kodi_id=kodi_id, kept_kodi_id=resolved.duplicate_of,
+            )
+            stats["skipped"] += 1
+            stats["duplicate"] += 1
+            continue
+        # Taking the row now could hide a re-add (its values would not come
+        # back) or hand a duplicate the row; the next scan asks again.
+        if resolved.unchecked:
+            log.debug(
+                "Kodi did not answer about the row's recorded item, skipped",
+                event="scan.skip", reason="holder_unchecked", title=title,
+                identity=resolved.identity, kodi_id=kodi_id,
+            )
+            stats["skipped"] += 1
+            stats["transient"] += 1
+            continue
+        identity = resolved.identity
         if media_type is SEASON and not item.get(media_type.date_field):
             # Kodi has no date on a season: its TMDB air date, once a fetch
             # found it, is kept as the row's premiered.
             known = tracker.get_item(media_type.name, identity) or {}
             item[media_type.date_field] = known.get("premiered") or ""
 
-        # A library or subfolder that is not included is skipped, but its
-        # items count as present, so orphan pruning keeps their history for
-        # when it is included again. Update now bypasses the gate: whether
-        # it may run there is the caller's call.
-        if not reset and not (lib.included and included_here):
-            log.debug(
-                "Skipping item outside the included libraries",
-                event="scan.skip", reason="excluded", title=title,
-                media_type=media_type.name, library=lib.path,
-            )
-            tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
-            stats["skipped"] += 1
-            stats["excluded"] += 1
-            continue
-
         # Resume: skip items already processed in this cycle. The reset path
         # (Update now) bypasses this so a just-scanned item can still be
-        # corrected on demand.
-        if not reset:
+        # corrected on demand. So does a library-event scan: its items are new
+        # under their Kodi id, and a re-added item's row can already be marked
+        # in the open full cycle although Kodi holds none of its values now.
+        if not reset and not new_only:
             pre_tracker = tracker.get_item(media_type.name, identity)
             if pre_tracker and pre_tracker.get("cycle_processed"):
                 stats["skipped"] += 1
@@ -1808,6 +2023,26 @@ def run_scan(
                 decisions[f] = FETCH_NOW
                 refills.add(f)
 
+        # Kodi re-added the item (a file upgrade, or Refresh) with its
+        # scraper's values. Its art is first seen again, so it is not locked
+        # as the user's, and every value MetaMender wrote that the scraper
+        # replaced is written back in this scan, subject to the usual rules
+        # (an NFO's value stays). Such a rewrite is not a sample of the
+        # item's ageing: it is recorded like Update now's check.
+        readd_refills: set[str] = set()
+        if resolved.readded_from is not None:
+            _rebaseline_art(tracker, media_type.name, identity, item)
+            readd_refills = _readd_due(tracker, media_type.name, identity, item, fs_map,
+                                       decisions)
+            for f in readd_refills:
+                decisions[f] = FETCH_NOW
+            log.info(
+                "Kodi re-added the item",
+                event="scan.readded", identity=identity,
+                old_kodi_id=resolved.readded_from, kodi_id=kodi_id,
+                fields_due=sorted(readd_refills),
+            )
+
         # A local art file that no longer exists is fair game like a broken
         # link; one whose share does not answer waits, untouched and
         # unsampled. A FINAL field gets one refill for a missing file, like
@@ -1853,6 +2088,18 @@ def run_scan(
             else:
                 nfo_kind = "tvshow" if media_type is SEASON else media_type.name
                 state = nfo_state(nfo_kind, item.get("file", ""))
+            if (state == UNREACHABLE and media_type is not SET
+                    and media_gone(item.get("file", ""))):
+                # The parent folder lists other entries, so this item was
+                # deleted or moved, not stranded behind an offline share.
+                log.debug(
+                    "Media folder gone, skipping item",
+                    event="scan.skip", reason="gone", title=title,
+                    identity=identity, media_type=media_type.name,
+                )
+                stats["skipped"] += 1
+                stats["gone"] += 1
+                continue
             if state == UNREACHABLE:
                 log.debug(
                     "Media unreachable, skipping item",
@@ -1867,6 +2114,13 @@ def run_scan(
                 _drop_protected_art(tracker, media_type.name, identity, item, fs_map,
                                     decisions, ART_FIELDS, REASON_NFO, missing)
                 due = any(d == FETCH_NOW for d in decisions.values())
+
+        # Fetched only because of the re-add: the fields not yet due are
+        # sampled along, and are no more a sample of the item's ageing than
+        # the rewrite is.
+        if readd_refills and not any(
+                d == FETCH_NOW for f, d in decisions.items() if f not in readd_refills):
+            readd_refills.update(f for f, d in decisions.items() if d != FINAL)
 
         ids = _resolve_ids(
             ctx, item, identity, kodi_ids, stored, language,
@@ -1909,6 +2163,7 @@ def run_scan(
             decisions=decisions,
             rebaseline=sorted(rebaseline),
             refills=sorted(refills),
+            readd_refills=sorted(readd_refills),
         )
 
         if breaker.all_disabled(needed):
@@ -2093,9 +2348,9 @@ def run_scan(
         # Advance a field's clock ONLY when its own providers answered; a
         # transient field is retried next scan instead of being wrongly
         # sampled/finalized. A protected field is answered and advances.
-        # Changed settings re-baseline it. Update now leaves the clock of a
-        # field with history alone and records only what it wrote: a manual
-        # refresh is not a sample of the item's ageing.
+        # Changed settings re-baseline it. Update now, and the rewrite after
+        # a re-add, leave the clock of a field with history alone and record
+        # only what was written: neither is a sample of the item's ageing.
         premiered = item.get(media_type.date_field, "")
         for f in nonfinal:
             outcome = outcomes[f]
@@ -2147,7 +2402,7 @@ def run_scan(
             reason = REASON_FROM_FILE if f in from_file else _field_reason(
                 f, written, held, extracted, nfo_managed, item, cert_kept,
             )
-            if reset and int(fs.get("fetch_count") or 0) > 0:
+            if (reset or f in readd_refills) and int(fs.get("fetch_count") or 0) > 0:
                 tracker.record_manual_check(
                     media_type.name, identity, f, settings_fp=fps[f],
                     written_value=provenance.get(f), source=source,
@@ -2193,9 +2448,11 @@ def run_scan(
         updated=stats["updated"],
         errors=stats["errors"],
         unreachable=stats["unreachable"],
+        gone=stats["gone"],
         protected=stats["protected"],
         excluded=stats["excluded"],
         unmatched=stats["unmatched"],
+        duplicate=stats["duplicate"],
         unknown_ids_accepted=shared.counts["unknown_ids_accepted"],
         episodes_found_by_tvdb=shared.counts["episodes_found_by_tvdb"],
         disabled=breaker.disabled(),

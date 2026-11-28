@@ -23,6 +23,7 @@ Logging:
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Callable
 
 from resources.lib.utils import TransientProviderError, get_logger
@@ -55,17 +56,31 @@ def prepare(abort: Callable[[], bool]) -> bool:
     logged and the answer follows whatever dataset is already loaded, since an
     old dataset is still usable.
     """
-    mod = _module()
-    if mod is None:
-        return False
+    log.info("IMDb ratings update starting", event="imdb.prepare", phase="start")
+    started = time.monotonic()
+    outcome = "success"
     try:
-        mod.refresh(abort=abort)
-    except Exception:
-        log.exception(
-            "IMDb ratings refresh failed",
-            event="imdb_ratings.refresh_failed",
+        mod = _module()
+        if mod is None:
+            outcome = "skipped"
+            return False
+        try:
+            mod.refresh(abort=abort)
+        except Exception:
+            outcome = "error"
+            log.exception(
+                "IMDb ratings refresh failed",
+                event="imdb_ratings.refresh_failed",
+            )
+        return mod.dataset_date() is not None
+    finally:
+        log.info(
+            "IMDb ratings update finished",
+            event="imdb.prepare",
+            phase="end",
+            outcome=outcome,
+            duration_ms=int((time.monotonic() - started) * 1000),
         )
-    return mod.dataset_date() is not None
 
 
 def lookup(imdb_id: str) -> tuple[float, int] | None:

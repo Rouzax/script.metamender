@@ -593,16 +593,72 @@ def test_first_scan_learns_names_and_merges(tmp_path, kodi_stubs, fake, tmdb_api
     tracker.close()
 
 
-def test_user_named_set_is_never_merged(tmp_path, kodi_stubs, fake, tmdb_api):
+def test_user_named_set_with_another_collections_movie_is_never_merged(
+        tmp_path, kodi_stubs, fake, tmdb_api):
     fake.add_set(1, "Favourites", "")
     fake.add_movie(1, 1, "20352")
     fake.add_movie(2, 1, "93456")
+    fake.add_movie(4, 1, "808")
     fake.add_set(2, EN_NAME, EN_PLOT)
     fake.add_movie(3, 2, "211672")
+    tmdb_api["member"].side_effect = lambda tmdb_id, _key: "2150" if tmdb_id == "808" else "86066"
     tracker = _make_tracker(tmp_path)
     _scan(tracker, _library())
     assert _movie_moves(fake) == []
     assert _set_write(fake, 1).get("title") is None
+    assert "favourites" not in tracker.get_set_names(IDENTITY)
+    tracker.close()
+
+
+def _managed_then_unknown_named(fake: FakeKodi, tracker) -> None:
+    """Scan the lone set (renamed to Dutch), then let Kodi's scraper file a
+    new movie of the collection under a name TMDB no longer lists (htpc1:
+    "The Super Mario Bros. Collection")."""
+    fake.add_set(1, EN_NAME, EN_PLOT)
+    fake.add_movie(1, 1, "20352")
+    fake.add_movie(2, 1, "93456")
+    _scan(tracker, _library())
+    assert fake.sets[1]["title"] == NL_NAME
+    fake.add_set(2, "Despicable Me Bros. Collection", "")
+    fake.add_movie(3, 2, "211672")
+    _make_due(tracker)
+    fake.update.reset_mock()
+
+
+def test_merged_set_name_is_learned(tmp_path, kodi_stubs, fake, tmdb_api):
+    tracker = _make_tracker(tmp_path)
+    _managed_then_unknown_named(fake, tracker)
+    assert "despicable me bros. collection" not in tracker.get_set_names(IDENTITY)
+    stats = _scan(tracker, _library())
+    assert _movie_moves(fake) == [(3, NL_NAME)]
+    assert stats["moved"] == 1
+    assert "despicable me bros. collection" in tracker.get_set_names(IDENTITY)
+    tracker.close()
+
+
+def test_name_not_learned_when_the_move_did_not_land(tmp_path, kodi_stubs, fake, tmdb_api):
+    tracker = _make_tracker(tmp_path)
+    _managed_then_unknown_named(fake, tracker)
+    fake.land_in = 7
+    _scan(tracker, _library())
+    assert "despicable me bros. collection" not in tracker.get_set_names(IDENTITY)
+    tracker.close()
+
+
+def test_user_moved_movie_from_an_unknown_named_set_not_merged_back(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    tracker = _make_tracker(tmp_path)
+    _managed_then_unknown_named(fake, tracker)
+    _scan(tracker, _library())
+    assert fake.movies[3]["setid"] == 1
+    # The user puts the movie back in the second set by hand.
+    fake.movies[3]["setid"] = 2
+    _make_due(tracker)
+    fake.update.reset_mock()
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert fake.movies[3]["setid"] == 2
+    assert tracker.get_set_move("tmdb:211672")["locked"] == 1
     tracker.close()
 
 
@@ -1154,6 +1210,77 @@ def test_movie_taken_out_of_a_set_seen_before_stays_out(
     _make_due(tracker)
     _scan(tracker, _library())
     assert _movie_moves(fake) == []
+    tracker.close()
+
+
+def test_movie_user_moved_from_managed_set_to_own_set_is_not_merged_back(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """MetaMender never moved the movie, so only its sighting in the
+    managed set shows the user put it in "Mine", a set holding only movies
+    of the collection."""
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    fake.add_set(2, "Mine")
+    fake.movies[3]["setid"] = 2
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert fake.movies[3]["setid"] == 2
+    assert tracker.get_set_seen("tmdb:211672")["locked"] == 1
+    # The lock holds at later scans too.
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    tracker.close()
+
+
+def test_movie_metamender_moved_out_of_a_seen_set_is_not_locked(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """Set 1 is managed and its movies are seen there; then the tracker
+    holds set 2, so set 1 is a duplicate and MetaMender moves them. The
+    sightings in set 1 outlive that scan, and its own moves explain them."""
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert tracker.get_set_seen("tmdb:211672")["setid"] == 1
+    fake.add_set(2, EN_NAME)
+    fake.add_movie(4, 2, "1004")
+    tracker._conn.execute("UPDATE items SET kodi_id = 2 WHERE media_type = 'set' "
+                          "AND identity = ?", (IDENTITY,))
+    tracker.commit()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert fake.movies[3]["setid"] == 2
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert tracker.get_set_move("tmdb:211672")["locked"] == 0
+    assert tracker.get_set_seen("tmdb:211672")["locked"] == 0
+    assert _movie_moves(fake) == []
+    tracker.close()
+
+
+def test_readded_movie_in_another_set_is_not_locked(tmp_path, kodi_stubs, fake, tmdb_api):
+    """A refresh re-adds the movie under a new movieid, and the scraper
+    files it under the collection's old name: a duplicate, merged."""
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    fake.add_set(2, EN_NAME)
+    del fake.movies[3]
+    fake.add_movie(30, 2, "211672")
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == [(30, NL_NAME)]
+    assert fake.movies[30]["setid"] == 1
+    assert tracker.get_set_seen("tmdb:211672")["locked"] == 0
     tracker.close()
 
 
