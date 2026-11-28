@@ -463,6 +463,13 @@ def _resolve_ids(
 def _finish_lookups(ctx: _ScanCtx, identity: str, ids: _Ids, today: str) -> None:
     """Record that the item's lookups answered, so an id they left missing is
     not asked for again before FALLBACK_RECHECK_DAYS. Nothing is recorded
-    when any lookup failed, so the next scan retries."""
-    if ids.looked_up and not ids.lookup_failed:
+    when any lookup failed, so the next scan retries.
+
+    A show whose TMDB and TVDB ids are both known has nothing left to look
+    up, wherever the ids came from, so it counts as checked too: that is what
+    lets its id-less episodes be matched by number."""
+    if ids.lookup_failed:
+        return
+    complete_show = ctx.media_type.name == "tvshow" and bool(ids.tmdb and ids.tvdb)
+    if ids.looked_up or complete_show:
         ctx.tracker.upsert_item(ctx.media_type.name, identity, ids_checked=today)

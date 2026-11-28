@@ -3465,6 +3465,67 @@ class TestDeferredLookupsNotRecorded:
         assert row["ids_checked"] is None
 
 
+class TestShowWithCompleteIdsIsChecked:
+    """A show whose TMDB and TVDB ids are both known after the id step has
+    nothing left to look up, so its id-less episodes are matched by number
+    instead of waiting for a lookup that will never run."""
+
+    def _scan_show(self, tracker, item):
+        run_scan(
+            TVSHOW, tracker, _libs(frozenset({"plot"})),
+            "k", _make_settings(), items=[item],
+        )
+        return _row(tracker, TVSHOW, item)
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow", return_value=None)
+    def test_show_with_kodi_ids_is_stamped_checked(
+        self, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        item = _make_tvshow_item()
+        item["uniqueid"] = {"tmdb": "99999", "tvdb": "80767"}
+        tracker = _make_tracker(tmp_path)
+        row = self._scan_show(tracker, item)
+        tracker.close()
+
+        assert row["ids_checked"] == date.today().isoformat()
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow", return_value=None)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow_external_ids")
+    def test_failed_lookup_still_not_stamped(
+        self, mock_ext, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.utils import TransientProviderError
+
+        mock_ext.side_effect = TransientProviderError("503")
+        item = _make_tvshow_item()
+        tracker = _make_tracker(tmp_path)
+        row = self._scan_show(tracker, item)
+        tracker.close()
+
+        assert row["ids_checked"] is None
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_tvshow", return_value=None)
+    def test_idless_episode_of_such_show_is_matched_by_number(
+        self, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        from resources.lib.engine.ids import _show_checked
+        from resources.lib.engine.scanctx import _ScanCtx
+
+        item = _make_tvshow_item()
+        item["uniqueid"] = {"tmdb": "99999", "tvdb": "80767"}
+        tracker = _make_tracker(tmp_path)
+        self._scan_show(tracker, item)
+        checked = tracker.get_checked_show_ids()
+        tracker.close()
+
+        ctx = MagicMock(spec=_ScanCtx)
+        ctx.checked_shows = checked
+        assert _show_checked(ctx, {"tvshowid": 10})
+
+
 class TestFoundEpisodeSeason:
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_episode_external_ids")
