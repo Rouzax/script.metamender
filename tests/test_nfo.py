@@ -278,5 +278,24 @@ def test_not_gone_on_vfs_error_at_grandparent(vfs, kodi_stubs, tmp_path):
     assert nfo.media_gone(str(tmp_path / "Movies" / "Film" / "Film.mkv")) is False
 
 
+def test_not_gone_when_grandparent_is_a_bare_smb_host(vfs, kodi_stubs):
+    """An offline share is missing while its server still lists its shares."""
+    x = kodi_stubs["xbmcvfs"]
+    x.exists.side_effect = lambda path: path == "smb://server/"
+    x.listdir.side_effect = lambda path: (["other"], [])
+    assert nfo.media_gone("smb://server/share/film.mkv") is False
+    assert nfo.media_gone("smb://server:445/share/film.mkv") is False
+
+
+def test_not_gone_when_grandparent_is_root(vfs, kodi_stubs):
+    x = kodi_stubs["xbmcvfs"]
+    x.exists.side_effect = lambda path: path in ("/", "C:\\")
+    x.listdir.side_effect = lambda path: (["other"], ["f"])
+    assert nfo.media_gone("/share/film.mkv") is False
+    assert nfo.media_gone("/share/Film/film.mkv") is False
+    assert nfo.media_gone("C:\\Movies\\film.mkv") is False
+    assert nfo.media_gone("C:\\Movies\\Film\\film.mkv") is False
+
+
 def test_not_gone_without_a_path():
     assert nfo.media_gone("") is False

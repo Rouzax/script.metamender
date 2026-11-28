@@ -200,6 +200,16 @@ def _first_media_path(file_path: str) -> str:
     return file_path
 
 
+# A bare host ("smb://server") or a drive root ("C:"): an offline share is
+# missing while its server or drive still answers, so these never prove that
+# the media was deleted.
+_HOST_OR_ROOT = re.compile(r"^(?:[a-z][a-z0-9+.-]*://[^/]*|[a-z]:)$", re.IGNORECASE)
+
+
+def _is_host_or_root(folder: str) -> bool:
+    return bool(_HOST_OR_ROOT.match(folder.rstrip("/\\")) or not folder.strip("/\\"))
+
+
 def media_gone(file_path: str) -> bool:
     """The media (or show folder) is missing while a folder above it is
     readable and holds other entries.
@@ -207,9 +217,9 @@ def media_gone(file_path: str) -> bool:
     That is a deleted or moved item, not an offline share: an unmounted mount
     point is an empty folder, and a dropped share fails the call. The folder
     checked is the media's parent or, when that parent is gone too (a movie
-    whose whole folder was deleted), the parent's parent; no higher. Any VFS
-    error answers False, so the caller keeps treating the item as
-    unreachable.
+    whose whole folder was deleted), the parent's parent; no higher, and never
+    a share host or filesystem root. Any VFS error answers False, so the
+    caller keeps treating the item as unreachable.
     """
     try:
         media = _first_media_path(file_path) if file_path else ""
@@ -220,7 +230,8 @@ def media_gone(file_path: str) -> bool:
             return False
         if not _exists(_as_folder(parent)):
             parent = _split(parent)[0]
-            if not parent or not _exists(_as_folder(parent)):
+            if (not parent or _is_host_or_root(parent)
+                    or not _exists(_as_folder(parent))):
                 return False
         dirs, files = xbmcvfs.listdir(_as_folder(parent))
         return bool(dirs or files)
