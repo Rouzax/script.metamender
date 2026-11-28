@@ -1503,3 +1503,54 @@ def test_full_scan_still_resets_last_scan_and_completes_the_cycle(kodi_stubs, tm
     assert _new_only_flags(scan) == [False, False]
     # The daily scan opened a fresh cycle and ran it to the end.
     assert _cycle_state(db) == ("1", [])
+
+
+def _events(log_mock, level):
+    return [c.kwargs.get("event") for c in getattr(log_mock, level).call_args_list]
+
+
+def test_skip_playback_logged_once_per_wait(kodi_stubs):
+    """A due scan waiting on playback logs one line when it starts waiting and
+    one when it proceeds, not one per service tick."""
+    with patch.object(daemon, "log") as log:
+        _Service().run(ticks=6, playing=lambda s: s.monitor.waits < 4)
+    assert _events(log, "debug").count("service.skip_playback") == 1
+    ends = [c for c in log.debug.call_args_list
+            if c.kwargs.get("event") == "service.playback_wait_end"]
+    assert len(ends) == 1 and "waited_s" in ends[0].kwargs
+
+
+def test_no_playback_wait_end_when_nothing_waited(kodi_stubs):
+    with patch.object(daemon, "log") as log:
+        _Service().run(ticks=2)
+    assert "service.playback_wait_end" not in _events(log, "debug")
+
+
+def test_notification_counts_set_and_season_changes(kodi_stubs):
+    for key in ("joined", "sets_created", "moved"):
+        stats = _stats_updated(0)
+        stats["set"] = {key: 2}
+        svc = _Service().run(ticks=1, scan=MagicMock(return_value=stats),
+                             notifications=True)
+        assert svc.notified == ["s32349"], key
+    stats = _stats_updated(0)
+    stats.setdefault("season", {})["updated"] = 1
+    svc = _Service().run(ticks=1, scan=MagicMock(return_value=stats),
+                         notifications=True)
+    assert svc.notified == ["s32504"]
+
+
+def test_targeted_scan_stopped_early_does_not_log_an_open_cycle(kodi_stubs, tmp_path):
+    db = str(tmp_path / "t.db")
+    scan = MagicMock(side_effect=[_complete_stats(), _complete_stats(aborted=True)])
+    with patch.object(daemon, "log") as log:
+        _run_on_clock(db, hours=[0, 1], events={1}, scan=scan)
+    assert _new_only_flags(scan) == [False, True]
+    assert "service.cycle_incomplete" not in _events(log, "info")
+
+
+def test_full_scan_stopped_early_logs_an_open_cycle(kodi_stubs, tmp_path):
+    scan = MagicMock(return_value=_complete_stats(aborted=True))
+    with patch.object(daemon, "log") as log:
+        _run_on_clock(str(tmp_path / "t.db"), hours=[0], scan=scan)
+    assert _events(log, "info").count("service.cycle_incomplete") == 1

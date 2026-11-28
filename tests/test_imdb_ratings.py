@@ -45,6 +45,28 @@ def test_prepare_refresh_error_falls_back_to_dataset(imdbratings_stub: MagicMock
     assert imdb_ratings.prepare(lambda: False) is False
 
 
+def test_imdb_prepare_logs_start_and_end(imdbratings_stub: MagicMock) -> None:
+    imdbratings_stub.dataset_date.return_value = "x"
+    with patch.object(imdb_ratings, "log") as log:
+        imdb_ratings.prepare(lambda: False)
+    calls = [c.kwargs for c in log.info.call_args_list]
+    assert [c["event"] for c in calls] == ["imdb.prepare", "imdb.prepare"]
+    assert [c["phase"] for c in calls] == ["start", "end"]
+    assert calls[1]["outcome"] == "success" and "duration_ms" in calls[1]
+
+    imdbratings_stub.refresh.side_effect = RuntimeError("boom")
+    with patch.object(imdb_ratings, "log") as log:
+        imdb_ratings.prepare(lambda: False)
+    assert log.info.call_args_list[-1].kwargs["outcome"] == "error"
+
+
+def test_imdb_prepare_without_the_module_is_skipped() -> None:
+    with patch.object(imdb_ratings, "_module", return_value=None), \
+            patch.object(imdb_ratings, "log") as log:
+        assert imdb_ratings.prepare(lambda: False) is False
+    assert log.info.call_args_list[-1].kwargs["outcome"] == "skipped"
+
+
 def test_lookup_absent_is_none(imdbratings_stub: MagicMock) -> None:
     imdbratings_stub.lookup.return_value = None
     assert imdb_ratings.lookup("tt0000001") is None

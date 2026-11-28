@@ -265,6 +265,20 @@ def test_manual_runs_set_pass_after_movies(monkeypatch, patched):
     manual.notify.assert_any_call(manual.updated_text(2))
 
 
+def test_manual_notification_counts_set_and_season_changes(monkeypatch, patched):
+    patched["sync"].return_value = LibraryConfig([Library(
+        path="smb://nas/Movies/", label="Movies", included=True, language="en-US",
+        fallback_language="", toggles=frozenset({"movie_sets", "posters"}))])
+    monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
+    patched["run_scan"].side_effect = lambda **kw: (
+        {"joined": 1, "sets_created": 1, "moved": 1} if kw["media_type"] is SET
+        else {"updated": 1} if kw["media_type"] is SEASON else {"updated": 0})
+    counted = MagicMock(return_value="counted")
+    monkeypatch.setattr(manual, "updated_text", counted)
+    manual.run()
+    counted.assert_called_once_with(4)
+
+
 def test_manual_without_libraries_scans_nothing(monkeypatch, patched):
     monkeypatch.setattr(manual, "_load_settings", MagicMock(return_value=_settings()))
     patched["sync"].return_value = None

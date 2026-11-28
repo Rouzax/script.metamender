@@ -16,7 +16,10 @@ ADDON_PREFIX = "MetaMend"
 
 LOG_DIR_NAME = "logs"
 LOG_FILE_PREFIX = "metamender"
-LOG_MAX_FILES = 10
+# A scan log is kept for this many days and only the newest LOG_MAX_FILES stay,
+# so a week of scans can be sent with a bug report.
+LOG_KEEP_DAYS = 7
+LOG_MAX_FILES = 30
 # Between scans the debug log goes to one activity file, rotated at this size
 # with this many older copies kept (metamender.1.log is the newest of them).
 LOG_ACTIVITY_MAX_BYTES = 500 * 1024
