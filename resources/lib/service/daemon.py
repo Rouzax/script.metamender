@@ -851,7 +851,12 @@ def run() -> None:
                             targeted=targeted,
                         )
 
-                        tracker.begin_cycle(settings["resume_interrupted"])
+                        # The cycle and the schedule belong to the full scan:
+                        # a library-event scan neither opens nor closes the
+                        # cycle, so an interrupted full cycle keeps its resume
+                        # point, and it does not put off the next full scan.
+                        if not targeted:
+                            tracker.begin_cycle(settings["resume_interrupted"])
                         # A Stop scan chosen while no scan ran must not end
                         # this one.
                         clear_stop()
@@ -929,7 +934,8 @@ def run() -> None:
                             duration_ms=duration_ms,
                         )
 
-                        last_scan = time.time()
+                        if not targeted:
+                            last_scan = time.time()
                         monitor.clear_scan_request()
 
                         # A pass that stopped early (shutdown, providers down)
@@ -946,11 +952,12 @@ def run() -> None:
                                 event="service.cycle_incomplete",
                             )
                         else:
-                            tracker.mark_cycle_complete()
-                            tracker.set_scan_state(
-                                "last_scan_completed",
-                                time.strftime("%Y-%m-%d %H:%M:%S"),
-                            )
+                            if not targeted:
+                                tracker.mark_cycle_complete()
+                                tracker.set_scan_state(
+                                    "last_scan_completed",
+                                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                                )
 
                             # Prune orphaned tracker rows. Guarded to run only
                             # after a FULL scan (not targeted); see

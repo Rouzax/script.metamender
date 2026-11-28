@@ -1649,8 +1649,10 @@ def run_scan(
 
         # Resume: skip items already processed in this cycle. The reset path
         # (Update now) bypasses this so a just-scanned item can still be
-        # corrected on demand.
-        if not reset:
+        # corrected on demand. So does a library-event scan: its items are new
+        # under their Kodi id, and a re-added item's row can already be marked
+        # in the open full cycle although Kodi holds none of its values now.
+        if not reset and not new_only:
             pre_tracker = tracker.get_item(media_type.name, identity)
             if pre_tracker and pre_tracker.get("cycle_processed"):
                 stats["skipped"] += 1

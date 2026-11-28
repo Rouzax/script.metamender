@@ -5394,6 +5394,38 @@ class TestNewOnlyScan:
         assert stats["processed"] == 1
         assert [c.args[0] for c in mock_tmdb.call_args_list] == ["22"]
 
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    @patch("resources.lib.data.kodi.get_all_items")
+    def test_targeted_scan_processes_a_row_marked_processed(
+        self, mock_all, mock_by_id, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        """A movie removed and added again gets a new Kodi id; its row may
+        already be processed in the open full cycle, and the library event
+        scan still processes it (and marks it, so the full cycle does not
+        redo it)."""
+        readded = _make_movie_item(movie_id=7, tmdb_id="22")
+        identity = compute_identity(readded, MOVIE)
+        mock_all.return_value = [{"movieid": 7}]
+        mock_by_id.side_effect = lambda mt, i, art=True: {7: readded}.get(i)
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", identity, kodi_id=3)
+        tracker.mark_cycle_processed("movie", identity)
+        tracker.commit()
+
+        stats = run_scan(
+            MOVIE, tracker, _libs(frozenset({"plot"})), "k",
+            _make_settings(), new_only=True,
+        )
+        row = tracker.get_item("movie", identity)
+        tracker.close()
+
+        assert stats["processed"] == 1
+        assert [c.args[0] for c in mock_tmdb.call_args_list] == ["22"]
+        assert row is not None and row["cycle_processed"]
+
 
 class TestDuplicateIdentities:
     """Two Kodi items that compute the same identity (two files of one movie,

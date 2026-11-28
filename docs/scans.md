@@ -12,7 +12,8 @@ you see while it works.
 - **After a library update.** When Kodi finishes updating or cleaning the
   video library, MetaMender waits five minutes and then looks at the items
   that are new to it. A scheduled scan that is due at the same time covers
-  them anyway.
+  them anyway. This scan does not move the daily one: that still comes 24
+  hours after the last daily scan.
 - **When you ask.** [Update now](update-now.md) refreshes one movie, show,
   season or episode right away.
 
@@ -29,10 +30,11 @@ you have not pressed anything for a minute or when you leave the library.
 
 While a scan runs, the MetaMender submenu in the context menu of any movie,
 show, season or episode has **Stop scan**. The scan stops after the item it is
-working on; nothing is undone. The next scan, on the usual schedule or after
-a library update, carries on from where this one stopped (unless **Resume
-interrupted scans** is off, then it starts from the beginning). Update now is
-not affected.
+working on; nothing is undone. The next scheduled scan, or the one when Kodi
+starts, carries on from where this one stopped (unless **Resume interrupted
+scans** is off, then it starts from the beginning). A scan after a library
+update looks only at the new items and leaves that point where it is. Update
+now is not affected.
 
 ## How often a field is checked
 
