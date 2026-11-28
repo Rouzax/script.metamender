@@ -5717,6 +5717,7 @@ class TestRecordedKodiId:
                    if c.kwargs.get("event") == "scan.duplicate_file"]
             assert dup == [{"event": "scan.duplicate_file", "identity": "tmdb:354912",
                             "kodi_id": 5571, "kept_kodi_id": 5570}]
+            assert _complete_kwargs(log)["duplicate"] == 1
             tracker.begin_cycle(resume_interrupted=False)
         tracker.close()
         assert 5571 not in [c.args[0] for c in mock_update.call_args_list]
@@ -5788,6 +5789,34 @@ class TestRecordedKodiId:
 
         assert stats["processed"] == 3
         assert [c.args[1] for c in mock_lookup.call_args_list] == [40]
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    @patch("resources.lib.engine.scan.lookup_item")
+    def test_failed_holder_lookup_skips_the_item_this_scan(
+        self, mock_lookup, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        """Kodi did not answer about the recorded id: whether this is a
+        re-add is unknown, so the item waits for the next scan untouched."""
+        from resources.lib.data.kodi import ITEM_FAILED
+        mock_lookup.return_value = (ITEM_FAILED, None)
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", "tmdb:354912", kodi_id=405)
+        tracker.commit()
+
+        with patch("resources.lib.engine.scan.log") as log:
+            stats = self._scan(tracker, [self._movie(433)])
+        rows = self._rows(tracker)
+        tracker.close()
+
+        assert rows == {"tmdb:354912": 405}
+        assert (stats["processed"], stats["skipped"], stats["transient"]) == (0, 1, 1)
+        mock_tmdb.assert_not_called()
+        mock_update.assert_not_called()
+        skips = [c.kwargs for c in log.debug.call_args_list
+                 if c.kwargs.get("event") == "scan.skip"]
+        assert [s["reason"] for s in skips] == ["holder_unchecked"]
 
 
 class TestResolveIdentity:
@@ -5865,8 +5894,24 @@ class TestResolveIdentity:
             return ITEM_FAILED, None
         resolved, _lookup = self._resolve(tracker, self._movie(433), side_effect=answer)
         tracker.close()
-        assert (resolved.identity, resolved.readded_from, resolved.duplicate_of) == (
-            own if file_row else "tmdb:354912", None, None)
+        assert (resolved.identity, resolved.readded_from, resolved.duplicate_of,
+                resolved.unchecked) == (own if file_row else "tmdb:354912", None, None, True)
+
+    def test_recorded_gone_lowest_twin_is_the_readd(self, tmp_path, kodi_stubs):
+        """The recorded id is gone and Kodi lists the file twice: the lowest
+        entry carries the re-add, the other is its duplicate."""
+        from resources.lib.engine.scan import _resolve_identity
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", "tmdb:354912", kodi_id=5569)
+        twins = {("tmdb:354912", self._FILE): [5571, 5570]}
+        answers = {}
+        with patch("resources.lib.engine.scan.lookup_item", side_effect=_kodi_answers({})):
+            for kodi_id in (5571, 5570):
+                answers[kodi_id] = _resolve_identity(
+                    tracker, MOVIE, self._movie(kodi_id), kodi_id, {}, {}, twins)
+        tracker.close()
+        assert (answers[5570].readded_from, answers[5570].duplicate_of) == (5569, None)
+        assert (answers[5571].readded_from, answers[5571].duplicate_of) == (None, 5570)
 
     def test_second_file_of_the_identity_gets_its_own_row(self, tmp_path, kodi_stubs):
         holder = self._movie(40, "smb://server/movies/other/coco.mkv")

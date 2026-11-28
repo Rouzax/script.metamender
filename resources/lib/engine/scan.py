@@ -312,8 +312,9 @@ def _make_stats() -> dict[str, Any]:
         # Second Kodi entries for a file whose other entry holds the row.
         "duplicate": 0,
         # Fields left unchecked because a provider failed transiently, plus
-        # items skipped while an id lookup had no answer: Update now tells
-        # "could not check" from "nothing changed" by it.
+        # items skipped while an id lookup, or Kodi's answer about the item a
+        # tracker row records, was missing: Update now tells "could not
+        # check" from "nothing changed" by it.
         "transient": 0,
         "fields": {},
         # True when the pass stopped before reaching the end of the library
@@ -841,6 +842,58 @@ def _gate_set_name(
               field="title", verdict=GATE_CHANGED)
 
 
+def _rebaseline_art(
+    tracker: TrackerDB, media_type: str, identity: str, item: dict[str, Any],
+) -> None:
+    """Take the art Kodi holds now as first seen in every slot the user did
+    not lock. After a Kodi re-add the slots hold the scraper's art, which
+    _gate_art would otherwise take for a change made outside MetaMender and
+    lock for good. Only the slots the listing carries: without the art map
+    there is nothing to compare against."""
+    locked = tracker.locked_fields(media_type, identity)
+    for f in sorted((ART_FIELDS & item.keys()) - locked):
+        tracker.set_first_fp(media_type, identity, f, fingerprint(kodi_form(item.get(f) or "")))
+
+
+def _readd_due(
+    tracker: TrackerDB,
+    media_type: str,
+    identity: str,
+    item: dict[str, Any],
+    fs_map: dict[str, dict[str, Any]],
+    decisions: dict[str, str],
+) -> set[str]:
+    """The fields of a re-added item whose value MetaMender wrote and Kodi
+    no longer holds: its scraper put its own value there. MetaMender's own
+    is recognised by field_keep's written_fp first, which outlives Reset
+    tracker, else field_status's written_value. Rating and votes hold a map
+    of per-slot fingerprints: they are due when a slot MetaMender wrote
+    differs; a slot it never wrote does not count. A field MetaMender never
+    wrote, and one already due (its schedule, changed settings), is left to
+    its own decision. ``decisions`` holds only fields the user did not
+    lock."""
+    keep = tracker.get_keep(media_type, identity)
+    ratings = item.get("ratings") or {}
+    ratings_differ = any(
+        (slot_fingerprint(ratings[slot]) if isinstance(ratings.get(slot), dict) else None)
+        != fp for slot, fp in _owned_slots(fs_map, ratings).items()
+    )
+    due: set[str] = set()
+    for f, decision in decisions.items():
+        if decision == FETCH_NOW:
+            continue
+        fs = fs_map.get(f) or {}
+        if f in RATING_FIELDS:
+            differs = ratings_differ and bool(_parse_slots(fs.get("written_value")))
+        else:
+            written = (keep.get(f) or {}).get("written_fp") or fs.get("written_value")
+            current = kodi_form(item.get(f) or "") if f in ART_FIELDS else kodi_form(item.get(f))
+            differs = written is not None and fingerprint(current) != written
+        if differs:
+            due.add(f)
+    return due
+
+
 def _drop_protected_art(
     tracker: TrackerDB,
     media_type: str,
@@ -1225,6 +1278,9 @@ class Resolved:
     # Another Kodi entry for the same file keeps the row; this one is
     # skipped without touching it.
     duplicate_of: int | None = None
+    # Kodi did not answer about the recorded id, so whether this is a re-add
+    # is unknown; the item waits for a scan that can tell.
+    unchecked: bool = False
 
 
 def _twin_entries(
@@ -1268,8 +1324,8 @@ def _resolve_identity(
     - It is gone, or names another item: Kodi re-added this item (a file
       upgrade, a refresh, a rebuilt library). This item takes the row over
       and the answer carries the recorded id as ``readded_from``.
-    - The query failed: nothing is known, so this item uses the row as it
-      did before and is not a re-add.
+    - The query failed: nothing is known, so the answer is ``unchecked``
+      and the scan leaves the item and the row alone until it can tell.
 
     Answers are kept in ``cache`` by Kodi id for the scan, so a holder many
     items point at is asked about once. Kodi gives a season no ids, so the
@@ -1297,7 +1353,7 @@ def _resolve_identity(
 
     status, other = _cached_lookup(media_type, recorded, show_id_map, cache)
     if status == ITEM_FAILED:
-        return Resolved(row_identity)
+        return Resolved(row_identity, unchecked=True)
     other_identity = compute_identity(other, media_type) if other else ""
     if status == ITEM_FOUND and not other_identity:
         # A season whose show's TMDB id this scan does not have: nothing to
@@ -1782,6 +1838,17 @@ def run_scan(
             stats["skipped"] += 1
             stats["duplicate"] += 1
             continue
+        # Taking the row now could hide a re-add (its values would not come
+        # back) or hand a duplicate the row; the next scan asks again.
+        if resolved.unchecked:
+            log.debug(
+                "Kodi did not answer about the row's recorded item, skipped",
+                event="scan.skip", reason="holder_unchecked", title=title,
+                identity=resolved.identity, kodi_id=kodi_id,
+            )
+            stats["skipped"] += 1
+            stats["transient"] += 1
+            continue
         identity = resolved.identity
         if media_type is SEASON and not item.get(media_type.date_field):
             # Kodi has no date on a season: its TMDB air date, once a fetch
@@ -1952,6 +2019,26 @@ def run_scan(
                 decisions[f] = FETCH_NOW
                 refills.add(f)
 
+        # Kodi re-added the item (a file upgrade, or Refresh) with its
+        # scraper's values. Its art is first seen again, so it is not locked
+        # as the user's, and every value MetaMender wrote that the scraper
+        # replaced is written back in this scan, subject to the usual rules
+        # (an NFO's value stays). Such a rewrite is not a sample of the
+        # item's ageing: it is recorded like Update now's check.
+        readd_refills: set[str] = set()
+        if resolved.readded_from is not None:
+            _rebaseline_art(tracker, media_type.name, identity, item)
+            readd_refills = _readd_due(tracker, media_type.name, identity, item, fs_map,
+                                       decisions)
+            for f in readd_refills:
+                decisions[f] = FETCH_NOW
+            log.info(
+                "Kodi re-added the item",
+                event="scan.readded", identity=identity,
+                old_kodi_id=resolved.readded_from, kodi_id=kodi_id,
+                fields_due=sorted(readd_refills),
+            )
+
         # A local art file that no longer exists is fair game like a broken
         # link; one whose share does not answer waits, untouched and
         # unsampled. A FINAL field gets one refill for a missing file, like
@@ -2012,6 +2099,13 @@ def run_scan(
                                     decisions, ART_FIELDS, REASON_NFO, missing)
                 due = any(d == FETCH_NOW for d in decisions.values())
 
+        # Fetched only because of the re-add: the fields not yet due are
+        # sampled along, and are no more a sample of the item's ageing than
+        # the rewrite is.
+        if readd_refills and not any(
+                d == FETCH_NOW for f, d in decisions.items() if f not in readd_refills):
+            readd_refills.update(f for f, d in decisions.items() if d != FINAL)
+
         ids = _resolve_ids(
             ctx, item, identity, kodi_ids, stored, language,
             _lookup_allowed(
@@ -2053,6 +2147,7 @@ def run_scan(
             decisions=decisions,
             rebaseline=sorted(rebaseline),
             refills=sorted(refills),
+            readd_refills=sorted(readd_refills),
         )
 
         if breaker.all_disabled(needed):
@@ -2237,9 +2332,9 @@ def run_scan(
         # Advance a field's clock ONLY when its own providers answered; a
         # transient field is retried next scan instead of being wrongly
         # sampled/finalized. A protected field is answered and advances.
-        # Changed settings re-baseline it. Update now leaves the clock of a
-        # field with history alone and records only what it wrote: a manual
-        # refresh is not a sample of the item's ageing.
+        # Changed settings re-baseline it. Update now, and the rewrite after
+        # a re-add, leave the clock of a field with history alone and record
+        # only what was written: neither is a sample of the item's ageing.
         premiered = item.get(media_type.date_field, "")
         for f in nonfinal:
             outcome = outcomes[f]
@@ -2291,7 +2386,7 @@ def run_scan(
             reason = REASON_FROM_FILE if f in from_file else _field_reason(
                 f, written, held, extracted, nfo_managed, item, cert_kept,
             )
-            if reset and int(fs.get("fetch_count") or 0) > 0:
+            if (reset or f in readd_refills) and int(fs.get("fetch_count") or 0) > 0:
                 tracker.record_manual_check(
                     media_type.name, identity, f, settings_fp=fps[f],
                     written_value=provenance.get(f), source=source,
@@ -2340,6 +2435,7 @@ def run_scan(
         protected=stats["protected"],
         excluded=stats["excluded"],
         unmatched=stats["unmatched"],
+        duplicate=stats["duplicate"],
         unknown_ids_accepted=shared.counts["unknown_ids_accepted"],
         episodes_found_by_tvdb=shared.counts["episodes_found_by_tvdb"],
         disabled=breaker.disabled(),
