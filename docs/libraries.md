@@ -368,8 +368,9 @@ A title that is already old gets one check. For a season, its age is that of its
 - **Art that changed outside MetaMender.** MetaMender remembers the poster
   (or fanart, or logo) an item had when it first looked at it with that art
   ticked. If it is later something other than that one or the one MetaMender
-  wrote, you (or another add-on, or a refresh in Kodi that brings different
-  art) chose it, and MetaMender locks it for good.
+  wrote, you (or another add-on) chose it, and MetaMender locks it for good.
+  A refresh in Kodi is not such a change; see
+  [After you refresh an item in Kodi](scans.md#after-you-refresh-an-item-in-kodi).
   The [Details window](details.md#art-and-episode-thumbs) says so, and
   **Let MetaMender update this again** unlocks it: MetaMender then treats
   the poster it finds as the one it first saw.

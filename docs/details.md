@@ -99,11 +99,13 @@ from fanart.tv**, **Image from another website**, **Local image file**,
 field, as for text. It is not offered when the earlier art was a local file
 that no longer exists.
 
-Art that changed outside MetaMender, by your hand, another add-on or a
-refresh in Kodi that brings different art, is locked with a padlock and the reason **Changed outside
-MetaMender, left as it is**. **Let MetaMender update this again** unlocks it:
-at the next scan MetaMender treats the art Kodi holds as the one it first
-saw, and may then replace it with a better one. See
+Art that changed outside MetaMender, by your hand or another add-on, is
+locked with a padlock and the reason **Changed outside MetaMender, left as
+it is**. A refresh in Kodi does not lock art; see
+[After you refresh an item in Kodi](scans.md#after-you-refresh-an-item-in-kodi).
+**Let MetaMender update this again** unlocks it: at the next scan
+MetaMender treats the art Kodi holds as the one it first saw, and may then
+replace it with a better one. See
 [Art and episode thumbs](libraries.md#art-and-episode-thumbs) for
 what MetaMender changes and what it leaves alone.
 

@@ -1,6 +1,77 @@
 MetaMender Changelog
 ====================
 
+v1.3.2 (unreleased)
+-------------------
+Improvements:
+  - When Kodi re-adds an item under a new Kodi id (Refresh, or a video
+    file replaced with a new release), the next scan writes back the
+    text, ratings and art MetaMender had written that the scraper
+    replaced, also for a settled field. The rewrite is recorded like
+    Update now's check, so no field moves along its schedule. The
+    scraper's art is taken as first seen, so it is no longer locked as
+    changed outside MetaMender. A value from an NFO file, a field the
+    user locked and a field MetaMender never wrote stay as they are. Art
+    locked this way before 1.3.2 stays locked; Details can unlock it.
+  - A second Kodi set of a collection whose set MetaMender manages is
+    now merged when every counted movie in it belongs to that
+    collection, whatever the set is called, for example the older
+    English name a scraper still uses. Its name is then learned as a
+    name of the collection. A set holding a movie of another collection,
+    or one whose collection is not known, stays shared and nothing
+    moves. A movie MetaMender saw in a managed set that the user then
+    put in another set counts as the user's move and is never merged
+    back.
+  - The "N items updated" notification after a background scan also
+    counts seasons, movie sets, movies that joined or moved between sets
+    and sets created, as a manual scan already counted seasons and sets.
+  - Scan logs are kept for 7 days, at most 30 files, instead of the last
+    10, so a week of scans on an always-on Kodi can go with a bug
+    report.
+
+Bug Fixes:
+  - A scan after a library update no longer puts off the daily scan, and
+    no longer opens or closes the full scan's cycle: an interrupted full
+    scan keeps its resume point instead of being marked complete.
+  - A scan after a library update no longer fetches the details of every
+    item in an excluded library or folder: the ids-only listing carries
+    the file, and such items are counted as excluded before any details
+    call. Items in an excluded library are skipped before their tracker
+    identity is resolved, so they cost no Kodi lookup, and seasons of an
+    excluded show are reported as excluded instead of as a season
+    without a show id.
+  - When Kodi lists one video file twice, the tracker row no longer
+    flips between the two entries every scan. The entry the row records
+    keeps it (the lowest listed entry when that id is gone); the other
+    is skipped and counted as a duplicate. MetaMender does not remove
+    Kodi's extra entry.
+  - Episodes without ids of a show whose TMDB and TheTVDB ids both came
+    from Kodi are now matched by episode number. Such a show was never
+    marked as checked because no id lookup ran, so its episodes were put
+    off for good.
+  - An item whose video file or show folder is gone, while the folder it
+    was in still lists other entries, is skipped as gone instead of
+    being counted as unreachable at every scan. An item on a share that
+    does not answer stays unreachable.
+
+Internal:
+  - kodi.lookup_item tells Kodi's -32602 answer for an id that does not
+    exist from a failed query; get_item_by_id keeps its contract and its
+    WARNING on top of it. A recorded id that is gone is logged at DEBUG
+    on the scan's path.
+  - Plain and <identity>|<file> tracker rows are resolved by one check
+    of the row's recorded Kodi id (_resolve_identity), with Kodi's
+    answers cached per scan pass. An item whose recorded id Kodi did not
+    answer about is skipped for that scan and counted as transient, so
+    the re-add signal is not lost. A re-add is logged at INFO as
+    scan.readded; a second entry as scan.duplicate_file and a gone item
+    as scan.skip reason=gone (DEBUG); scan.complete reports both counts.
+  - service.skip_playback is logged once when a due scan starts waiting
+    for playback to stop, and service.playback_wait_end (waited_s) when
+    it goes ahead, instead of every second.
+  - The IMDb ratings dataset update logs imdb.prepare at INFO when it
+    starts and ends, with duration_ms and outcome.
+
 v1.3.1 (2026-11-26)
 -------------------
 New Features:
