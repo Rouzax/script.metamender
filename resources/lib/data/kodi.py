@@ -80,6 +80,11 @@ def _build_properties(media_type: MediaType, art: bool = True) -> list[str]:
     return props
 
 
+def _id_properties(media_type: MediaType) -> list[str]:
+    """The properties of an ids-only listing (get_all_items)."""
+    return [] if media_type in (SEASON, SET) else ["file"]
+
+
 def flatten_art(item: dict[str, Any], media_type: MediaType) -> dict[str, Any]:
     """Expose the art slots MetaMender manages as plain top-level fields.
 
@@ -107,8 +112,10 @@ def get_all_items(
         tvshowid: For seasons and episodes, limit to this TV show (Kodi
             param, not filter).
         season: For episodes, limit to this season (requires tvshowid).
-        ids_only: Ask for no properties: each item carries only its Kodi id
-            and label, which keeps a listing of a large library cheap.
+        ids_only: Ask for the file only: each item carries its Kodi id,
+            label and file, which keeps a listing of a large library cheap
+            and still tells which library an item is in. Kodi has no file
+            on a season, so a season listing asks for nothing.
         art: Ask for the art map and expose the managed art slots as
             ``poster`` / ``thumb``. Without it the items carry no art field
             at all, so nothing can read an unrequested slot as empty.
@@ -117,7 +124,8 @@ def get_all_items(
         List of item dicts from the Kodi library.
     """
     params: dict[str, Any] = {
-        "properties": [] if ids_only else _build_properties(media_type, art),
+        "properties": _id_properties(media_type) if ids_only
+        else _build_properties(media_type, art),
         "limits": {"start": 0, "end": 99999},
     }
     if tvshowid is not None:

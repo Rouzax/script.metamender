@@ -1253,6 +1253,20 @@ def _tracker_identity(
     return identity
 
 
+def _stamp_excluded(tracker: TrackerDB, media_type: MediaType, item: dict[str, Any]) -> None:
+    """Stamp today's last_seen on the row of an item in an excluded library
+    without resolving its identity: its ``<identity>|<file>`` row when it has
+    one, else the identity it computes. A season of a show without a TMDB id
+    has no identity and no row."""
+    identity = compute_identity(item, media_type)
+    if not identity:
+        return
+    own = "{}|{}".format(identity, item.get("file", ""))
+    if tracker.get_item(media_type.name, own) is not None:
+        identity = own
+    tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
+
+
 def scans_seasons(libraries: LibraryConfig) -> bool:
     """Whether an included library manages a season field (the poster). The
     callers skip the season pass otherwise, and with it the season listing."""
@@ -1296,20 +1310,37 @@ def _season_items(
 
 def _new_items(
     tracker: TrackerDB, media_type: MediaType, art: bool,
+    libraries: LibraryConfig, stats: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """The library's items whose Kodi id the tracker does not know yet, with
     full details (the art map only with ``art``). An id listed but gone by
-    the details call is skipped."""
+    the details call is skipped.
+
+    An item whose library or subfolder is not included is counted as
+    excluded in ``stats`` here, before its details call: it never gets a tracker row, so every library-event scan would
+    fetch it again. An item in no library is fetched and counted by the
+    item loop, as on a full scan."""
     known = tracker.known_kodi_ids(media_type.name)
     listed = kodi.get_all_items(media_type, ids_only=True)
-    fresh = [
-        i[media_type.kodi_id_field] for i in listed
-        if i.get(media_type.kodi_id_field) not in known
-    ]
+    fresh: list[Any] = []
+    excluded = 0
+    for listed_item in listed:
+        kodi_id = listed_item.get(media_type.kodi_id_field)
+        if kodi_id in known:
+            continue
+        file_path = listed_item.get("file") or ""
+        if (libraries.for_file(file_path) is not None
+                and libraries.included_for(file_path) is None):
+            excluded += 1
+            continue
+        fresh.append(kodi_id)
+    stats["skipped"] += excluded
+    stats["excluded"] += excluded
     items = [d for d in (get_item_by_id(media_type, i, art=art) for i in fresh) if d]
     log.info(
         "New library items selected", event="scan.new_items",
         media_type=media_type.name, listed=len(listed), new=len(items),
+        excluded=excluded,
     )
     return items
 
@@ -1544,7 +1575,7 @@ def run_scan(
     elif items is None:
         art = manages_art(media_type, libraries)
         items = (
-            _new_items(tracker, media_type, art) if new_only
+            _new_items(tracker, media_type, art, libraries, stats) if new_only
             else kodi.get_all_items(media_type, art=art)
         )
     needed = _pass_providers(media_type, libraries, items, reset)
@@ -1608,6 +1639,24 @@ def run_scan(
             file_path, lib)
         fallback_lang = fallback_lang.strip()
 
+        # A library or subfolder that is not included is skipped, but its
+        # items count as present, so orphan pruning keeps their history for
+        # when it is included again. The gate comes before the season's
+        # show-id check and before the identity is resolved, which can ask
+        # Kodi about another item holding the row; an excluded item costs no
+        # Kodi call. Update now bypasses the gate: whether it may run there
+        # is the caller's call.
+        if not reset and not (lib.included and included_here):
+            log.debug(
+                "Skipping item outside the included libraries",
+                event="scan.skip", reason="excluded", title=title,
+                media_type=media_type.name, library=lib.path,
+            )
+            _stamp_excluded(tracker, media_type, item)
+            stats["skipped"] += 1
+            stats["excluded"] += 1
+            continue
+
         # A season is keyed on its show's TMDB id, so without one it has no
         # identity; it is picked up once its show is resolved.
         if media_type is SEASON and not compute_identity(item, media_type):
@@ -1631,21 +1680,6 @@ def run_scan(
             # found it, is kept as the row's premiered.
             known = tracker.get_item(media_type.name, identity) or {}
             item[media_type.date_field] = known.get("premiered") or ""
-
-        # A library or subfolder that is not included is skipped, but its
-        # items count as present, so orphan pruning keeps their history for
-        # when it is included again. Update now bypasses the gate: whether
-        # it may run there is the caller's call.
-        if not reset and not (lib.included and included_here):
-            log.debug(
-                "Skipping item outside the included libraries",
-                event="scan.skip", reason="excluded", title=title,
-                media_type=media_type.name, library=lib.path,
-            )
-            tracker.update_last_seen(media_type.name, identity, date.today().isoformat())
-            stats["skipped"] += 1
-            stats["excluded"] += 1
-            continue
 
         # Resume: skip items already processed in this cycle. The reset path
         # (Update now) bypasses this so a just-scanned item can still be

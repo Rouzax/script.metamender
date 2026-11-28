@@ -790,6 +790,22 @@ def test_season_without_show_tmdb_id_is_skipped(
     assert "scan.season_no_show_id" in events
 
 
+def test_excluded_season_is_counted_as_excluded_not_no_show_id(tmp_path, kodi_stubs):
+    """A season of a show in an excluded library has no show TMDB id when
+    the show was never resolved; it is reported as excluded."""
+    tracker = _make_tracker(tmp_path)
+    libs = one_library({"poster"}, included=False)
+    with patch("resources.lib.engine.scan.log") as log:
+        stats = _scan_seasons(tracker, [_season(show_tmdb_id=None)], libs=libs)
+    tracker.close()
+
+    assert stats["excluded"] == 1 and stats["skipped"] == 1
+    events = [c.kwargs for c in log.debug.call_args_list]
+    assert not any(e.get("event") == "scan.season_no_show_id" for e in events)
+    assert any(e.get("event") == "scan.skip" and e.get("reason") == "excluded"
+               for e in events)
+
+
 @patch("resources.lib.data.kodi.update_item", return_value=True)
 @patch("resources.lib.providers.tmdb.fetch_season_posters")
 @patch("resources.lib.providers.tmdb.fetch_tvshow")

@@ -5427,6 +5427,126 @@ class TestNewOnlyScan:
         assert row is not None and row["cycle_processed"]
 
 
+def _kids_excluded(toggles=("plots",)):
+    """An included library for every server path but kids/, which is a
+    library of its own that is not included."""
+    from resources.lib.data.libraries import Library, LibraryConfig
+    main = Library(path="smb://server/", label="Main", included=True, language="en-US",
+                   fallback_language="", toggles=frozenset(toggles))
+    kids = Library(path="smb://server/kids/", label="Kids", included=False,
+                   language="en-US", fallback_language="", toggles=frozenset(toggles))
+    return LibraryConfig([main, kids])
+
+
+class TestExcludedBeforeLookup:
+    """An item in an excluded library costs no Kodi lookup: a library-event
+    scan drops it from the listing before the details call, and the item
+    loop skips it before it resolves the item's identity."""
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    @patch("resources.lib.data.kodi.get_all_items")
+    def test_new_items_makes_no_details_call_for_excluded_items(
+        self, mock_all, mock_by_id, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        new = _make_movie_item(movie_id=1, tmdb_id="11")
+        new["file"] = "smb://server/movies/new.mkv"
+        mock_all.return_value = [
+            {"movieid": 1, "file": new["file"]},
+            {"movieid": 2, "file": "smb://server/kids/a.mkv"},
+            {"movieid": 3, "file": "smb://server/kids/b.mkv"},
+        ]
+        mock_by_id.side_effect = lambda mt, i, art=True: {1: new}.get(i)
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+
+        stats = run_scan(MOVIE, tracker, _kids_excluded(), "k",
+                         _make_settings(), new_only=True)
+        tracker.close()
+
+        assert [c.args[1] for c in mock_by_id.call_args_list] == [1]
+        assert stats["excluded"] == 2 and stats["processed"] == 1
+
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    @patch("resources.lib.data.kodi.get_all_items")
+    def test_new_items_keeps_items_in_no_library_on_todays_path(
+        self, mock_all, mock_by_id, mock_tmdb, tmp_path, kodi_stubs
+    ):
+        stray = _make_movie_item(movie_id=4, tmdb_id="44")
+        stray["file"] = "nfs://elsewhere/stray.mkv"
+        bare = _make_movie_item(movie_id=5, tmdb_id="55")
+        bare["file"] = ""
+        mock_all.return_value = [{"movieid": 4, "file": stray["file"]}, {"movieid": 5}]
+        mock_by_id.side_effect = lambda mt, i, art=True: {4: stray, 5: bare}.get(i)
+        tracker = _make_tracker(tmp_path)
+
+        stats = run_scan(MOVIE, tracker, _kids_excluded(), "k",
+                         _make_settings(), new_only=True)
+        tracker.close()
+
+        assert sorted(c.args[1] for c in mock_by_id.call_args_list) == [4, 5]
+        assert stats["unmatched"] == 2 and stats["excluded"] == 0
+        assert not mock_tmdb.called
+
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    def test_excluded_item_never_resolves_identity(self, mock_by_id, tmp_path, kodi_stubs):
+        """An episode in an excluded library whose identity an episode of an
+        included library holds is not checked against that holder."""
+        episode = _make_episode_item(showtitle="DuckTales")
+        episode["file"] = "smb://server/kids/ducktales/S01E01.mkv"
+        identity = compute_identity(episode, EPISODE)
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("episode", identity, kodi_id=999)
+        tracker.commit()
+        holder = _make_episode_item(showtitle="DuckTales")
+        holder.update(episodeid=999, file="smb://server/shows/ducktales/S01E01.mkv")
+        mock_by_id.side_effect = lambda mt, i, art=True: {999: holder}.get(i)
+
+        with patch("resources.lib.engine.scan.log") as log:
+            stats = run_scan(EPISODE, tracker, _kids_excluded(), "k",
+                             _make_settings(), items=[episode])
+        tracker.close()
+
+        assert not mock_by_id.called
+        events = [c.kwargs.get("event") for c in log.debug.call_args_list]
+        assert "scan.duplicate_identity" not in events
+        assert stats["excluded"] == 1
+
+    @pytest.mark.parametrize("has_file_row", [True, False])
+    @patch("resources.lib.engine.scan.get_item_by_id")
+    def test_excluded_item_last_seen_kept(
+        self, mock_by_id, has_file_row, tmp_path, kodi_stubs
+    ):
+        episode = _make_episode_item(showtitle="DuckTales")
+        episode["file"] = "smb://server/kids/ducktales/S01E01.mkv"
+        identity = compute_identity(episode, EPISODE)
+        own = "{}|{}".format(identity, episode["file"])
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("episode", identity, kodi_id=999 if has_file_row else 100)
+        tracker.update_last_seen("episode", identity, "2020-01-01")
+        if has_file_row:
+            tracker.upsert_item("episode", own, kodi_id=100)
+            tracker.update_last_seen("episode", own, "2020-01-01")
+        tracker.commit()
+
+        run_scan(EPISODE, tracker, _kids_excluded(), "k",
+                 _make_settings(), items=[episode])
+        plain = tracker.get_item("episode", identity)
+        by_file = tracker.get_item("episode", own)
+        tracker.close()
+
+        today = date.today().isoformat()
+        assert not mock_by_id.called
+        if has_file_row:
+            assert by_file["last_seen"] == today
+            assert plain["last_seen"] == "2020-01-01"
+        else:
+            assert by_file is None
+            assert plain["last_seen"] == today
+
+
 class TestDuplicateIdentities:
     """Two Kodi items that compute the same identity (two files of one movie,
     each with tmdb 170) need their own tracker rows: with one shared row the
