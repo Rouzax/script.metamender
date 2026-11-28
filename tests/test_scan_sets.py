@@ -1213,6 +1213,50 @@ def test_movie_taken_out_of_a_set_seen_before_stays_out(
     tracker.close()
 
 
+def test_movie_user_moved_from_managed_set_to_own_set_is_not_merged_back(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """MetaMender never moved the movie, so only its sighting in the
+    managed set shows the user put it in "Mine", a set holding only movies
+    of the collection."""
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    fake.add_set(2, "Mine")
+    fake.movies[3]["setid"] = 2
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    assert fake.movies[3]["setid"] == 2
+    assert tracker.get_set_seen("tmdb:211672")["locked"] == 1
+    # The lock holds at later scans too.
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == []
+    tracker.close()
+
+
+def test_readded_movie_in_another_set_is_not_locked(tmp_path, kodi_stubs, fake, tmdb_api):
+    """A refresh re-adds the movie under a new movieid, and the scraper
+    files it under the collection's old name: a duplicate, merged."""
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    fake.add_set(2, EN_NAME)
+    del fake.movies[3]
+    fake.add_movie(30, 2, "211672")
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert _movie_moves(fake) == [(30, NL_NAME)]
+    assert fake.movies[30]["setid"] == 1
+    assert tracker.get_set_seen("tmdb:211672")["locked"] == 0
+    tracker.close()
+
+
 def test_movie_readded_by_kodi_out_of_a_seen_set_may_join(
         tmp_path, kodi_stubs, fake, tmdb_api):
     _one_set(fake)

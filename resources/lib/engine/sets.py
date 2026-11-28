@@ -612,11 +612,13 @@ def _lock_user_moves(
     tracker: Any, movies: list[dict[str, Any]], set_moves: dict[str, dict[str, Any]],
 ) -> None:
     """Lock, for good, the recorded move or join of every listed movie the
-    user has since put in another set or taken out of its set. A movie in no
-    set that the set pass last saw in a managed set under the same movieid
-    was taken out by the user too, whoever put it there: its sighting is
-    locked, and its entry in ``set_moves`` reads as locked, so it never
-    joins a set again."""
+    user has since put in another set or taken out of its set. A movie that
+    the set pass last saw in a managed set under the same movieid and that
+    now sits in no set, or in another set, was moved by the user too,
+    whoever put it in the managed set: its sighting is locked, and its entry
+    in ``set_moves`` reads as locked, so it never joins a set again and no
+    merge moves it. A locked sighting counts whatever set the movie is in
+    now."""
     for movie in movies:
         identity = compute_identity(movie, MOVIE)
         movieid = int(movie.get("movieid") or 0)
@@ -625,13 +627,15 @@ def _lock_user_moves(
         if move is not None and not move.get("locked") and user_moved(move, movieid, setid):
             tracker.lock_set_move(identity)
             set_moves[identity] = move = dict(move, locked=1)
-        if setid or (move is not None and move.get("locked")):
+        if move is not None and move.get("locked"):
             continue
         seen = tracker.get_set_seen(identity)
         if seen is None:
             continue
         if not seen.get("locked"):
-            if int(seen.get("kodi_id") or 0) != movieid or not int(seen.get("setid") or 0):
+            seen_setid = int(seen.get("setid") or 0)
+            if (int(seen.get("kodi_id") or 0) != movieid or not seen_setid
+                    or seen_setid == setid):
                 continue
             tracker.lock_set_seen(identity)
         set_moves[identity] = dict(move or {}, locked=1)

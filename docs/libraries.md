@@ -585,8 +585,11 @@ When a set is merged:
   **Movie sets** ticked.
 - **A movie you moved yourself stays put.** If you take a movie MetaMender
   moved and put it in another set, MetaMender never moves it again. Putting
-  it back in the set it came from undoes the merge for that movie. A movie
-  you refresh in Kodi is a new entry to Kodi, so it may be moved once more.
+  it back in the set it came from undoes the merge for that movie. The same
+  holds for a movie MetaMender saw in the set it looks after and you then
+  put in another set, also one that holds only movies of the collection. A
+  movie you refresh in Kodi is a new entry to Kodi, so it may be moved once
+  more.
 - **The emptied set is not deleted.** Kodi removes sets without movies the
   next time you clean the library (**Clean library** in Kodi's video
   settings or menu).
