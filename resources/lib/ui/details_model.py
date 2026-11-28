@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
@@ -179,6 +179,8 @@ _MOVED_BY_YOU = 32773
 # The same for a movie that was in no set: MetaMender added it.
 _ADDED_HERE = 32786
 _ADDED_BY_METAMENDER = 32785
+# A second Kodi entry for a file whose other entry holds the item's row.
+_SECOND_ENTRY = 32789
 
 
 @dataclass
@@ -607,6 +609,7 @@ def build_rows(
     managed: Iterable[str] | None = None,
     cert_country_missing: bool = False,
     threshold_days: int = DEFAULT_THRESHOLD_DAYS,
+    second_entry: bool = False,
 ) -> list[DetailRow]:
     """The Ids entry, then the fields grouped updated, left as it is and
     waiting, each group in the scan's field order (sorted by name).
@@ -619,6 +622,9 @@ def build_rows(
     age rating country is set up.
     ``threshold_days`` is the stale_threshold_days setting, which decides
     when a field is settled. Rating and votes are one "Rating" row.
+    ``second_entry``: Kodi lists the item's file twice and the rows belong to
+    the other entry, so the Ids entry says so and no row has an action: a
+    Restore or Lock here would act on the other entry's row.
     """
     names = sorted(set(fields if fields is not None else media_type.backfill_fields))
     managed_set = set(managed) if managed is not None else set(names)
@@ -635,7 +641,11 @@ def build_rows(
                    f == "mpaa" and cert_country_missing)
         for f in names
     ]
-    ordered = [_ids_row(media_type, item, item_row)]
+    ids = _ids_row(media_type, item, item_row)
+    if second_entry:
+        rows = [replace(r, action="") for r in rows]
+        ids.lines.insert(0, ("", lang(_SECOND_ENTRY)))
+    ordered = [ids]
     for group in GROUP_HEADINGS:
         ordered.extend(r for r in rows if r.group == group)
     return ordered

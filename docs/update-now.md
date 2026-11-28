@@ -29,7 +29,9 @@ for it.
 
 - **A movie or an episode** is refreshed at once. A notification says
   **Updated**, **No changes**, or **Could not check now** when a site did not
-  answer (the item is then checked again on its normal schedule).
+  answer (the item is then checked again on its normal schedule). When Kodi
+  lists the item's video file twice and MetaMender updates the other entry,
+  it says so instead of **No changes**: use Update now on that other entry.
 - **A TV show** refreshes the show itself, its season posters and every
   episode in it.
 - **A season** refreshes its poster and every episode of that season.

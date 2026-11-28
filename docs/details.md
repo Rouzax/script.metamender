@@ -125,6 +125,13 @@ found (for a season, its show's TMDB and TheTVDB ids):
 
 Ids MetaMender found stay in its own records; it does not add them to Kodi.
 
+When Kodi lists the item's video file twice, Details on the entry MetaMender
+does not update says "Kodi lists this file twice. MetaMender manages its
+other entry, so nothing can be changed here." The fields show what
+MetaMender knows of the item, without **Restore original**, **Keep this
+value** or **Let MetaMender update this again**: those belong to the other
+entry's Details.
+
 When MetaMender moved a movie out of a duplicate set (see
 [Duplicate sets](libraries.md#duplicate-sets)), the movie's **Ids** entry says
 so: "Moved by MetaMender from the set *old name* on *date*", or, once you have

@@ -1,6 +1,7 @@
 """Tests for scan orchestrator."""
 from __future__ import annotations
 
+import os
 from contextlib import ExitStack, contextmanager
 from datetime import date, timedelta
 from typing import Any, Dict  # noqa: F401 (used in type comments)
@@ -11,7 +12,7 @@ import pytest
 from resources.lib.constants import FALLBACK_RECHECK_DAYS, FALLBACK_RECHECKS
 from resources.lib.data.identity import compute_identity
 from resources.lib.data.localart import EXISTS
-from resources.lib.data.media_types import EPISODE, MOVIE, TVSHOW
+from resources.lib.data.media_types import EPISODE, MOVIE, SEASON, TVSHOW
 from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE
 from resources.lib.engine.protect import fingerprint
 from resources.lib.engine.scan import (
@@ -3807,6 +3808,49 @@ class TestNfoProtection:
         assert stats["gone"] == 1 and stats["skipped"] == 1
         assert stats["unreachable"] == 0
 
+    @pytest.mark.parametrize("media_type", [TVSHOW, SEASON])
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_season_posters")
+    @patch("resources.lib.providers.tmdb.fetch_tvshow")
+    def test_show_whose_folder_is_gone_counts_gone(
+        self, mock_show, mock_posters, mock_update, media_type, tmp_path, kodi_stubs,
+        monkeypatch,
+    ):
+        """A deleted show folder beside other shows is gone, for the show and
+        its seasons alike, with xbmcvfs.exists checking a path as a folder
+        only when it ends in a separator, as Kodi does."""
+        from resources.lib.data import localart, nfo
+        vfs = kodi_stubs["xbmcvfs"]
+        vfs.exists.side_effect = lambda p: (
+            os.path.isdir(p) if p.endswith(os.sep) else os.path.isfile(p))
+        monkeypatch.setattr(nfo, "xbmcvfs", vfs)
+        monkeypatch.setattr(localart, "xbmcvfs", vfs)
+        # The real VFS checks, not the reachable item the autouse fixture gives.
+        monkeypatch.setattr("resources.lib.engine.scan.nfo_state", nfo.nfo_state)
+        monkeypatch.setattr("resources.lib.engine.scan.local_art_state",
+                            localart.local_art_state)
+        shows = tmp_path / "TV"
+        (shows / "Other Show").mkdir(parents=True)
+        (shows / "Other Show" / "S01E01.mkv").write_text("x")
+        folder = str(shows / "Gone Show") + os.sep
+        if media_type is TVSHOW:
+            item = dict(_make_tvshow_item(), file=folder)
+            fields = frozenset({"plot"})
+        else:
+            item = {"seasonid": 51, "season": 1, "showtitle": "Gone Show",
+                    "tvshowid": 10, "title": "Season 1", "poster": "", "art": {},
+                    "file": folder, "show_tmdb_id": "99999"}
+            fields = frozenset({"poster"})
+        tracker = _make_tracker(tmp_path)
+        stats = run_scan(
+            media_type, tracker, one_library(fields, path=str(tmp_path) + os.sep),
+            "k", _make_settings(), items=[item], show_id_map={10: "99999"},
+        )
+        tracker.close()
+
+        assert stats["gone"] == 1 and stats["unreachable"] == 0
+        assert not mock_update.called
+
     @patch("resources.lib.data.kodi.update_item", return_value=True)
     @patch("resources.lib.providers.tmdb.fetch_movie")
     def test_nfo_detection_cached_per_scan(
@@ -5832,6 +5876,28 @@ class TestRecordedKodiId:
             assert self._rows(tracker)[own] == 5571
             tracker.begin_cycle(resume_interrupted=False)
         tracker.close()
+
+    @patch("resources.lib.data.kodi.update_item", return_value=True)
+    @patch("resources.lib.providers.tmdb.fetch_movie")
+    @patch("resources.lib.engine.scan.lookup_item")
+    def test_update_now_on_the_second_entry_reports_a_duplicate(
+        self, mock_lookup, mock_tmdb, mock_update, tmp_path, kodi_stubs
+    ):
+        """Update now passes the one entry, so the scan finds the duplicate
+        through the row's recorded id and says so in its stats."""
+        first, second = self._movie(5570), self._movie(5571)
+        mock_lookup.side_effect = _kodi_answers({5570: first, 5571: second})
+        mock_tmdb.return_value = _tmdb_movie_response()
+        tracker = _make_tracker(tmp_path)
+        tracker.upsert_item("movie", "tmdb:354912", kodi_id=5570)
+        tracker.commit()
+
+        stats = run_scan(MOVIE, tracker, _libs(frozenset({"plot"})), "k",
+                         _make_settings(), items=[dict(second)], reset=True)
+        tracker.close()
+
+        assert stats["duplicate"] == 1 and stats["updated"] == 0
+        assert not mock_tmdb.called and not mock_update.called
 
     @pytest.mark.parametrize("reverse", [False, True])
     @patch("resources.lib.data.kodi.update_item", return_value=True)

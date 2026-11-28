@@ -61,6 +61,13 @@ def _split(path: str) -> Tuple[str, str]:
     return head, tail
 
 
+def _as_folder(path: str) -> str:
+    """The folder form of a path: xbmcvfs.exists checks a path ending in a
+    separator as a folder and anything else as a file."""
+    sep = _sep(path)
+    return path if path.endswith(sep) else path + sep
+
+
 def _join(folder: str, name: str) -> str:
     sep = _sep(folder)
     return folder.rstrip(sep) + sep + name
@@ -207,9 +214,9 @@ def media_gone(file_path: str) -> bool:
         if not media or _exists(media):
             return False
         parent = _split(media)[0]
-        if not parent or not _exists(parent):
+        if not parent or not _exists(_as_folder(parent)):
             return False
-        dirs, files = xbmcvfs.listdir(parent)
+        dirs, files = xbmcvfs.listdir(_as_folder(parent))
         return bool(dirs or files)
     except Exception:
         log.exception("Could not check for a gone folder", event="nfo.gone_check_failed",

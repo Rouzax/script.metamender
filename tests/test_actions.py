@@ -31,6 +31,7 @@ _LANG = {
     32350: "Updated: {}",
     32351: "No changes: {}",
     32353: "Could not check now: {}",
+    32788: "Kodi lists {} twice; MetaMender updates its other entry",
     32360: "Reset tracker?",
     32361: "This will clear all field status records so the next scan re-fetches everything.",
     32362: "Reset complete: {} fields cleared",
@@ -220,6 +221,21 @@ def test_update_now_says_could_not_check(update_patched, stats):
     actions.update_now("movie", "7")
     msg = update_patched["notify"].call_args[0][0]
     assert msg == "Could not check now: Air"
+
+
+def test_update_now_on_the_second_entry_of_a_file_says_so(update_patched):
+    """The scan skips a second Kodi entry for a tracked file: the user is
+    told it is updated through the other entry, not "No changes"."""
+    update_patched["run_scan"].return_value = {"updated": 0, "duplicate": 1}
+    actions.update_now("movie", "7")
+    assert update_patched["notify"].call_args[0][0] == (
+        "Kodi lists Air twice; MetaMender updates its other entry")
+
+
+def test_update_now_reports_an_update_over_a_skipped_duplicate(update_patched):
+    update_patched["run_scan"].return_value = {"updated": 1, "duplicate": 1}
+    actions.update_now("movie", "7")
+    assert update_patched["notify"].call_args[0][0] == "Updated: Air"
 
 
 def test_update_now_reports_an_update_even_if_a_field_was_unchecked(update_patched):

@@ -282,34 +282,48 @@ class DetailsView:
 def _read_identity(
     tracker: TrackerDB, media_type: MediaType, item: dict[str, Any], kodi_id: int,
     show_id_map: dict[int, str],
-) -> tuple[str, str]:
-    """(the key the item's rows are under now, the key the scan uses), found
-    the way scan._resolve_identity finds it but without its writes: opening
-    the window must change nothing, so a row the next scan would adopt is
-    read under its current identity. The two differ only for such a row."""
+) -> tuple[str, str, bool]:
+    """(the key the item's rows are under now, the key the scan uses, whether
+    the item is a second Kodi entry for a file whose other entry holds the
+    row), found the way scan._resolve_identity finds them but without its
+    writes: opening the window must change nothing, so a row the next scan
+    would adopt is read under its current identity. The two keys differ only
+    for such a row.
+
+    The row's recorded Kodi id is asked about with lookup_item: a gone entry
+    (a re-add) is an expected answer, not a warning. When Kodi does not
+    answer, the row is read as the item's own."""
     identity = compute_identity(item, media_type)
     if not identity:
         # A season of a show with no TMDB id: the scan skips it, so it has no row.
-        return "", ""
-    own = "{}|{}".format(identity, item.get("file", ""))
-    if tracker.get_item(media_type.name, own) is not None:
-        return own, own
-    # An id written back to Kodi changes the identity the item computes; the
-    # row stays under the old one until the next scan adopts it. Restore and
-    # Unlock on the old identity are carried along by that adoption.
-    adoptable = tracker.adoptable_identity(media_type.name, identity, kodi_id)
-    if adoptable is not None:
-        return adoptable, identity
-    row = tracker.get_item(media_type.name, identity)
+        return "", "", False
+    file_path = item.get("file", "")
+    own = "{}|{}".format(identity, file_path)
+    row = tracker.get_item(media_type.name, own)
+    row_identity = own
+    if row is None:
+        # An id written back to Kodi changes the identity the item computes;
+        # the row stays under the old one until the next scan adopts it.
+        # Restore and Unlock on the old identity are carried along by that
+        # adoption.
+        adoptable = tracker.adoptable_identity(media_type.name, identity, kodi_id)
+        if adoptable is not None:
+            return adoptable, identity, False
+        row = tracker.get_item(media_type.name, identity)
+        row_identity = identity
     holder = row.get("kodi_id") if row else None
     if holder is None or holder == kodi_id:
-        return identity, identity
-    other = kodi.get_item_by_id(media_type, holder)
-    if other and media_type is SEASON:
+        return row_identity, row_identity, False
+    status, other = kodi.lookup_item(media_type, holder)
+    if status == kodi.ITEM_FAILED:
+        return row_identity, row_identity, False
+    if other is not None and media_type is SEASON:
         other["show_tmdb_id"] = show_id_map.get(int(other.get("tvshowid", -1)))
-    if other and compute_identity(other, media_type) == identity:
-        return own, own
-    return identity, identity
+    if other is not None and compute_identity(other, media_type) == identity:
+        if other.get("file") == file_path:
+            return row_identity, row_identity, True
+        return own, own, False
+    return row_identity, row_identity, False
 
 
 def _enrich_season(item: dict[str, Any]) -> dict[int, str]:
@@ -478,8 +492,9 @@ class DetailsSession:
                 if keys is None:
                     return None
                 identity, scan_identity = keys
+                second_entry = False
             else:
-                identity, scan_identity = _read_identity(
+                identity, scan_identity, second_entry = _read_identity(
                     tracker, self.media_type, item, self.kodi_id, show_id_map)
             if self.media_type is MOVIE:
                 _add_set_move(tracker, item, self.kodi_id)
@@ -520,6 +535,7 @@ class DetailsSession:
             managed=managed,
             cert_country_missing=certifications_on(self.media_type, enabled) and not cert_usable,
             threshold_days=settings["stale_threshold_days"],
+            second_entry=second_entry,
         )
         return DetailsView(
             _heading(self.media_type, item), header_line(item_row, fs_map, folder), rows

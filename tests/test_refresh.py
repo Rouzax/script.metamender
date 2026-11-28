@@ -63,6 +63,7 @@ _LANG = {
     32482: "Updated: {}, {} of {} changed",
     32483: "Stopped after {} of {} episodes: {}",
     32484: "Could not finish: {}",
+    32788: "Kodi lists {} twice; MetaMender updates its other entry",
 }
 
 
@@ -71,8 +72,9 @@ def strings(monkeypatch):
     monkeypatch.setattr(refresh, "lang", lambda i: _LANG.get(i, ""))
 
 
-def _stats(updated=0, transient=0, unreachable=0):
-    return {"updated": updated, "transient": transient, "unreachable": unreachable}
+def _stats(updated=0, transient=0, unreachable=0, duplicate=0):
+    return {"updated": updated, "transient": transient, "unreachable": unreachable,
+            "duplicate": duplicate}
 
 
 def test_items_are_classified_from_the_stats_delta():
@@ -556,6 +558,36 @@ def test_toast_when_only_the_show_record_changed(strings):
     p.item_finished(_stats(updated=1), _stats(updated=1))
     assert (p.done, p.updated) == (2, 0)
     assert p.toast("Lost", stopped=False, could_not_finish=False) == "Updated: Lost"
+
+
+def test_toast_when_the_show_is_a_second_entry_of_its_folder(strings):
+    """Kodi lists the show twice: the scan skips this entry's record and
+    episodes as duplicates, so the toast says so instead of "No changes"."""
+    p = RefreshProgress()
+    p.begin(1, now=0.0)
+    p.item_finished(_stats(), _stats(duplicate=1), counted=False)
+    p.item_finished(_stats(duplicate=1), _stats(duplicate=2))
+    assert (p.done, p.updated, p.unchecked) == (1, 0, 0)
+    assert p.toast("Lost", stopped=False, could_not_finish=False) == (
+        "Kodi lists Lost twice; MetaMender updates its other entry")
+
+
+def test_toast_when_a_duplicate_episode_was_skipped(strings):
+    p = RefreshProgress()
+    p.begin(2, now=0.0)
+    p.item_finished(_stats(), _stats())
+    p.item_finished(_stats(), _stats(duplicate=1))
+    assert p.toast("Lost", stopped=False, could_not_finish=False) == (
+        "Kodi lists Lost twice; MetaMender updates its other entry")
+
+
+def test_toast_an_update_wins_over_a_skipped_duplicate(strings):
+    p = RefreshProgress()
+    p.begin(2, now=0.0)
+    p.item_finished(_stats(), _stats(updated=1))
+    p.item_finished(_stats(updated=1), _stats(updated=1, duplicate=1))
+    assert p.toast("Lost", stopped=False, could_not_finish=False) == (
+        "Updated: Lost, 1 of 2 changed")
 
 
 def test_fanart_rejection_is_part_of_the_outcome():

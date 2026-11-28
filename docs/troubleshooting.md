@@ -107,8 +107,10 @@ library.
   not pressed anything for a minute or leave the library.
 - **Kodi lists the item twice** for one video file: MetaMender updates the
   entry it has been updating and leaves the other alone, so one of the two
-  keeps the scraper's values. MetaMender does not remove Kodi's extra
-  entry; that is up to you.
+  keeps the scraper's values. On the other entry, Update now says that Kodi
+  lists the item twice, and Details shows the fields read-only with a line
+  saying MetaMender manages the other entry. MetaMender does not remove
+  Kodi's extra entry; that is up to you.
 - **Its file or folder is gone**: an item whose video file (or show folder)
   no longer exists, while the folder it was in still holds other files or
   folders, is skipped until you clean the library (**Clean library** in

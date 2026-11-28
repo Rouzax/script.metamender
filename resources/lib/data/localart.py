@@ -23,6 +23,7 @@ from __future__ import annotations
 import xbmcvfs
 
 from resources.lib.data.nfo import (
+    _as_folder,
     _first_media_path,
     _local_metadata_folder,
     _sep,
@@ -39,11 +40,6 @@ UNREACHABLE = "unreachable"
 
 def _exists(path: str) -> bool:
     return bool(xbmcvfs.exists(path))
-
-
-def _as_folder(path: str) -> str:
-    sep = _sep(path)
-    return path if path.endswith(sep) else path + sep
 
 
 def _folder_holds_something(folder: str) -> bool:

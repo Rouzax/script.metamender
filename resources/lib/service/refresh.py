@@ -136,6 +136,7 @@ class RefreshProgress:
         # not counted among the episodes.
         self.show_updated = False
         self.show_unchecked = False
+        self.duplicate = False
         self.current = ""
         self._started = 0.0
         self._stop = False
@@ -155,10 +156,12 @@ class RefreshProgress:
         update wins over a field that could not be checked. The show's own
         record and its season posters (``counted`` False) are remembered
         apart from the episodes, together: any of them updated, else any of
-        them unchecked."""
+        them unchecked. An item skipped as a second Kodi entry for its file
+        is remembered for the toast."""
         def grew(key: str) -> bool:
             return int(after.get(key) or 0) > int(before.get(key) or 0)
         with self._lock:
+            self.duplicate = self.duplicate or grew("duplicate")
             if not counted:
                 self.show_updated = self.show_updated or grew("updated")
                 self.show_unchecked = not self.show_updated and (
@@ -208,6 +211,8 @@ class RefreshProgress:
                 return lang(32350).format(title)
             if self.unchecked or self.show_unchecked:
                 return lang(32353).format(title)
+            if self.duplicate:
+                return lang(32788).format(title)  # Kodi lists {} twice
             return lang(32351).format(title)
 
 

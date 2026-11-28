@@ -8,8 +8,17 @@ from resources.lib.data import nfo
 from resources.lib.data.nfo import NFO, NO_NFO, UNREACHABLE, nfo_state
 
 
+def _kodi_exists(path):
+    """xbmcvfs.exists as Kodi answers it: a path ending in a separator is
+    checked as a folder, anything else as a file."""
+    if path.endswith(os.sep):
+        return os.path.isdir(path)
+    return os.path.isfile(path)
+
+
 @pytest.fixture
 def vfs(kodi_stubs, monkeypatch, tmp_path):
+    kodi_stubs["xbmcvfs"].exists.side_effect = _kodi_exists
     monkeypatch.setattr(nfo, "xbmcvfs", kodi_stubs["xbmcvfs"])
 
     def make(*rel):
@@ -144,7 +153,8 @@ def test_zip_checks_outside_the_archive(vfs):
 
 def test_show_folder_tvshow_nfo(vfs, tmp_path):
     vfs("Show", "S01E01.mkv")
-    show = str(tmp_path / "Show")
+    # Kodi gives a show's folder with a trailing separator.
+    show = str(tmp_path / "Show") + "/"
     assert nfo_state("tvshow", show) == NO_NFO
     vfs("Show", "tvshow.nfo")
     assert nfo_state("tvshow", show) == NFO
@@ -152,7 +162,7 @@ def test_show_folder_tvshow_nfo(vfs, tmp_path):
 
 def test_show_other_nfo_is_not_tvshow_nfo(vfs, tmp_path):
     vfs("Show", "only.nfo")
-    assert nfo_state("tvshow", str(tmp_path / "Show")) == NO_NFO
+    assert nfo_state("tvshow", str(tmp_path / "Show") + "/") == NO_NFO
 
 
 def test_trailing_slash_on_show_folder(vfs, tmp_path):
