@@ -1238,6 +1238,33 @@ def test_movie_user_moved_from_managed_set_to_own_set_is_not_merged_back(
     tracker.close()
 
 
+def test_movie_metamender_moved_out_of_a_seen_set_is_not_locked(
+        tmp_path, kodi_stubs, fake, tmdb_api):
+    """Set 1 is managed and its movies are seen there; then the tracker
+    holds set 2, so set 1 is a duplicate and MetaMender moves them. The
+    sightings in set 1 outlive that scan, and its own moves explain them."""
+    _one_set(fake)
+    fake.add_movie(3, 1, "211672")
+    tracker = _make_tracker(tmp_path)
+    _scan(tracker, _library())
+    assert tracker.get_set_seen("tmdb:211672")["setid"] == 1
+    fake.add_set(2, EN_NAME)
+    fake.add_movie(4, 2, "1004")
+    tracker._conn.execute("UPDATE items SET kodi_id = 2 WHERE media_type = 'set' "
+                          "AND identity = ?", (IDENTITY,))
+    tracker.commit()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert fake.movies[3]["setid"] == 2
+    fake.update.reset_mock()
+    _make_due(tracker)
+    _scan(tracker, _library())
+    assert tracker.get_set_move("tmdb:211672")["locked"] == 0
+    assert tracker.get_set_seen("tmdb:211672")["locked"] == 0
+    assert _movie_moves(fake) == []
+    tracker.close()
+
+
 def test_readded_movie_in_another_set_is_not_locked(tmp_path, kodi_stubs, fake, tmdb_api):
     """A refresh re-adds the movie under a new movieid, and the scraper
     files it under the collection's old name: a duplicate, merged."""

@@ -125,6 +125,13 @@ def user_moved(move: Optional[dict[str, Any]], movieid: int, current_setid: int)
         move.get("to_setid") or 0) != current_setid
 
 
+def _placed_by_move(move: dict[str, Any], movieid: int, current_setid: int) -> bool:
+    """Whether the movie sits in a set where its recorded move put it: same
+    Kodi movie, same set."""
+    return (current_setid > 0 and int(move.get("kodi_id") or 0) == movieid
+            and int(move.get("to_setid") or 0) == current_setid)
+
+
 def _counted_library(member: dict[str, Any], libraries: LibraryConfig) -> Optional[Library]:
     """The member's library when both it and the member's folder are
     included; None means the member does not count."""
@@ -628,6 +635,10 @@ def _lock_user_moves(
             tracker.lock_set_move(identity)
             set_moves[identity] = move = dict(move, locked=1)
         if move is not None and move.get("locked"):
+            continue
+        if move is not None and _placed_by_move(move, movieid, setid):
+            # The sighting predates MetaMender's own move: sightings are
+            # recorded from the listing taken before the moves.
             continue
         seen = tracker.get_set_seen(identity)
         if seen is None:
