@@ -92,18 +92,23 @@ written there:
   [changed outside MetaMender](libraries.md#what-metamender-leaves-alone).
 - **What stays as it is**: a value from an NFO file (on an item with one,
   MetaMender only fills empty fields), a field you locked, and a field
-  MetaMender never wrote, which is checked on its usual schedule.
+  MetaMender never wrote, which is checked on its usual schedule. Art
+  follows the usual art rules, so the scraper's art stays when it is one
+  MetaMender always leaves alone: a local image file, art from a website
+  other than TMDB or fanart.tv, or an episode thumb that is already an
+  image on a website, such as the TMDB still your scraper chose. See
+  [What MetaMender leaves alone](libraries.md#what-metamender-leaves-alone).
 
 To keep the scraper's text or art instead, open the
 [Details window](details.md#restore-original) after that scan and choose
 **Restore original** on the field: the scraper's value comes back and the
 field is locked.
 
-If a site cannot be reached during that scan, the field gets its value back
-when it is next checked. MetaMender recognises a refresh by the new entry
-Kodi makes; when Kodi gives the item its old entry number back, which can
-happen for the item added last, it looks like an edit made outside
-MetaMender. Art locked as changed outside MetaMender by a refresh before
+If a site or the item's share cannot be reached during that scan, the field
+gets its value back when it is next checked. MetaMender recognises a refresh
+by the new entry Kodi makes; when Kodi gives the item its old entry number
+back, which can happen for the item added last, it looks like an edit made
+outside MetaMender. Art locked as changed outside MetaMender by a refresh before
 version 1.3.2 stays locked; **Let MetaMender update this again** in the
 Details window unlocks it.
 

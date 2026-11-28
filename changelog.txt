@@ -7,12 +7,15 @@ Improvements:
   - When Kodi re-adds an item under a new Kodi id (Refresh, or a video
     file replaced with a new release), the next scan writes back the
     text, ratings and art MetaMender had written that the scraper
-    replaced, also for a settled field. The rewrite is recorded like
-    Update now's check, so no field moves along its schedule. The
-    scraper's art is taken as first seen, so it is no longer locked as
-    changed outside MetaMender. A value from an NFO file, a field the
-    user locked and a field MetaMender never wrote stay as they are. Art
-    locked this way before 1.3.2 stays locked; Details can unlock it.
+    replaced, also for a settled field; art within the usual art rules,
+    so a local image file, art from another website and an episode thumb
+    that is a web image (such as the scraper's TMDB still) stay. The
+    rewrite is recorded like Update now's check, so no field moves along
+    its schedule. The scraper's art is taken as first seen, so it is no
+    longer locked as changed outside MetaMender. A value from an NFO
+    file, a field the user locked and a field MetaMender never wrote
+    stay as they are. Art locked this way before 1.3.2 stays locked;
+    Details can unlock it.
   - A second Kodi set of a collection whose set MetaMender manages is
     now merged when every counted movie in it belongs to that
     collection, whatever the set is called, for example the older
@@ -22,9 +25,10 @@ Improvements:
     moves. A movie MetaMender saw in a managed set that the user then
     put in another set counts as the user's move and is never merged
     back.
-  - The "N items updated" notification after a background scan also
-    counts seasons, movie sets, movies that joined or moved between sets
-    and sets created, as a manual scan already counted seasons and sets.
+  - The "N items updated" notification after a scan, background or
+    manual, now also counts movies that joined or moved between sets and
+    sets created; a background scan also counts seasons and movie sets
+    updated, as a manual scan already did.
   - Scan logs are kept for 7 days, at most 30 files, instead of the last
     10, so a week of scans on an always-on Kodi can go with a bug
     report.
