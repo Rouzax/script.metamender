@@ -1,7 +1,7 @@
 MetaMender Changelog
 ====================
 
-v1.3.2 (unreleased)
+v1.3.2 (2026-11-28)
 -------------------
 Improvements:
   - When Kodi re-adds an item under a new Kodi id (Refresh, or a video
@@ -60,8 +60,10 @@ Bug Fixes:
     marked as checked because no id lookup ran, so its episodes were put
     off for good.
   - An item whose video file or show folder is gone, while the folder it
-    was in still lists other entries, is skipped as gone instead of
-    being counted as unreachable at every scan. An item on a share that
+    was in still lists other entries, or a movie whose whole folder was
+    deleted while the folder above it still lists other entries, is
+    skipped as gone instead of being counted as unreachable at every
+    scan. An item on a share that
     does not answer stays unreachable.
 
 Internal:
