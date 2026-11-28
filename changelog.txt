@@ -15,7 +15,10 @@ Improvements:
     longer locked as changed outside MetaMender. A value from an NFO
     file, a field the user locked and a field MetaMender never wrote
     stay as they are. Art locked this way before 1.3.2 stays locked;
-    Details can unlock it.
+    Details can unlock it. If a site or the item's share cannot be
+    reached in the scan that finds the re-add, a field still being
+    checked gets its value back when it is next due; a settled field,
+    no longer checked, gets it back only through Update now on the item.
   - A second Kodi set of a collection whose set MetaMender manages is
     now merged when every counted movie in it belongs to that
     collection, whatever the set is called, for example the older
@@ -24,14 +27,15 @@ Improvements:
     or one whose collection is not known, stays shared and nothing
     moves. A movie MetaMender saw in a managed set that the user then
     put in another set counts as the user's move and is never merged
-    back.
+    back. On the first scan after upgrading, a second set whose movies
+    all belong to the collection, including a set you made yourself, is
+    merged into the set MetaMender looks after.
   - The "N items updated" notification after a scan, background or
     manual, now also counts movies that joined or moved between sets and
     sets created; a background scan also counts seasons and movie sets
     updated, as a manual scan already did.
-  - Scan logs are kept for 7 days, at most 30 files, instead of the last
-    10, so a week of scans on an always-on Kodi can go with a bug
-    report.
+  - Scan logs are kept up to 30 files, none older than 7 days, instead
+    of the last 10, so more scans can go with a bug report.
 
 Bug Fixes:
   - A scan after a library update no longer puts off the daily scan, and
@@ -47,8 +51,10 @@ Bug Fixes:
   - When Kodi lists one video file twice, the tracker row no longer
     flips between the two entries every scan. The entry the row records
     keeps it (the lowest listed entry when that id is gone); the other
-    is skipped and counted as a duplicate. MetaMender does not remove
-    Kodi's extra entry.
+    is skipped and counted as a duplicate. Update now on the other entry
+    says that Kodi lists the file twice and MetaMender updates its other
+    entry, instead of "No changes", and Details there shows the fields
+    read-only. MetaMender does not remove Kodi's extra entry.
   - Episodes without ids of a show whose TMDB and TheTVDB ids both came
     from Kodi are now matched by episode number. Such a show was never
     marked as checked because no id lookup ran, so its episodes were put

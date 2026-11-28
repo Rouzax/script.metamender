@@ -104,8 +104,10 @@ To keep the scraper's text or art instead, open the
 **Restore original** on the field: the scraper's value comes back and the
 field is locked.
 
-If a site or the item's share cannot be reached during that scan, the field
-gets its value back when it is next checked. MetaMender recognises a refresh
+If a site or the item's share cannot be reached during the scan that finds the
+re-added item, a field MetaMender still checks gets its value back when it is
+next due. A settled field, one MetaMender no longer checks, gets it back only
+through [Update now](update-now.md) on the item. MetaMender recognises a refresh
 by the new entry Kodi makes; when Kodi gives the item its old entry number
 back, which can happen for the item added last, it looks like an edit made
 outside MetaMender. Art locked as changed outside MetaMender by a refresh before
