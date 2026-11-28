@@ -246,5 +246,37 @@ def test_not_gone_on_vfs_error(vfs, kodi_stubs, tmp_path):
     assert nfo.media_gone(str(tmp_path / "Movies" / "Film.mkv")) is False
 
 
+def test_media_gone_when_the_whole_movie_folder_is_deleted(vfs, tmp_path):
+    vfs("Movies", "Other (2020)", "Other.mkv")
+    missing = str(tmp_path / "Movies" / "Film (2026)" / "Film.mkv")
+    assert nfo.media_gone(missing) is True
+
+
+def test_not_gone_when_grandparent_is_empty_or_missing(vfs, tmp_path):
+    (tmp_path / "Empty").mkdir()
+    assert nfo.media_gone(str(tmp_path / "Empty" / "Film" / "Film.mkv")) is False
+    assert nfo.media_gone(str(tmp_path / "Offline" / "Film" / "Film.mkv")) is False
+
+
+def test_gone_check_goes_up_one_level_only(vfs, tmp_path):
+    vfs("Movies", "Other.mkv")
+    deep = str(tmp_path / "Movies" / "A" / "B" / "Film.mkv")
+    assert nfo.media_gone(deep) is False
+
+
+def test_not_gone_on_vfs_error_at_grandparent(vfs, kodi_stubs, tmp_path):
+    vfs("Movies", "Other.mkv")
+    real = kodi_stubs["xbmcvfs"].exists.side_effect
+    grandparent = str(tmp_path / "Movies") + os.sep
+
+    def flaky(path):
+        if path == grandparent:
+            raise OSError("share dropped")
+        return real(path)
+
+    kodi_stubs["xbmcvfs"].exists.side_effect = flaky
+    assert nfo.media_gone(str(tmp_path / "Movies" / "Film" / "Film.mkv")) is False
+
+
 def test_not_gone_without_a_path():
     assert nfo.media_gone("") is False

@@ -112,7 +112,8 @@ library.
   saying MetaMender manages the other entry. MetaMender does not remove
   Kodi's extra entry; that is up to you.
 - **Its file or folder is gone**: an item whose video file (or show folder)
-  no longer exists, while the folder it was in still holds other files or
+  no longer exists, while the folder it was in (or, for a movie whose whole
+  folder was deleted, the folder above that) still holds other files or
   folders, is skipped until you clean the library (**Clean library** in
   Kodi's video settings or menu). An item on a share that does not answer
   is unreachable instead and is tried again at the next scan.

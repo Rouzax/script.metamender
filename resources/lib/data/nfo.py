@@ -201,11 +201,13 @@ def _first_media_path(file_path: str) -> str:
 
 
 def media_gone(file_path: str) -> bool:
-    """The media (or show folder) is missing while its parent folder is
+    """The media (or show folder) is missing while a folder above it is
     readable and holds other entries.
 
     That is a deleted or moved item, not an offline share: an unmounted mount
-    point is an empty folder, and a dropped share fails the call. Any VFS
+    point is an empty folder, and a dropped share fails the call. The folder
+    checked is the media's parent or, when that parent is gone too (a movie
+    whose whole folder was deleted), the parent's parent; no higher. Any VFS
     error answers False, so the caller keeps treating the item as
     unreachable.
     """
@@ -214,8 +216,12 @@ def media_gone(file_path: str) -> bool:
         if not media or _exists(media):
             return False
         parent = _split(media)[0]
-        if not parent or not _exists(_as_folder(parent)):
+        if not parent:
             return False
+        if not _exists(_as_folder(parent)):
+            parent = _split(parent)[0]
+            if not parent or not _exists(_as_folder(parent)):
+                return False
         dirs, files = xbmcvfs.listdir(_as_folder(parent))
         return bool(dirs or files)
     except Exception:

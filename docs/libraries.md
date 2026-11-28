@@ -452,7 +452,9 @@ manual scan.
 
 **A movie or episode whose video file is gone is left alone**, its art and
 every other field, for example an older release you replaced that Kodi has
-not removed from its library yet. Clean the library (**Clean library** in
+not removed from its library yet. This also holds for a movie whose whole
+folder was deleted, as long as the folder above it still holds other files
+or folders. Clean the library (**Clean library** in
 Kodi's video settings or menu) so Kodi drops the old entry.
 
 **When neither site has an image** of that type for the item, the slot stays
