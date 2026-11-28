@@ -233,7 +233,7 @@ can still unlock it). Nothing in the set changes.
 | Left alone: TMDB has no collection for its movies | None of its movies belongs to a TMDB collection, as far as MetaMender knows. A movie MetaMender has not asked TMDB about yet counts for none; the next scan or **Update now** asks. |
 | Left alone: no TMDB collection holds more than half of its movies | The movies come from several collections, as in a set you made by hand. |
 | Merged into *set*: Kodi removes this set at its next library clean | A duplicate of the set MetaMender manages: its movies are moved into *set*. Kodi deletes the empty set when you clean the library. |
-| Left alone: the set *set* already follows this TMDB collection | The set has a name of its own (such as "Favourites") and shares a collection with *set*. MetaMender moves nothing into or out of it. |
+| Left alone: the set *set* already follows this TMDB collection | The set has a name of its own (such as "Favourites"), shares a collection with *set*, and holds a movie of another collection or one whose collection MetaMender does not know. MetaMender moves nothing into or out of it. |
 
 See [A movie set was left alone](troubleshooting.md#a-movie-set-was-left-alone)
 for what to do about each.

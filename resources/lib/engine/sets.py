@@ -226,6 +226,18 @@ def _managed_setid(
     return min(named, key=lambda pc: (-pc[1], pc[0].setid))[0].setid
 
 
+def _only_of_collection(
+    members: list[dict[str, Any]], libraries: LibraryConfig,
+    collections: dict[str, str], collection_id: str,
+) -> bool:
+    """Whether the set has a counted member and every counted member's
+    stored collection is ``collection_id``. A member with no stored answer
+    is not known to be of it."""
+    counted = [m for m in members if _counted_library(m, libraries) is not None]
+    return bool(counted) and all(
+        _member_collection(m, collections) == collection_id for m in counted)
+
+
 def _moves_out_of(
     duplicate: SetPlan, managed_setid: int, members: list[dict[str, Any]],
     libraries: LibraryConfig, collections: dict[str, str],
@@ -269,12 +281,16 @@ def plan_sets(
     ``set_moves`` maps a movie identity to its recorded move.
 
     Among the sets whose members chose one collection, at most one is
-    managed (see _managed_setid). Any other is a duplicate only when its name
-    is a known name of the collection (the scraper's or an old TMDB name,
-    which is how Kodi makes one); a set the user named is shared and left
-    alone, and is never a merge target unless the tracker already records it
-    as the collection's set. When no set may be managed, every set of the
-    collection is shared and nothing moves.
+    managed (see _managed_setid). Any other is a duplicate when its name is
+    a known name of the collection (the scraper's or an old TMDB name,
+    which is how Kodi makes one), or when every counted member is stored as
+    of that collection (a scraper's name TMDB no longer lists, or a set the
+    user made of the collection's movies only). Any other set is shared and
+    left alone: one counted member of another collection, or of none known,
+    keeps the user's set as it is. A set whose name is not known is never a
+    merge target unless the tracker already records it as the collection's
+    set. When no set may be managed, every set of the collection is shared
+    and nothing moves.
     """
     by_set: dict[int, list[dict[str, Any]]] = {}
     for member in members:
@@ -296,7 +312,10 @@ def plan_sets(
         for plan, _ in group:
             if plan.setid == managed:
                 continue
-            if managed is not None and _name_key(plan.title) in known:
+            if managed is not None and (
+                    _name_key(plan.title) in known
+                    or _only_of_collection(by_set.get(plan.setid, []), libraries,
+                                           collections, cid)):
                 final[plan.setid] = replace(plan, reason=LEFT_DUPLICATE, managed_setid=managed)
                 moves.extend(_moves_out_of(final[plan.setid], managed,
                                            by_set.get(plan.setid, []), libraries,
@@ -573,6 +592,17 @@ def _learn_names(
     return learned
 
 
+def _learn_merged_names(tracker: Any, plans: list[SetPlan], merged_from: set[int]) -> None:
+    """Record the name of every duplicate set a movie moved out of as a
+    known name of its collection. A duplicate merged because its movies all
+    belong to the collection may carry a name TMDB no longer lists; once
+    known, a set Kodi makes under it again is a duplicate whatever it
+    holds, and a collection with such a set gets no second set made."""
+    for plan in plans:
+        if plan.reason == LEFT_DUPLICATE and plan.collection_id and plan.setid in merged_from:
+            tracker.add_set_names(_set_identity(plan.collection_id), [plan.title])
+
+
 def _collection_fetch(collection_id: str, api_key: str) -> Callable[[], Any]:
     # Only the names are read here: no image language is needed.
     return lambda: tmdb.fetch_collection(collection_id, api_key, ())
@@ -626,6 +656,8 @@ class _MoveResult:
     moved: dict[int, list[dict[str, Any]]]
     # The plot each managed set holds after its moves (see _restore_plot).
     plots: dict[int, str]
+    # The duplicate sets at least one movie moved out of.
+    merged_from: set[int]
     # The caller's before_write said to stop (shutdown or Stop scan).
     stopped: bool
 
@@ -642,7 +674,7 @@ def _move_movies(
     the video library and returns False to stop. A move and the plot
     restore it calls for are one unit, with no hold between them, so a stop
     never leaves a managed set with the old set's plot."""
-    result = _MoveResult(moved={}, plots={}, stopped=False)
+    result = _MoveResult(moved={}, plots={}, merged_from=set(), stopped=False)
     for move in moves:
         if not before_write():
             result.stopped = True
@@ -666,6 +698,7 @@ def _move_movies(
                                     move.to_setid, today)
         stats["moved"] = stats.get("moved", 0) + 1
         result.moved.setdefault(move.to_setid, []).append(member)
+        result.merged_from.add(move.from_setid)
         log.info("Movie moved into the managed set", event="sets.moved", movie=title,
                  from_set=move.from_name, to_set=name)
     return result
@@ -989,7 +1022,8 @@ def prepare_sets(
     two or more Kodi sets has its names on record before the merge decision
     (_learn_names); plans; locks moves and joins the user undid; moves the
     movies of duplicate sets, verifies each by re-reading the movie's setid,
-    and puts the managed set's plot back where a move changed it. Then adds
+    puts the managed set's plot back where a move changed it, and records
+    the name of each set a movie moved out of (_learn_merged_names). Then adds
     the movies in no set to their collection's set (_plan_set_joins,
     _join_movies) and, when any joined, lists and plans again so a created
     or grown set is returned as it now is. ``before_write`` runs before each
@@ -1053,6 +1087,7 @@ def prepare_sets(
     result = _move_movies(ctx, moves, by_setid, by_movieid, today, stats, write_ok)
     moved, plots = result.moved, result.plots
     stopped = result.stopped
+    _learn_merged_names(tracker, plans, result.merged_from)
 
     only_collection = next((p.collection_id for p in plans if p.setid == target), None)
     if not stopped and (only_setid is None or only_collection is not None):

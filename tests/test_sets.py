@@ -234,11 +234,98 @@ def test_known_name_matches_trimmed_and_any_case():
     assert plans[1].reason == LEFT_DUPLICATE and len(moves) == 1
 
 
-def test_user_named_set_sharing_a_collection_is_shared_not_duplicate():
+def test_second_set_with_another_collection_movie_stays_shared():
+    # Favourites mostly holds movies of the managed collection, but one of
+    # its movies belongs to another: it is the user's own set, and nothing
+    # moves out of it or into it.
     names = {"collection:86066": frozenset({"despicable me collection"})}
-    plans, moves = _two_sets("Favourites", names=names, holders={"collection:86066": 1})
-    assert plans[1].reason == LEFT_SHARED
+    managed = [_movie(i, 1, KIDS) for i in range(1, 4)]
+    favourites = [_movie(7, 2, KIDS), _movie(8, 2, KIDS), _movie(9, 2, KIDS)]
+    collections = {m["uniqueid"]["tmdb"]: "86066" for m in managed + favourites}
+    collections["1009"] = "2150"
+    plans, moves = _plan(
+        sets=[M(1, "Verschrikkelijke Ikke Collectie"), D(2, "Favourites")],
+        members=managed + favourites, collections=collections,
+        names=names, holders={"collection:86066": 1})
+    assert [p.reason for p in plans] == [None, LEFT_SHARED]
     assert plans[1].managed_setid is None
+    assert not moves
+
+
+def test_second_set_with_a_member_of_no_known_collection_stays_shared():
+    # A counted member TMDB was never asked about, or did not answer, is not
+    # known to belong to the collection.
+    names = {"collection:86066": frozenset({"despicable me collection"})}
+    managed = [_movie(i, 1, KIDS) for i in range(1, 4)]
+    favourites = [_movie(7, 2, KIDS), _movie(8, 2, KIDS), _movie(9, 2, KIDS)]
+    collections = {m["uniqueid"]["tmdb"]: "86066" for m in managed + favourites}
+    del collections["1009"]
+    plans, moves = _plan(
+        sets=[M(1, "Verschrikkelijke Ikke Collectie"), D(2, "Favourites")],
+        members=managed + favourites, collections=collections,
+        names=names, holders={"collection:86066": 1})
+    assert plans[1].reason == LEFT_SHARED
+    assert not moves
+    # A stored "in no collection" answer keeps it shared too.
+    collections["1009"] = ""
+    plans, moves = _plan(
+        sets=[M(1, "Verschrikkelijke Ikke Collectie"), D(2, "Favourites")],
+        members=managed + favourites, collections=collections,
+        names=names, holders={"collection:86066": 1})
+    assert plans[1].reason == LEFT_SHARED
+    assert not moves
+
+
+def test_second_set_with_only_collection_movies_merges():
+    # htpc1: the scraper filed a movie under TMDB's older name of the
+    # collection, which is not among the names on record.
+    names = {"collection:1434561": frozenset({"the super mario collectie"})}
+    managed = [_movie(1, 1, KIDS, tmdb="502356")]
+    second = [_movie(2, 2, KIDS, tmdb="1294203")]
+    plans, moves = _plan(
+        sets=[M(1, "The Super Mario Collectie"), D(2, "The Super Mario Bros. Collection")],
+        members=managed + second,
+        collections={"502356": "1434561", "1294203": "1434561"},
+        names=names, holders={"collection:1434561": 1})
+    assert [p.reason for p in plans] == [None, LEFT_DUPLICATE]
+    assert plans[1].managed_setid == 1
+    assert moves == [Move(movieid=2, identity="tmdb:1294203", from_setid=2,
+                          from_name="The Super Mario Bros. Collection", to_setid=1)]
+
+
+def test_second_set_with_no_counted_member_stays_shared():
+    # Its only member is in an excluded folder: the set is not read at all.
+    names = {"collection:86066": frozenset({"despicable me collection"})}
+    plans, moves = _two_sets("Favourites", names=names, holders={"collection:86066": 1},
+                             dup_folder=EXCLUDED)
+    assert plans[1].reason == LEFT_NO_MEMBERS
+    assert not moves
+
+
+def test_uncounted_member_of_another_collection_does_not_keep_a_set_shared():
+    # Only counted members decide; the member in the excluded folder stays.
+    names = {"collection:86066": frozenset({"despicable me collection"})}
+    managed = [_movie(i, 1, KIDS) for i in range(1, 4)]
+    second = [_movie(7, 2, KIDS), _movie(8, 2, EXCLUDED)]
+    collections = {m["uniqueid"]["tmdb"]: "86066" for m in managed + second}
+    collections["1008"] = "2150"
+    plans, moves = _plan(
+        sets=[M(1, "Verschrikkelijke Ikke Collectie"), D(2, "Favourites")],
+        members=managed + second, collections=collections,
+        names=names, holders={"collection:86066": 1})
+    assert plans[1].reason == LEFT_DUPLICATE
+    assert [m.movieid for m in moves] == [7]
+
+
+def test_user_moved_movie_not_merged_back():
+    # MetaMender merged movie 7 into set 1; the user put it back in the
+    # second set, whose name is not a known one.
+    names = {"collection:86066": frozenset({"despicable me collection"})}
+    move = {"kodi_id": 7, "from_name": "Favourites", "to_setid": 1,
+            "moved_on": "2026-11-01", "locked": 0}
+    plans, moves = _two_sets("Favourites", names=names, holders={"collection:86066": 1},
+                             set_moves={"tmdb:1007": move})
+    assert plans[1].reason == LEFT_DUPLICATE
     assert not moves
 
 
@@ -247,11 +334,12 @@ def test_shared_set_is_never_a_merge_target():
     # it stays managed although Favourites has more members.
     names = {"collection:86066": frozenset({"despicable me collection"})}
     managed = [_movie(i, 1, KIDS) for i in range(1, 3)]
-    favourites = [_movie(i, 3, KIDS) for i in range(10, 14)]
+    favourites = [_movie(i, 3, KIDS) for i in range(10, 15)]
+    collections = {m["uniqueid"]["tmdb"]: "86066" for m in managed + favourites}
+    collections["1014"] = "2150"
     plans, moves = _plan(
         sets=[M(1, "Despicable Me Collection"), D(3, "Favourites")],
-        members=managed + favourites,
-        collections={m["uniqueid"]["tmdb"]: "86066" for m in managed + favourites},
+        members=managed + favourites, collections=collections,
         names=names, holders={"collection:86066": 1})
     assert [p.reason for p in plans] == [None, LEFT_SHARED]
     assert not moves
@@ -291,15 +379,23 @@ def test_without_holder_a_set_with_an_unknown_name_is_never_managed():
     # scraper-named set may be managed, and nothing moves into Favourites.
     names = {"collection:86066": frozenset({"despicable me collection"})}
     scraper = [_movie(i, 1, KIDS) for i in range(1, 3)]
-    favourites = [_movie(i, 3, KIDS) for i in range(10, 14)]
+    favourites = [_movie(i, 3, KIDS) for i in range(10, 15)]
+    collections = {m["uniqueid"]["tmdb"]: "86066" for m in scraper + favourites}
+    collections["1014"] = "2150"
     plans, moves = _plan(
         sets=[M(1, "Despicable Me Collection"), D(3, "Favourites")],
-        members=scraper + favourites,
-        collections={m["uniqueid"]["tmdb"]: "86066" for m in scraper + favourites},
-        names=names)
+        members=scraper + favourites, collections=collections, names=names)
     assert [p.reason for p in plans] == [None, LEFT_SHARED]
     assert plans[0].managed_setid is None and plans[1].managed_setid is None
     assert not moves
+    # Holding only movies of the collection, it merges into the scraper's
+    # set, however many movies it has.
+    del collections["1014"]
+    plans, moves = _plan(
+        sets=[M(1, "Despicable Me Collection"), D(3, "Favourites")],
+        members=scraper + favourites[:4], collections=collections, names=names)
+    assert [p.reason for p in plans] == [None, LEFT_DUPLICATE]
+    assert {m.to_setid for m in moves} == {1} and len(moves) == 4
 
 
 def test_without_holder_or_known_name_every_set_is_shared():
@@ -442,8 +538,9 @@ def test_describe_set_of_a_set_kodi_lacks_is_none(monkeypatch):
 
 
 def test_describe_shared_set_names_the_managed_set(monkeypatch):
-    members = [_movie(1, 1, KIDS), _movie(2, 2, KIDS)]
-    stored = {"1001": "86066", "1002": "86066"}
+    # Favourites holds a movie of another collection, so it is shared.
+    members = [_movie(1, 1, KIDS), _movie(2, 2, KIDS), _movie(3, 2, KIDS), _movie(4, 2, KIDS)]
+    stored = {"1001": "86066", "1002": "86066", "1003": "86066", "1004": "2150"}
     tracker = _StoredTracker(stored, holders={"collection:86066": 1})
     plan = _describe(monkeypatch, [M(1, "Toy Story"), M(2, "Favourites")], members,
                      tracker, 2)

@@ -240,9 +240,12 @@ A set keeps its name, plot and art when:
   Kodi removes it, once empty, when you clean the library. See
   [Duplicate sets](libraries.md#duplicate-sets).
 - **It shares a collection with the set MetaMender manages** but has a name
-  of its own, such as "Favourites". MetaMender does not touch it or move
-  movies out of it. If no set of a collection carries a name of that
-  collection, none of them is managed.
+  of its own, such as "Favourites", and holds a movie of another collection
+  or one whose collection MetaMender does not know. MetaMender does not
+  touch it or move movies out of it. A set whose movies all belong to the
+  collection is merged instead; see
+  [Duplicate sets](libraries.md#duplicate-sets). If no set of a collection
+  carries a name of that collection, none of them is managed.
 - **Every one of its movies has an NFO file**: its name, plot and art are
   only filled when empty.
 - **Its name changed outside MetaMender**, so the name is locked. The

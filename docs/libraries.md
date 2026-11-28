@@ -559,15 +559,33 @@ lands in a new set with the old name. MetaMender merges such a duplicate:
 it moves its movies into the renamed set. This is the only time MetaMender
 moves a movie between sets.
 
-- **Only a set named after the collection is merged**: a TMDB name of the
-  collection, the name the set had when MetaMender first looked at it, or a
-  name MetaMender gave it. A set with any other name that shares a
-  collection, such as one you called "Favourites", is left alone, and no
-  movie is moved out of it or into it.
+A second set of a collection whose set MetaMender looks after is merged
+when either holds:
+
+- **It is named after the collection**: a TMDB name of the collection, the
+  name the set had when MetaMender first looked at it, a name MetaMender
+  gave it, or the name of a set it merged before.
+- **Every one of its movies belongs to the collection**, whatever the set
+  is called. This catches a name TMDB no longer lists, such as an older
+  English name your scraper still uses. It also merges a set you made
+  yourself that holds only movies of the collection. Only movies in an
+  included library and folder count here. Once merged, the set's name
+  counts as a name of the collection.
+
+Any other set that shares the collection is left alone: no movie is moved
+out of it or into it. That is a set such as "Favourites" that also holds a
+movie of another collection, or a movie whose collection MetaMender does
+not know (TMDB lists it in none, or has not answered yet). A merge never
+makes a set you named the one MetaMender looks after; the movies always
+move into the set it already manages.
+
+When a set is merged:
+
 - **Only movies of the collection move**, and only from a library with
   **Movie sets** ticked.
 - **A movie you moved yourself stays put.** If you take a movie MetaMender
-  moved and put it in another set, MetaMender never moves it again. A movie
+  moved and put it in another set, MetaMender never moves it again. Putting
+  it back in the set it came from undoes the merge for that movie. A movie
   you refresh in Kodi is a new entry to Kodi, so it may be moved once more.
 - **The emptied set is not deleted.** Kodi removes sets without movies the
   next time you clean the library (**Clean library** in Kodi's video
@@ -612,7 +630,8 @@ Where the movie goes:
 What stays as it is:
 
 - **A movie in another set** stays there, also when that is a set you made,
-  such as "Favourites".
+  such as "Favourites", unless that set is merged as a duplicate (see
+  [Duplicate sets](#duplicate-sets)).
 - **A movie in no TMDB collection** stays in no set.
 - **A movie you take out of its set stays out.** At every scan MetaMender
   notes which movies are in the sets it looks after. A movie it saw in such
